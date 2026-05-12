@@ -1,0 +1,16 @@
+WEBVTT
+Kind: captions
+Language: en
+
+00:00:00.500 --> 00:00:03.100
+Welcome to lecture one of CS336 from Stanford.
+
+00:00:03.100 --> 00:00:06.800
+Today we will introduce the transformer architecture
+and explain self-attention.
+
+00:00:06.800 --> 00:00:09.500
+<00:00:07.200><c>The</c> <c>key</c> <c>question</c> is: why does it scale?
+
+00:00:09.500 --> 00:00:12.000
+Welcome to lecture one of CS336 from Stanford.
