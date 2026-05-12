@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.uv/
+dist/
+build/
+
+# Node / Astro
+node_modules/
+template-site/.astro/
+template-site/dist/
+
+# Course-merger runtime state
+.course-merger/
+site/dist/
+site/node_modules/
+
+# Editors
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Tests
+.pytest_cache/
+.coverage
+htmlcov/
