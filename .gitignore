@@ -9,6 +9,7 @@ build/
 
 # Node / Astro
 node_modules/
+template-site/node_modules/
 template-site/.astro/
 template-site/dist/
 

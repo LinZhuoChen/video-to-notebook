@@ -1,0 +1,19 @@
+---
+import Base from '../layouts/Base.astro';
+import { getCollection } from 'astro:content';
+
+const courses = await getCollection('course');
+const concepts = await getCollection('concept');
+---
+<Base title="Home">
+  <h1>course-merger</h1>
+  <p>
+    {courses.length} course{courses.length === 1 ? '' : 's'} ·
+    {concepts.length} concept{concepts.length === 1 ? '' : 's'} indexed.
+  </p>
+  <p>
+    Pick a starting point:
+    <a href="/courses/">browse by course</a> or
+    <a href="/concepts/">browse by concept</a>.
+  </p>
+</Base>
