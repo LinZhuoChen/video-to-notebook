@@ -2,31 +2,52 @@
 
 Crawl open-courseware (YouTube / Bilibili), tag chunks with concept labels via Claude, cluster labels into a unified ontology across courses, and emit an interactive static HTML site for self-study.
 
-> [!warning] Status: design phase (no implementation yet)
-> The design lives in [`docs/specs/2026-05-09-course-merger-skill-design.md`](docs/specs/2026-05-09-course-merger-skill-design.md). Implementation plan is being drafted.
+> [!warning] Status: under construction (Plan 1 of 4 — Foundation + Crawl).
+> The current build supports `init` and `crawl` only. Tag / cluster / build land in Plans 2-4.
 
-## What this does (when finished)
+## Quickstart
 
 ```bash
-course-merger init
-course-merger crawl <CS336 url>
-course-merger crawl <GPU-MODE url>
-course-merger crawl <bilibili url> --cookies-from edge
-course-merger tag
-course-merger cluster
-course-merger build
+# 1. Install
+git clone https://github.com/chenlinzhuo/course-merger.git
+cd course-merger
+uv venv && uv pip install -e ".[dev]"
+
+# 2. Initialize a project
+mkdir my-courses && cd my-courses
+uv run course-merger init
+
+# 3. Crawl a YouTube playlist
+uv run course-merger crawl \
+    "https://www.youtube.com/playlist?list=PLxxx" \
+    --name cs336
+
+# 4. Crawl a Bilibili playlist (requires logged-in browser)
+uv run course-merger crawl \
+    "https://www.bilibili.com/video/BVxxx/" \
+    --name "vizuara-llm" \
+    --cookies-from edge
 ```
 
-→ static site under `site/dist/`, deployable to GitHub Pages. Every concept page lists where each course explains it; a "Compare across courses" view shows them side-by-side with timestamped video links.
+After `crawl`, all transcripts and chunks live in `.course-merger/db.sqlite`. Inspect with:
+
+```bash
+sqlite3 .course-merger/db.sqlite "SELECT slug, title FROM courses;"
+sqlite3 .course-merger/db.sqlite "SELECT COUNT(*) FROM chunks;"
+```
 
 ## Roadmap
 
-- **v1** (current design): YouTube + Bilibili, subtitle-only ingestion, concept-anchored merging, Astro static site.
-- **v2** (deferred): Whisper fallback (mlx / openai / groq), Coursera/edX/MIT-OCW adapters, multi-language concept aliasing.
+- **Plan 1 (current):** Foundation + crawl. `init`, `crawl` for YouTube & Bilibili. ✅
+- **Plan 2 (next):** Tag + cluster. `tag`, `cluster`. Claude Haiku tagging + Sonnet cluster review.
+- **Plan 3:** Build + HTML. `build`, `serve`. Astro static site with cross-course concept pages.
+- **Plan 4:** Demo + deploy. `examples/frontier-notebook/` auto-deploys to GitHub Pages.
 
-## Showcase
+## Design
 
-The `examples/frontier-notebook/` directory will host a curated World-Models × Agents corpus (5–8 courses) auto-deployed to GitHub Pages on every push to `main`.
+Full design spec: [`docs/specs/2026-05-09-course-merger-skill-design.md`](docs/specs/2026-05-09-course-merger-skill-design.md).
+
+Plan 1 implementation plan: [`docs/superpowers/plans/2026-05-09-plan-1-foundation-and-crawl.md`](docs/superpowers/plans/2026-05-09-plan-1-foundation-and-crawl.md).
 
 ## License
 
