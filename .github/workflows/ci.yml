@@ -29,4 +29,4 @@ jobs:
         run: pyright src tests
 
       - name: Test
-        run: pytest -v --tb=short
+        run: pytest -v --tb=short -m "not e2e"

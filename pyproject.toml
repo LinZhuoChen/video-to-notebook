@@ -23,6 +23,7 @@ dev = [
     "ruff>=0.5.0",
     "pyright>=1.1.370",
     "types-PyYAML>=6.0",
+    "pytest-playwright>=0.5.0",
 ]
 
 [project.scripts]
@@ -44,4 +45,5 @@ testpaths = ["tests"]
 pythonpath = ["src"]
 markers = [
     "integration: integration tests (slower, may hit fs)",
+    "e2e: browser-driven E2E tests (requires playwright install)",
 ]
