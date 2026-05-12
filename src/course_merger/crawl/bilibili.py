@@ -8,9 +8,9 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
 
-from course_merger.crawl.exceptions import BilibiliCookieError
+from course_merger.crawl.exceptions import BilibiliCookieError, PlaylistFetchError
 
-__all__ = ["BilibiliCookieError", "BilibiliCrawler"]
+__all__ = ["BilibiliCookieError", "BilibiliCrawler", "PlaylistFetchError"]
 
 _P_PARAM_RE = re.compile(r"\?p=\d+")
 
@@ -39,6 +39,11 @@ class BilibiliCrawler:
             url,
         ]
         result = subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=120)
+        if result.returncode != 0:
+            last_err = result.stderr.strip().splitlines()[-1] if result.stderr.strip() else "no error message"
+            raise PlaylistFetchError(
+                f"yt-dlp failed for {url} (exit {result.returncode}): {last_err}"
+            )
         entries: list[dict] = []
         for line in result.stdout.strip().splitlines():
             parts = line.split("|", 2)

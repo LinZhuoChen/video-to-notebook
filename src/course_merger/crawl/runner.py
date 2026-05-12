@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Protocol
 
 from course_merger.crawl.base import Chunker
-from course_merger.crawl.exceptions import BilibiliCookieError
+from course_merger.crawl.exceptions import BilibiliCookieError, PlaylistFetchError
 from course_merger.crawl.subtitles import parse_vtt
 from course_merger.db.session import connect
 
@@ -89,6 +89,8 @@ def run_crawl(
                     entry["video_url"], lang_priority, cookies_from
                 )
             except BilibiliCookieError:
+                raise
+            except PlaylistFetchError:
                 raise
             except Exception:
                 conn.execute(

@@ -68,3 +68,13 @@ def test_download_subtitle_detects_403_and_raises():
                 cookies_from="edge",
             )
     assert "edge" in str(exc.value)
+
+
+from course_merger.crawl.exceptions import PlaylistFetchError
+
+
+def test_list_playlist_raises_on_nonzero_returncode():
+    fake_run = _fake_completed(stderr="ERROR: BVxxx not found", returncode=1)
+    with patch("subprocess.run", return_value=fake_run):
+        with pytest.raises(PlaylistFetchError):
+            BilibiliCrawler().list_playlist("https://www.bilibili.com/video/BVxxx/")

@@ -60,3 +60,14 @@ def test_download_subtitle_vtt_reads_file(tmp_path: Path):
         )
     assert result is not None
     assert result.startswith("WEBVTT")
+
+
+from course_merger.crawl.exceptions import PlaylistFetchError
+
+
+def test_list_playlist_raises_on_nonzero_returncode():
+    fake_run = _fake_completed(stderr="ERROR: Video unavailable", returncode=1)
+    with patch("subprocess.run", return_value=fake_run):
+        with pytest.raises(PlaylistFetchError) as exc:
+            YouTubeCrawler().list_playlist("https://www.youtube.com/playlist?list=invalid")
+    assert "Video unavailable" in str(exc.value)
