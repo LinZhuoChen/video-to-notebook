@@ -1,0 +1,77 @@
+# Starter ontology for LLM / Transformer / GPU courses.
+# Use as a seed; the cluster command will grow it.
+
+concepts:
+  - slug: attention
+    canonical_name: Attention
+    description: Mechanism for weighting input tokens when forming a contextualized representation.
+    aliases: [attention mechanism]
+
+  - slug: self-attention
+    canonical_name: Self-Attention
+    description: Attention applied within a single sequence — Q, K, V from the same input.
+    aliases: [SA, scaled dot-product attention, self attention]
+
+  - slug: multi-head-attention
+    canonical_name: Multi-Head Attention
+    description: Multiple attention heads in parallel; outputs concatenated and projected.
+    aliases: [MHA, multi-headed attention]
+
+  - slug: rotary-positional-encoding
+    canonical_name: Rotary Positional Encoding
+    description: RoPE — encodes absolute positions by rotating Q/K projections.
+    aliases: [RoPE, rotary embedding, rotary position]
+
+  - slug: kv-cache
+    canonical_name: KV Cache
+    description: Caching previously computed keys and values to speed up autoregressive decoding.
+    aliases: [KV-cache, key-value cache]
+
+  - slug: transformer-block
+    canonical_name: Transformer Block
+    description: One attention + FFN layer with residual connections and layer norm.
+    aliases: [transformer layer]
+
+  - slug: mlp
+    canonical_name: MLP / Feed-Forward Network
+    description: Two-layer MLP applied position-wise after attention.
+    aliases: [feed-forward, FFN, MLP block]
+
+  - slug: layer-norm
+    canonical_name: Layer Normalization
+    description: Per-token feature normalization for training stability.
+    aliases: [LayerNorm, LN]
+
+  - slug: rms-norm
+    canonical_name: RMS Normalization
+    description: Variance-only normalization, no mean subtraction.
+    aliases: [RMSNorm]
+
+  - slug: cross-attention
+    canonical_name: Cross-Attention
+    description: Attention where Q comes from one sequence, K/V from another.
+
+  - slug: prompt-caching
+    canonical_name: Prompt Caching
+    description: Reuse pre-computed KV for shared prompt prefixes to cut cost.
+    aliases: [Anthropic prompt cache]
+
+  - slug: tokenization
+    canonical_name: Tokenization
+    description: Splitting text into subword tokens.
+    aliases: [BPE, byte-pair encoding, tokenizer]
+
+  - slug: speculative-decoding
+    canonical_name: Speculative Decoding
+    description: Use a small draft model to propose tokens then verify with the large model.
+    aliases: [spec decode, speculative sampling]
+
+  - slug: flash-attention
+    canonical_name: Flash Attention
+    description: IO-aware attention algorithm fused into a single CUDA kernel.
+    aliases: [FlashAttn]
+
+  - slug: pagedattention
+    canonical_name: PagedAttention
+    description: Block-paged KV cache memory management, used by vLLM.
+    aliases: [paged attention, page attention]
