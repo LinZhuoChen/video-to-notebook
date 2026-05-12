@@ -10,6 +10,7 @@ from urllib.parse import urlparse
 import anthropic
 import typer
 
+from course_merger.build.runner import run_build
 from course_merger.cluster.embedding import Embedder
 from course_merger.cluster.llm_review import Reviewer
 from course_merger.cluster.runner import run_cluster
@@ -269,3 +270,57 @@ def cluster_cmd(
         f"{report.merged} merged, {report.created} created, "
         f"{report.rejected} rejected, {report.ambiguous} ambiguous"
     )
+
+
+@app.command("build")
+def build_cmd(
+    no_npm: bool = typer.Option(
+        False, "--no-npm", help="Only write Markdown content; skip running astro build."
+    ),
+    incremental: bool = typer.Option(
+        False, "--incremental",
+        help="Only re-render concepts marked dirty by the most recent cluster run.",
+    ),
+) -> None:
+    """Generate the static site under <project>/site/dist/."""
+    try:
+        root = find_project_root(Path.cwd())
+    except ProjectNotInitializedError as e:
+        typer.echo(f"error: {e}")
+        raise typer.Exit(code=1)
+
+    db_path = root / PROJECT_MARKER / "db.sqlite"
+    report = run_build(
+        project_root=root, db_path=db_path,
+        npm_build=not no_npm, incremental=incremental,
+    )
+
+    typer.echo(
+        f"done: {report.courses_written} courses, "
+        f"{report.lectures_written} lectures, "
+        f"{report.concepts_written} concepts"
+        + (f", astro exit {report.npm_exit_code}" if report.npm_exit_code is not None else "")
+    )
+    if report.npm_exit_code not in (None, 0):
+        raise typer.Exit(code=5)
+
+
+@app.command("serve")
+def serve_cmd() -> None:
+    """Run `astro dev` on the project's site directory."""
+    import subprocess
+    try:
+        root = find_project_root(Path.cwd())
+    except ProjectNotInitializedError as e:
+        typer.echo(f"error: {e}")
+        raise typer.Exit(code=1)
+
+    from course_merger.build.template_copy import ensure_site_dir
+    site_dir = ensure_site_dir(root)
+
+    if not (site_dir / "node_modules").is_dir():
+        typer.echo("running: npm install")
+        subprocess.run(["npm", "install", "--silent"], cwd=site_dir, check=False)
+
+    typer.echo(f"running: npm run dev (in {site_dir})")
+    subprocess.run(["npm", "run", "dev"], cwd=site_dir, check=False)
