@@ -15,6 +15,9 @@ from course_merger.crawl.exceptions import BilibiliCookieError, PlaylistFetchErr
 from course_merger.crawl.runner import CrawlReport, _CrawlerLike, run_crawl
 from course_merger.crawl.youtube import YouTubeCrawler
 from course_merger.db.session import init_db
+from course_merger.tag.claude_tagger import ClaudeTagger
+from course_merger.tag.ontology import load_ontology
+from course_merger.tag.runner import run_tag
 
 app = typer.Typer(
     help="Crawl and merge open-courseware into an interactive concept-anchored site.",
@@ -180,3 +183,49 @@ def crawl_cmd(
     )
     if report.lectures_error:
         raise typer.Exit(code=3)
+
+
+@app.command("tag")
+def tag_cmd(
+    ontology: Path = typer.Option(
+        ..., "--ontology", help="Path to ontology YAML.", exists=True, dir_okay=False
+    ),
+    model: str = typer.Option(
+        "claude-haiku-4-5", "--model", help="Claude model id for tagging."
+    ),
+    course: str | None = typer.Option(
+        None, "--course", help="Only tag chunks of this course slug."
+    ),
+    limit: int | None = typer.Option(
+        None, "--limit", help="Max chunks to process this run (for cost control)."
+    ),
+) -> None:
+    """Assign concept tags to every untagged chunk via Claude Haiku."""
+    try:
+        root = find_project_root(Path.cwd())
+    except ProjectNotInitializedError as e:
+        typer.echo(f"error: {e}")
+        raise typer.Exit(code=1)
+
+    onto = load_ontology(ontology)
+
+    import anthropic
+    client = anthropic.Anthropic()  # picks up ANTHROPIC_API_KEY env
+
+    tagger = ClaudeTagger(client=client, model=model, ontology=onto)
+
+    db_path = root / PROJECT_MARKER / "db.sqlite"
+    report = run_tag(
+        db_path=db_path,
+        tagger=tagger,
+        ontology=onto,
+        course_slug=course,
+        limit=limit,
+    )
+
+    typer.echo(
+        f"done: {report.chunks_tagged} chunks tagged, "
+        f"{report.tags_known_written} known tags, "
+        f"{report.tags_proposed_written} proposed tags, "
+        f"{report.parse_failures} parse failures"
+    )
