@@ -10,7 +10,8 @@ from urllib.parse import urlparse
 import typer
 
 from course_merger.config import CONFIG_FILENAME, PROJECT_MARKER, ProjectNotInitializedError, find_project_root
-from course_merger.crawl.bilibili import BilibiliCookieError, BilibiliCrawler
+from course_merger.crawl.bilibili import BilibiliCrawler
+from course_merger.crawl.exceptions import BilibiliCookieError
 from course_merger.crawl.runner import CrawlReport, _CrawlerLike, run_crawl
 from course_merger.crawl.youtube import YouTubeCrawler
 from course_merger.db.session import init_db

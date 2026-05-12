@@ -8,10 +8,9 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
 
+from course_merger.crawl.exceptions import BilibiliCookieError
 
-class BilibiliCookieError(RuntimeError):
-    """Raised when Bilibili rejects the request due to missing/expired cookies."""
-
+__all__ = ["BilibiliCookieError", "BilibiliCrawler"]
 
 _P_PARAM_RE = re.compile(r"\?p=\d+")
 

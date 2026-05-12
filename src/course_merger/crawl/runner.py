@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Protocol
 
 from course_merger.crawl.base import Chunker
-from course_merger.crawl.bilibili import BilibiliCookieError
+from course_merger.crawl.exceptions import BilibiliCookieError
 from course_merger.crawl.subtitles import parse_vtt
 from course_merger.db.session import connect
 
