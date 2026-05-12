@@ -6,6 +6,8 @@ __pycache__/
 .uv/
 dist/
 build/
+# keep the source package — gitignore "build/" would swallow src/course_merger/build/
+!src/course_merger/build/
 
 # Node / Astro
 node_modules/
