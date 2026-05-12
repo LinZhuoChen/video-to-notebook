@@ -1,0 +1,19 @@
+concepts:
+  - slug: self-attention
+    canonical_name: Self-Attention
+    description: Token-pairwise attention mechanism inside a Transformer block.
+    aliases:
+      - SA
+      - scaled dot-product attention
+      - self attention
+
+  - slug: rotary-positional-encoding
+    canonical_name: Rotary Positional Encoding
+    description: RoPE — encodes absolute position by rotating Q/K embeddings.
+    aliases:
+      - RoPE
+      - rotary embedding
+
+  - slug: kv-cache
+    canonical_name: KV Cache
+    description: Caching previously computed keys and values to speed up autoregressive decoding.
