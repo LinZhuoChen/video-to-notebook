@@ -15,6 +15,7 @@ def init_db(db_path: Path) -> None:
     schema = _SCHEMA_PATH.read_text(encoding="utf-8")
     conn = sqlite3.connect(db_path)
     try:
+        conn.execute("PRAGMA journal_mode = WAL")
         conn.executescript(schema)
         conn.commit()
     finally:

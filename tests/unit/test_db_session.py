@@ -58,3 +58,11 @@ def test_transaction_rolls_back_on_error(tmp_path: Path):
     with connect(db_path) as conn:
         (cnt,) = conn.execute("SELECT COUNT(*) FROM courses").fetchone()
     assert cnt == 0
+
+
+def test_wal_mode_enabled(tmp_path: Path):
+    db_path = tmp_path / "db.sqlite"
+    init_db(db_path)
+    with connect(db_path) as conn:
+        (mode,) = conn.execute("PRAGMA journal_mode").fetchone()
+    assert mode == "wal"
