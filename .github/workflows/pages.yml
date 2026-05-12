@@ -1,0 +1,65 @@
+name: Deploy demo to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'examples/frontier-notebook/**'
+      - 'template-site/**'
+      - 'src/course_merger/**'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages-deploy
+  cancel-in-progress: false
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: "latest"
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install course-merger
+        run: uv pip install --system -e ".[dev]"
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Restore corpus cache
+        id: cache-corpus
+        uses: actions/cache@v4
+        with:
+          path: examples/frontier-notebook/.course-merger-project/.course-merger
+          key: corpus-${{ hashFiles('examples/frontier-notebook/courses.toml', 'examples/frontier-notebook/ontology.yaml') }}-v1
+
+      - name: Build the demo
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          SITE_URL: https://${{ github.repository_owner }}.github.io
+          BASE_PATH: /${{ github.event.repository.name }}/
+        run: bash examples/frontier-notebook/build.sh
+
+      - name: Upload pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: examples/frontier-notebook/.course-merger-project/site/dist
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
