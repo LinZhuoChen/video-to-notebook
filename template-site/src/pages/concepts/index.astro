@@ -21,7 +21,7 @@ const letters = Object.keys(grouped).sort();
       <ul>
         {grouped[letter].map(c => (
           <li>
-            <a href={`/concepts/${c.data.slug}/`}>{c.data.canonical_name}</a>
+            <a href={`/concepts/${c.slug}/`}>{c.data.canonical_name}</a>
             <span class="count">({c.data.occurrence_count})</span>
           </li>
         ))}

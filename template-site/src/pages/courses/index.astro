@@ -11,7 +11,7 @@ const courses = (await getCollection('course')).sort(
   <ul class="course-grid">
     {courses.map(c => (
       <li>
-        <a href={`/courses/${c.data.slug}/`}>
+        <a href={`/courses/${c.slug}/`}>
           <strong>{c.data.title}</strong>
         </a>
         <span class="meta">{c.data.platform} · {c.data.lecture_count} lectures</span>

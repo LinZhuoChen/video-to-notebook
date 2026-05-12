@@ -14,8 +14,8 @@ def _frontmatter(data: dict[str, Any]) -> str:
 
 
 def write_concept_md(*, concept: dict[str, Any], occurrences: list[dict[str, Any]]) -> str:
+    # Note: `slug` is auto-derived from filename by Astro 5; do NOT put it in frontmatter.
     fm = {
-        "slug": concept["slug"],
         "canonical_name": concept["canonical_name"],
         "description": concept.get("description", ""),
         "ontology_source": concept["ontology_source"],
@@ -39,8 +39,8 @@ def write_concept_md(*, concept: dict[str, Any], occurrences: list[dict[str, Any
 
 
 def write_course_md(*, course: dict[str, Any], lectures: list[dict[str, Any]]) -> str:
+    # Note: `slug` is auto-derived from filename by Astro 5; do NOT put it in frontmatter.
     fm = {
-        "slug": course["slug"],
         "title": course["title"],
         "platform": course["platform"],
         "source_url": course["source_url"],
@@ -60,8 +60,9 @@ def write_course_md(*, course: dict[str, Any], lectures: list[dict[str, Any]]) -
 def write_lecture_md(
     *, course: dict[str, Any], lecture: dict[str, Any], chunks: list[dict[str, Any]]
 ) -> str:
+    # Note: `slug` is auto-derived from filename (cs336--N.md → "cs336--n");
+    # do NOT put it in frontmatter or Astro 5 schema validation will reject it.
     fm = {
-        "slug": f"{course['slug']}--{lecture['idx']}",
         "course_slug": course["slug"],
         "idx": lecture["idx"],
         "title": lecture["title"],

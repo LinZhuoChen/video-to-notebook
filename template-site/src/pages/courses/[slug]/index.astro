@@ -4,7 +4,7 @@ import { getCollection, getEntry } from 'astro:content';
 
 export async function getStaticPaths() {
   const courses = await getCollection('course');
-  return courses.map(c => ({ params: { slug: c.data.slug } }));
+  return courses.map(c => ({ params: { slug: c.slug } }));
 }
 
 const { slug } = Astro.params;

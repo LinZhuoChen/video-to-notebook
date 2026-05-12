@@ -5,7 +5,7 @@ import { getCollection } from 'astro:content';
 
 export async function getStaticPaths() {
   const concepts = await getCollection('concept');
-  return concepts.map(c => ({ params: { slug: c.data.slug }, props: { concept: c } }));
+  return concepts.map(c => ({ params: { slug: c.slug }, props: { concept: c } }));
 }
 
 const { concept } = Astro.props;
@@ -13,7 +13,7 @@ const lectures = await getCollection('lecture');
 
 const occurrences = lectures.flatMap(l =>
   l.data.chunks
-    .filter(c => c.concept_slugs.includes(concept.data.slug))
+    .filter(c => c.concept_slugs.includes(concept.slug))
     .map(c => ({
       course_slug: l.data.course_slug,
       lecture_idx: l.data.idx,
@@ -31,7 +31,7 @@ const courseSlugsForCompare = Array.from(new Set(occurrences.map(o => o.course_s
   <h1>{concept.data.canonical_name}</h1>
   {concept.data.description && <p>{concept.data.description}</p>}
   <p class="meta">
-    <code>{concept.data.slug}</code> ·
+    <code>{concept.slug}</code> ·
     source: {concept.data.ontology_source} ·
     {occurrences.length} occurrence{occurrences.length === 1 ? '' : 's'}
     {concept.data.aliases.length > 0 && (
@@ -41,7 +41,7 @@ const courseSlugsForCompare = Array.from(new Set(occurrences.map(o => o.course_s
 
   {courseSlugsForCompare.length > 1 && (
     <p>
-      <a class="compare-link" href={`/concepts/${concept.data.slug}/compare/?courses=${courseSlugsForCompare.join(',')}`}>
+      <a class="compare-link" href={`/concepts/${concept.slug}/compare/?courses=${courseSlugsForCompare.join(',')}`}>
         Compare across {courseSlugsForCompare.length} courses →
       </a>
     </p>

@@ -1,9 +1,11 @@
 import { defineCollection, z } from 'astro:content';
 
+// Note: Astro 5 reserves `slug` for the auto-generated filename slug.
+// We use `entry.slug` directly in pages — do NOT redeclare slug in the schema.
+
 const concept = defineCollection({
   type: 'content',
   schema: z.object({
-    slug: z.string(),
     canonical_name: z.string(),
     description: z.string().default(''),
     ontology_source: z.enum(['seed', 'discovered', 'user']),
@@ -15,7 +17,6 @@ const concept = defineCollection({
 const course = defineCollection({
   type: 'content',
   schema: z.object({
-    slug: z.string(),
     title: z.string(),
     platform: z.enum(['youtube', 'bilibili']),
     source_url: z.string(),
@@ -26,7 +27,6 @@ const course = defineCollection({
 const lecture = defineCollection({
   type: 'content',
   schema: z.object({
-    slug: z.string(),
     course_slug: z.string(),
     idx: z.number(),
     title: z.string(),

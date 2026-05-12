@@ -5,7 +5,7 @@ import { getCollection } from 'astro:content';
 
 export async function getStaticPaths() {
   const concepts = await getCollection('concept');
-  return concepts.map(c => ({ params: { slug: c.data.slug }, props: { concept: c } }));
+  return concepts.map(c => ({ params: { slug: c.slug }, props: { concept: c } }));
 }
 
 const { concept } = Astro.props;
@@ -14,7 +14,7 @@ const lectures = await getCollection('lecture');
 const occurrencesByCourse: Record<string, any[]> = {};
 for (const lec of lectures) {
   const hits = lec.data.chunks
-    .filter(c => c.concept_slugs.includes(concept.data.slug))
+    .filter(c => c.concept_slugs.includes(concept.slug))
     .map(c => ({
       course_slug: lec.data.course_slug,
       lecture_idx: lec.data.idx,
@@ -28,7 +28,7 @@ for (const lec of lectures) {
 }
 ---
 <Base title={`Compare: ${concept.data.canonical_name}`}>
-  <p><a href={`/concepts/${concept.data.slug}/`}>← back to concept</a></p>
+  <p><a href={`/concepts/${concept.slug}/`}>← back to concept</a></p>
   <h1>{concept.data.canonical_name} — across courses</h1>
   <CompareView occurrencesByCourse={occurrencesByCourse} />
 </Base>

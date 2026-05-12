@@ -32,7 +32,9 @@ def test_write_concept_md_includes_frontmatter():
     )
 
     assert md.startswith("---\n")
-    assert 'slug: self-attention' in md
+    # Astro 5 reserves `slug`; it must NOT appear in frontmatter
+    frontmatter_block = md.split("---", 2)[1]
+    assert "\nslug:" not in frontmatter_block
     assert 'canonical_name: Self-Attention' in md
     assert 'occurrence_count: 5' in md
     assert "cs336" in md  # body mentions the course
@@ -69,7 +71,10 @@ def test_write_course_md_lists_lectures():
             {"idx": 2, "title": "Attention", "video_url": "https://yt/v2", "duration_sec": 1200},
         ],
     )
-    assert 'slug: cs336' in md
+    # Astro 5 reserves `slug` — must not be in frontmatter
+    frontmatter_block = md.split("---", 2)[1]
+    assert "\nslug:" not in frontmatter_block
+    assert 'title: CS336' in md
     assert 'lecture_count: 2' in md
     assert "Intro" in md
     assert "Attention" in md
@@ -98,7 +103,9 @@ def test_write_lecture_md_serializes_chunks_into_frontmatter():
             },
         ],
     )
-    assert 'slug: cs336--2' in md
+    # Astro 5 reserves `slug` — it's auto-derived from filename, not in frontmatter
+    frontmatter_block = md.split("---", 2)[1]
+    assert "\nslug:" not in frontmatter_block
     assert 'course_slug: cs336' in md
     assert 'idx: 2' in md
     assert 'chunks:' in md
