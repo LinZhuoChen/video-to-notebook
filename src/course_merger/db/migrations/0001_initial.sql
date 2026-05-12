@@ -1,4 +1,4 @@
--- Plan 1 subset. concepts/aliases/chunk_concepts/build_meta tables land in Plan 2.
+-- 0001: initial schema (Plan 1 — courses, lectures, chunks).
 
 CREATE TABLE IF NOT EXISTS courses (
   id          INTEGER PRIMARY KEY,
