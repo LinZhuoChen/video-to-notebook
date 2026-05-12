@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Protocol
 
 from course_merger.crawl.base import Chunker
+from course_merger.crawl.bilibili import BilibiliCookieError
 from course_merger.crawl.subtitles import parse_vtt
 from course_merger.db.session import connect
 
@@ -87,6 +88,8 @@ def run_crawl(
                 vtt = crawler.download_subtitle_vtt(
                     entry["video_url"], lang_priority, cookies_from
                 )
+            except BilibiliCookieError:
+                raise
             except Exception:
                 conn.execute(
                     "INSERT INTO lectures (course_id, idx, title, video_url, transcript, status) "
