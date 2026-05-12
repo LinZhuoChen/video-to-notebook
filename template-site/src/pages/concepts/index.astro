@@ -1,0 +1,36 @@
+---
+import Base from '../../layouts/Base.astro';
+import { getCollection } from 'astro:content';
+
+const concepts = (await getCollection('concept'))
+  .sort((a, b) => a.data.canonical_name.localeCompare(b.data.canonical_name));
+
+const grouped: Record<string, typeof concepts> = {};
+for (const c of concepts) {
+  const letter = c.data.canonical_name[0].toUpperCase();
+  (grouped[letter] ??= []).push(c);
+}
+const letters = Object.keys(grouped).sort();
+---
+<Base title="Concepts">
+  <h1>All Concepts</h1>
+  <p>{concepts.length} concepts indexed.</p>
+  {letters.map(letter => (
+    <section>
+      <h2 id={letter}>{letter}</h2>
+      <ul>
+        {grouped[letter].map(c => (
+          <li>
+            <a href={`/concepts/${c.data.slug}/`}>{c.data.canonical_name}</a>
+            <span class="count">({c.data.occurrence_count})</span>
+          </li>
+        ))}
+      </ul>
+    </section>
+  ))}
+</Base>
+
+<style>
+  h2 { margin-top: 2rem; }
+  .count { color: #888; font-size: 0.9em; margin-left: 0.3rem; }
+</style>

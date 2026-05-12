@@ -1,0 +1,48 @@
+---
+interface Occurrence {
+  course_slug: string;
+  lecture_idx: number;
+  lecture_title: string;
+  video_url: string;
+  start_sec: number;
+  text: string;
+  confidence: number;
+}
+interface Props {
+  occurrences: Occurrence[];
+}
+const { occurrences } = Astro.props;
+
+const grouped: Record<string, Occurrence[]> = {};
+for (const o of occurrences) (grouped[o.course_slug] ??= []).push(o);
+---
+<table class="occurrences">
+  <thead>
+    <tr>
+      <th>Course</th><th>Lecture</th><th>Time</th><th>Excerpt</th>
+    </tr>
+  </thead>
+  <tbody>
+    {Object.entries(grouped).map(([course, items]) => items.map(o => (
+      <tr>
+        <td><a href={`/courses/${course}/`}><code>{course}</code></a></td>
+        <td>
+          <a href={`/courses/${course}/${o.lecture_idx}/`}>
+            L{o.lecture_idx}: {o.lecture_title}
+          </a>
+        </td>
+        <td>
+          <code>
+            {Math.floor(o.start_sec / 60).toString().padStart(2, '0')}:
+            {(Math.floor(o.start_sec) % 60).toString().padStart(2, '0')}
+          </code>
+        </td>
+        <td class="excerpt">{o.text.length > 200 ? o.text.slice(0, 200) + '…' : o.text}</td>
+      </tr>
+    )))}
+  </tbody>
+</table>
+
+<style>
+  .occurrences td.excerpt { max-width: 500px; font-size: 0.93em; color: #333; }
+</style>

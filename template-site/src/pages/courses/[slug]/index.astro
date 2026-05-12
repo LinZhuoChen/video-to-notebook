@@ -1,0 +1,38 @@
+---
+import Base from '../../../layouts/Base.astro';
+import { getCollection, getEntry } from 'astro:content';
+
+export async function getStaticPaths() {
+  const courses = await getCollection('course');
+  return courses.map(c => ({ params: { slug: c.data.slug } }));
+}
+
+const { slug } = Astro.params;
+const course = await getEntry('course', slug!);
+if (!course) throw new Error(`course not found: ${slug}`);
+
+const lectures = (await getCollection('lecture'))
+  .filter(l => l.data.course_slug === slug)
+  .sort((a, b) => a.data.idx - b.data.idx);
+---
+<Base title={course.data.title}>
+  <h1>{course.data.title}</h1>
+  <p>
+    <a href={course.data.source_url}>{course.data.platform} source</a>
+    · {lectures.length} lectures
+  </p>
+  <h2>Lectures</h2>
+  <ol class="lecture-list">
+    {lectures.map(l => (
+      <li>
+        <a href={`/courses/${slug}/${l.data.idx}/`}>
+          L{l.data.idx}: {l.data.title}
+        </a>
+      </li>
+    ))}
+  </ol>
+</Base>
+
+<style>
+  .lecture-list li { margin-block: 0.4rem; }
+</style>

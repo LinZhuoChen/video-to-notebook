@@ -1,0 +1,40 @@
+---
+interface Occurrence {
+  course_slug: string;
+  lecture_idx: number;
+  lecture_title: string;
+  start_sec: number;
+  text: string;
+}
+interface Props {
+  occurrencesByCourse: Record<string, Occurrence[]>;
+}
+const { occurrencesByCourse } = Astro.props;
+const courses = Object.keys(occurrencesByCourse);
+---
+<div class="compare-grid" style={`grid-template-columns: repeat(${courses.length}, 1fr);`}>
+  {courses.map(course => (
+    <div class="compare-col">
+      <h3><a href={`/courses/${course}/`}><code>{course}</code></a></h3>
+      <ol>
+        {occurrencesByCourse[course].map(o => (
+          <li>
+            <a href={`/courses/${course}/${o.lecture_idx}/`}>
+              <strong>L{o.lecture_idx}</strong> @ {Math.floor(o.start_sec)}s
+            </a>
+            <p>{o.text}</p>
+          </li>
+        ))}
+      </ol>
+    </div>
+  ))}
+</div>
+
+<style>
+  .compare-grid { display: grid; gap: 1rem; margin-top: 1rem; }
+  .compare-col { border: 1px solid #eee; border-radius: 6px; padding: 1rem; }
+  .compare-col h3 { margin-top: 0; border-bottom: 1px solid #eee; padding-bottom: 0.5rem; }
+  .compare-col ol { padding-left: 1.2rem; }
+  .compare-col li { margin-bottom: 1rem; font-size: 0.93em; }
+  .compare-col p { margin: 0.2rem 0 0; color: #333; }
+</style>

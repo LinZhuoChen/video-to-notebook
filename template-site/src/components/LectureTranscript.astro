@@ -1,0 +1,70 @@
+---
+interface Chunk {
+  idx: number;
+  start_sec: number;
+  end_sec: number;
+  text: string;
+  concept_slugs: string[];
+}
+interface Props {
+  chunks: Chunk[];
+}
+const { chunks } = Astro.props;
+---
+<ol class="transcript">
+  {chunks.map(c => (
+    <li data-start={c.start_sec} data-end={c.end_sec} data-idx={c.idx}>
+      <button class="seek" type="button" data-start={c.start_sec}
+        aria-label={`Jump to ${Math.floor(c.start_sec)}s`}>
+        {Math.floor(c.start_sec / 60).toString().padStart(2, '0')}:
+        {(Math.floor(c.start_sec) % 60).toString().padStart(2, '0')}
+      </button>
+      <p>{c.text}</p>
+      {c.concept_slugs.length > 0 && (
+        <ul class="tags">
+          {c.concept_slugs.map(s => (
+            <li><a href={`/concepts/${s}/`}><code>{s}</code></a></li>
+          ))}
+        </ul>
+      )}
+    </li>
+  ))}
+</ol>
+
+<script>
+  const iframe = document.getElementById('video-iframe') as HTMLIFrameElement | null;
+  if (iframe && iframe.src.includes('youtube.com')) {
+    document.querySelectorAll('button.seek').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const start = parseFloat((btn as HTMLElement).dataset.start || '0');
+        iframe.contentWindow?.postMessage(
+          JSON.stringify({ event: 'command', func: 'seekTo', args: [start, true] }),
+          '*',
+        );
+      });
+    });
+  }
+</script>
+
+<style>
+  .transcript {
+    list-style: none; padding: 0; max-height: 60vh; overflow-y: auto;
+    border: 1px solid #eee; border-radius: 6px;
+  }
+  .transcript li {
+    display: grid; grid-template-columns: 70px 1fr; gap: 0.8rem;
+    padding: 0.6rem 0.8rem; border-bottom: 1px solid #f5f5f5;
+  }
+  .transcript li:hover { background: #fafafa; }
+  button.seek {
+    font-family: monospace; background: transparent; border: 1px solid #ddd;
+    padding: 0.2rem 0.4rem; cursor: pointer; border-radius: 3px; font-size: 0.85em;
+  }
+  button.seek:hover { background: #0b5; color: #fff; border-color: #0b5; }
+  .transcript p { margin: 0; grid-column: 2; }
+  .tags {
+    grid-column: 2; list-style: none; padding: 0;
+    display: flex; gap: 0.4rem; flex-wrap: wrap; margin-top: 0.3rem;
+  }
+  .tags code { font-size: 0.8em; }
+</style>

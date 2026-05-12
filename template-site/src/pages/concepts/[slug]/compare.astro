@@ -1,0 +1,34 @@
+---
+import Base from '../../../layouts/Base.astro';
+import CompareView from '../../../components/CompareView.astro';
+import { getCollection } from 'astro:content';
+
+export async function getStaticPaths() {
+  const concepts = await getCollection('concept');
+  return concepts.map(c => ({ params: { slug: c.data.slug }, props: { concept: c } }));
+}
+
+const { concept } = Astro.props;
+const lectures = await getCollection('lecture');
+
+const occurrencesByCourse: Record<string, any[]> = {};
+for (const lec of lectures) {
+  const hits = lec.data.chunks
+    .filter(c => c.concept_slugs.includes(concept.data.slug))
+    .map(c => ({
+      course_slug: lec.data.course_slug,
+      lecture_idx: lec.data.idx,
+      lecture_title: lec.data.title,
+      start_sec: c.start_sec,
+      text: c.text,
+    }));
+  if (hits.length === 0) continue;
+  occurrencesByCourse[lec.data.course_slug] ??= [];
+  occurrencesByCourse[lec.data.course_slug].push(...hits);
+}
+---
+<Base title={`Compare: ${concept.data.canonical_name}`}>
+  <p><a href={`/concepts/${concept.data.slug}/`}>← back to concept</a></p>
+  <h1>{concept.data.canonical_name} — across courses</h1>
+  <CompareView occurrencesByCourse={occurrencesByCourse} />
+</Base>

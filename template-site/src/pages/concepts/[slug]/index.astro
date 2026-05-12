@@ -1,0 +1,59 @@
+---
+import Base from '../../../layouts/Base.astro';
+import ConceptOccurrenceTable from '../../../components/ConceptOccurrenceTable.astro';
+import { getCollection } from 'astro:content';
+
+export async function getStaticPaths() {
+  const concepts = await getCollection('concept');
+  return concepts.map(c => ({ params: { slug: c.data.slug }, props: { concept: c } }));
+}
+
+const { concept } = Astro.props;
+const lectures = await getCollection('lecture');
+
+const occurrences = lectures.flatMap(l =>
+  l.data.chunks
+    .filter(c => c.concept_slugs.includes(concept.data.slug))
+    .map(c => ({
+      course_slug: l.data.course_slug,
+      lecture_idx: l.data.idx,
+      lecture_title: l.data.title,
+      video_url: l.data.video_url,
+      start_sec: c.start_sec,
+      text: c.text,
+      confidence: 0,
+    })),
+);
+
+const courseSlugsForCompare = Array.from(new Set(occurrences.map(o => o.course_slug)));
+---
+<Base title={concept.data.canonical_name}>
+  <h1>{concept.data.canonical_name}</h1>
+  {concept.data.description && <p>{concept.data.description}</p>}
+  <p class="meta">
+    <code>{concept.data.slug}</code> ·
+    source: {concept.data.ontology_source} ·
+    {occurrences.length} occurrence{occurrences.length === 1 ? '' : 's'}
+    {concept.data.aliases.length > 0 && (
+      <> · aliases: {concept.data.aliases.map(a => <code>{a}</code>).join(', ')}</>
+    )}
+  </p>
+
+  {courseSlugsForCompare.length > 1 && (
+    <p>
+      <a class="compare-link" href={`/concepts/${concept.data.slug}/compare/?courses=${courseSlugsForCompare.join(',')}`}>
+        Compare across {courseSlugsForCompare.length} courses →
+      </a>
+    </p>
+  )}
+
+  <ConceptOccurrenceTable occurrences={occurrences} />
+</Base>
+
+<style>
+  .meta { color: #666; font-size: 0.9em; }
+  .compare-link {
+    display: inline-block; padding: 0.5rem 1rem; background: #0b5; color: #fff;
+    text-decoration: none; border-radius: 4px; font-weight: 500;
+  }
+</style>

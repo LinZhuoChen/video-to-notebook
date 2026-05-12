@@ -1,0 +1,41 @@
+---
+interface Props {
+  videoUrl: string;
+}
+const { videoUrl } = Astro.props;
+
+function youtubeId(u: string): string | null {
+  const m = u.match(/(?:v=|youtu\.be\/)([\w-]{11})/);
+  return m ? m[1] : null;
+}
+function bilibiliBV(u: string): string | null {
+  const m = u.match(/(BV[\w]+)/);
+  return m ? m[1] : null;
+}
+
+const ytId = youtubeId(videoUrl);
+const bvId = bilibiliBV(videoUrl);
+---
+{ytId && (
+  <iframe
+    id="video-iframe"
+    width="100%" height="400"
+    src={`https://www.youtube.com/embed/${ytId}?enablejsapi=1`}
+    title="YouTube video"
+    frameborder="0"
+    allow="autoplay; encrypted-media"
+    allowfullscreen
+  ></iframe>
+)}
+{bvId && !ytId && (
+  <iframe
+    id="video-iframe"
+    width="100%" height="400"
+    src={`https://player.bilibili.com/player.html?bvid=${bvId}`}
+    title="Bilibili video"
+    frameborder="0"
+    scrolling="no"
+    allowfullscreen
+  ></iframe>
+)}
+{!ytId && !bvId && <a href={videoUrl}>Open video →</a>}

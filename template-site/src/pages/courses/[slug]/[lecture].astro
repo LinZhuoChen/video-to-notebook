@@ -1,0 +1,23 @@
+---
+import Base from '../../../layouts/Base.astro';
+import VideoEmbed from '../../../components/VideoEmbed.astro';
+import LectureTranscript from '../../../components/LectureTranscript.astro';
+import { getCollection } from 'astro:content';
+
+export async function getStaticPaths() {
+  const lectures = await getCollection('lecture');
+  return lectures.map(l => ({
+    params: { slug: l.data.course_slug, lecture: String(l.data.idx) },
+    props: { lecture: l },
+  }));
+}
+
+const { lecture } = Astro.props;
+---
+<Base title={lecture.data.title}>
+  <p><a href={`/courses/${lecture.data.course_slug}/`}>← back to course</a></p>
+  <h1>L{lecture.data.idx}: {lecture.data.title}</h1>
+  <VideoEmbed videoUrl={lecture.data.video_url} />
+  <h2>Transcript</h2>
+  <LectureTranscript chunks={lecture.data.chunks} />
+</Base>

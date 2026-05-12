@@ -1,0 +1,30 @@
+---
+import Base from '../../layouts/Base.astro';
+import { getCollection } from 'astro:content';
+
+const courses = (await getCollection('course')).sort(
+  (a, b) => a.data.title.localeCompare(b.data.title),
+);
+---
+<Base title="Courses">
+  <h1>All Courses</h1>
+  <ul class="course-grid">
+    {courses.map(c => (
+      <li>
+        <a href={`/courses/${c.data.slug}/`}>
+          <strong>{c.data.title}</strong>
+        </a>
+        <span class="meta">{c.data.platform} · {c.data.lecture_count} lectures</span>
+      </li>
+    ))}
+  </ul>
+</Base>
+
+<style>
+  .course-grid {
+    list-style: none; padding: 0;
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 1rem;
+  }
+  .course-grid li { border: 1px solid #eee; padding: 1rem; border-radius: 6px; }
+  .meta { display: block; color: #888; font-size: 0.9em; margin-top: 0.3rem; }
+</style>
