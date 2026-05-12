@@ -9,6 +9,9 @@ from urllib.parse import urlparse
 
 import typer
 
+from course_merger.cluster.embedding import Embedder
+from course_merger.cluster.llm_review import Reviewer
+from course_merger.cluster.runner import run_cluster
 from course_merger.config import CONFIG_FILENAME, PROJECT_MARKER, ProjectNotInitializedError, find_project_root
 from course_merger.crawl.bilibili import BilibiliCrawler
 from course_merger.crawl.exceptions import BilibiliCookieError, PlaylistFetchError
@@ -228,4 +231,42 @@ def tag_cmd(
         f"{report.tags_known_written} known tags, "
         f"{report.tags_proposed_written} proposed tags, "
         f"{report.parse_failures} parse failures"
+    )
+
+
+@app.command("cluster")
+def cluster_cmd(
+    ontology: Path = typer.Option(
+        ..., "--ontology", help="Path to ontology YAML.", exists=True, dir_okay=False
+    ),
+    review_model: str = typer.Option(
+        "claude-sonnet-4-6", "--review-model", help="Claude model for cluster review."
+    ),
+    threshold: float = typer.Option(
+        0.75, "--threshold", help="Cosine similarity threshold for merging proposed tags."
+    ),
+) -> None:
+    """Cluster proposed tags and ask Sonnet to merge / create / reject each cluster."""
+    try:
+        root = find_project_root(Path.cwd())
+    except ProjectNotInitializedError as e:
+        typer.echo(f"error: {e}")
+        raise typer.Exit(code=1)
+
+    onto = load_ontology(ontology)
+    import anthropic
+    client = anthropic.Anthropic()
+
+    embedder = Embedder()
+    reviewer = Reviewer(client=client, model=review_model, ontology=onto)
+
+    db_path = root / PROJECT_MARKER / "db.sqlite"
+    report = run_cluster(
+        db_path=db_path, embedder=embedder, reviewer=reviewer, threshold=threshold
+    )
+
+    typer.echo(
+        f"done: {report.clusters_reviewed} clusters reviewed | "
+        f"{report.merged} merged, {report.created} created, "
+        f"{report.rejected} rejected, {report.ambiguous} ambiguous"
     )
