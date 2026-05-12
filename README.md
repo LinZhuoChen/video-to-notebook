@@ -1,66 +1,139 @@
 # course-merger
 
-Crawl open-courseware (YouTube / Bilibili), tag chunks with concept labels via Claude, cluster labels into a unified ontology across courses, and emit an interactive static HTML site for self-study.
+> Crawl open-courseware, tag chunks with concept labels via Claude, and render an interactive cross-course concept-anchored static site for self-study.
 
-> [!warning] Status: under construction (Plan 2 of 4 — Foundation + Crawl + Tag + Cluster).
-> The current build supports `init`, `crawl`, `tag`, `cluster`. HTML build lands in Plan 3.
+[![CI](https://github.com/chenlinzhuo/course-merger/actions/workflows/ci.yml/badge.svg)](https://github.com/chenlinzhuo/course-merger/actions/workflows/ci.yml)
+
+The killer feature: a **"Compare across courses"** view. Pick any concept (e.g. *Self-Attention*), see how Stanford CS336, GPU MODE, and Vizuara each teach it — side by side, with click-to-seek timestamped video.
+
+## Demo
+
+Live demo: [chenlinzhuo.github.io/course-merger/](https://chenlinzhuo.github.io/course-merger/) — built from the 5 World-Models × Agents courses in `examples/frontier-notebook/`.
+
+## Install
+
+```bash
+# 1. Python CLI (3.12+)
+pip install course-merger
+# or: uv tool install course-merger
+
+# 2. External requirements
+brew install node yt-dlp        # Node 20+ for the HTML build; yt-dlp for crawling
+playwright install chromium     # only if running e2e tests
+```
+
+For Bilibili crawling you also need a logged-in browser (`--cookies-from edge|chrome|firefox`).
 
 ## Quickstart
 
 ```bash
-# 1. Install
-git clone https://github.com/chenlinzhuo/course-merger.git
-cd course-merger
-uv venv && uv pip install -e ".[dev]"
-
-# 2. Initialize a project
-mkdir my-courses && cd my-courses
-uv run course-merger init
-
-# 3. Crawl one or more courses
-uv run course-merger crawl \
-    "https://www.youtube.com/playlist?list=PLxxx" --name cs336
-uv run course-merger crawl \
-    "https://www.bilibili.com/video/BVxxx/" --name "vizuara-llm" \
-    --cookies-from edge
-
-# 4. Tag chunks with concept labels (Claude Haiku, ~$0.10 per course)
 export ANTHROPIC_API_KEY=sk-ant-...
-uv run course-merger tag --ontology /path/to/ontology.yaml
 
-# 5. Cluster proposed tags into the canonical ontology (Claude Sonnet, ~$0.30 per pass)
-uv run course-merger cluster --ontology /path/to/ontology.yaml
+mkdir my-study-site && cd my-study-site
+
+# 1. Initialize
+course-merger init
+
+# 2. Crawl one or more courses
+course-merger crawl "https://www.youtube.com/playlist?list=PLxxx" --name cs336
+course-merger crawl "https://www.bilibili.com/video/BVxxx/" --name "vizuara-llm" --cookies-from edge
+
+# 3. Tag chunks with concept labels (Claude Haiku, ~$0.10/course)
+course-merger tag --ontology examples/ontology-llm.yaml --limit 200
+
+# 4. Cluster proposed tags (Claude Sonnet, ~$0.30/run)
+course-merger cluster --ontology examples/ontology-llm.yaml
+
+# 5. Build the static site
+course-merger build
+
+# Preview locally at http://localhost:4321
+course-merger serve
 ```
 
-After these steps, `.course-merger/db.sqlite` contains:
-- Courses, lectures, chunks (Plan 1)
-- Concepts, concept_aliases, chunk_concepts, build_meta, proposed_tags (Plan 2)
+After step 5, `site/dist/` is a complete static site you can serve from any HTTP server or deploy to GitHub Pages.
 
-Inspect the resulting concept assignments:
+## How it works
+
+```
+                 ┌──────────────────────────────────────┐
+                 │           SQLite (.course-merger/db) │
+                 │  courses · lectures · chunks         │
+                 │  concepts · chunk_concepts · aliases │
+                 └──────────────────────────────────────┘
+                          ↑           ↑          ↑
+   ┌──────────┐   crawl   │           │ tag      │ cluster   ┌──────────┐
+   │ yt-dlp   │──────────▶│           │ (Haiku)  │ (Sonnet)  │  build   │
+   │ subtitles│           │           │          │           │ (Astro)  │
+   └──────────┘           │           │          │           └────┬─────┘
+                                                              dist/  → GitHub Pages
+```
+
+Each subcommand is **idempotent and resumable**. Add a new course → only that course gets crawled/tagged. Re-run `cluster` → it picks up new proposed tags, doesn't re-process settled ones. `build --incremental` re-renders only concepts that changed.
+
+## Use it as a Claude Code skill
+
+Install once:
 
 ```bash
-sqlite3 .course-merger/db.sqlite \
-    "SELECT canonical_name, COUNT(*) AS occurrences \
-     FROM concepts c JOIN chunk_concepts cc ON c.id = cc.concept_id \
-     GROUP BY c.id ORDER BY occurrences DESC LIMIT 10;"
+git clone https://github.com/chenlinzhuo/course-merger.git
+bash course-merger/skills/course-merger/scripts/install-locally.sh
 ```
 
-A starter ontology lives at `examples/ontology-llm.yaml` (15 LLM concepts to seed the corpus).
+Then in Claude Code:
 
-## Roadmap
+> Build me a study site from these courses: <playlist1> <playlist2> <playlist3> using examples/ontology-llm.yaml
 
-- **Plan 1:** Foundation + crawl. `init`, `crawl` for YouTube & Bilibili. ✅
-- **Plan 2:** Tag + cluster. `tag`, `cluster`. Claude Haiku tagging + Sonnet cluster review. ✅
-- **Plan 3 (next):** Build + HTML. `build`, `serve`. Astro static site with cross-course concept pages.
-- **Plan 4:** Demo + deploy + Claude Code skill wrapper. `examples/frontier-notebook/` auto-deploys to GitHub Pages. `skills/course-merger/SKILL.md` lets Claude Code users trigger crawl/tag/build via natural language.
+Claude will walk through the 5 steps with you, asking for confirmation before tag/cluster (which cost money).
 
-## Design
+The full skill manifest is at `skills/course-merger/SKILL.md`.
 
-Full design spec: [`docs/specs/2026-05-09-course-merger-skill-design.md`](docs/specs/2026-05-09-course-merger-skill-design.md).
+## Customize for your own corpus
 
-Implementation plans:
-- Plan 1: [`docs/superpowers/plans/2026-05-09-plan-1-foundation-and-crawl.md`](docs/superpowers/plans/2026-05-09-plan-1-foundation-and-crawl.md)
-- Plan 2: [`docs/superpowers/plans/2026-05-09-plan-2-tag-and-cluster.md`](docs/superpowers/plans/2026-05-09-plan-2-tag-and-cluster.md)
+The `examples/frontier-notebook/` directory is the recommended starting point:
+
+```bash
+cp -r examples/frontier-notebook examples/my-corpus
+# Edit examples/my-corpus/courses.toml and examples/my-corpus/ontology.yaml
+bash examples/my-corpus/build.sh
+```
+
+The build script chains crawl/tag/cluster/build, reads `courses.toml`, and lands a working site at `examples/my-corpus/.course-merger-project/site/dist/`.
+
+## Cost reality check
+
+Per course (50-100 lectures, ~1500 chunks):
+
+| Stage | Model | Cost |
+|-------|-------|------|
+| Crawl | n/a (yt-dlp) | $0 |
+| Tag | Claude Haiku (prompt caching) | ~$0.10-0.30 |
+| Cluster | Claude Sonnet | ~$0.20-0.50 |
+| Build | n/a (Astro) | $0 |
+| **Total per course** | | **~$0.30-0.80** |
+
+For a 5-course corpus, expect ~$2-4 first run. Re-runs are free thanks to per-chunk idempotency.
+
+## Roadmap (deferred to v2)
+
+- **Whisper fallback**: transcribe videos with no subtitles via mlx-whisper / Groq.
+- **Coursera/edX/MIT-OCW adapters**: more crawlers behind the `Crawler` Protocol.
+- **Live filter on compare view**: client-side `?courses=cs336,gpu-mode` selection.
+- **`review` CLI**: human-in-the-loop dispatch for `ambiguous` cluster decisions.
+- **Multi-language concept aliasing**: dedicated Chinese ↔ English concept name pairs.
+
+## Architecture & design
+
+- Design spec: [`docs/specs/2026-05-09-course-merger-skill-design.md`](docs/specs/2026-05-09-course-merger-skill-design.md)
+- Implementation plans (TDD-decomposed):
+  - Plan 1: [Foundation + Crawl](docs/superpowers/plans/2026-05-09-plan-1-foundation-and-crawl.md)
+  - Plan 2: [Tag + Cluster](docs/superpowers/plans/2026-05-09-plan-2-tag-and-cluster.md)
+  - Plan 3: [Build + HTML](docs/superpowers/plans/2026-05-09-plan-3-build-and-html.md)
+  - Plan 4: [Demo + Deploy + Skill](docs/superpowers/plans/2026-05-09-plan-4-demo-deploy-skill.md)
+
+## Contributing
+
+PRs welcome — particularly new crawler adapters and ontology files for non-AI/CS domains. Run `pytest -v` before sending.
 
 ## License
 
