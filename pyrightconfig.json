@@ -2,6 +2,8 @@
   "include": ["src", "tests"],
   "exclude": ["**/node_modules", "**/.venv", "**/dist"],
   "pythonVersion": "3.12",
+  "venvPath": ".",
+  "venv": ".venv",
   "typeCheckingMode": "basic",
   "reportMissingImports": "error",
   "reportMissingTypeStubs": "none"
