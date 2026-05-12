@@ -1,0 +1,37 @@
+# Frontier Notebook — curated open-courseware corpus
+#
+# Each [[course]] entry maps to one `course-merger crawl` invocation.
+# Slug becomes the URL path on the site (e.g. /courses/cs336/).
+
+[[course]]
+slug = "cs336"
+url = "https://www.youtube.com/playlist?list=PLoROMvodv4rOY23Y0BoGoBGgQ1zmU_MT_"
+platform = "youtube"
+# Stanford CS336 — Language Modeling from Scratch
+
+[[course]]
+slug = "gpu-mode"
+url = "https://www.youtube.com/playlist?list=PLVEjdmwEDkgcjr6esfQEcJzhRSi-NgyOh"
+platform = "youtube"
+# GPU MODE — community lectures on CUDA / GPU programming
+
+[[course]]
+slug = "principles-of-diffusion"
+url = "https://www.youtube.com/playlist?list=PLB6OKWxCQTM6vOTKxqaO9Bks-WD8q3xMy"
+platform = "youtube"
+# Stanford / MIT Principles of Diffusion Models
+
+[[course]]
+slug = "vizuara-build-claude-code"
+url = "https://www.youtube.com/playlist?list=PLPTV0NXA_ZShnka8uVzF3mSvZdilfiGWG"
+platform = "youtube"
+# Vizuara — Build Claude Code from Scratch
+
+[[course]]
+slug = "vizuara-build-deepseek"
+url = "https://www.youtube.com/playlist?list=PLPTV0NXA_ZSiOpKKlHA8AntpYR-zaBlSF"
+platform = "youtube"
+# Vizuara — Build DeepSeek from Scratch
+
+# To add more: append [[course]] blocks. Bilibili courses set
+# platform = "bilibili" and require --cookies-from at run-time.

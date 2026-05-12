@@ -1,0 +1,144 @@
+# Frontier Notebook — World Models × Agents ontology
+#
+# 30 seed concepts covering the editorial scope of frontiernotebook.dev.
+# Tune for your own corpus by adding / renaming entries.
+
+concepts:
+  # === Foundations ===
+  - slug: tokenization
+    canonical_name: Tokenization
+    description: Splitting text into subword tokens (BPE, SentencePiece).
+    aliases: [BPE, byte-pair encoding, tokenizer]
+
+  - slug: embedding
+    canonical_name: Embedding
+    description: Mapping tokens or features to dense vectors.
+    aliases: [token embedding, word embedding]
+
+  - slug: positional-encoding
+    canonical_name: Positional Encoding
+    description: Injecting position information into otherwise permutation-invariant attention.
+    aliases: [position embedding]
+
+  # === Attention family ===
+  - slug: attention
+    canonical_name: Attention
+    description: Weighted aggregation over context.
+    aliases: [attention mechanism]
+
+  - slug: self-attention
+    canonical_name: Self-Attention
+    description: Attention applied within a single sequence (Q, K, V from the same input).
+    aliases: [SA, scaled dot-product attention]
+
+  - slug: multi-head-attention
+    canonical_name: Multi-Head Attention
+    description: Multiple attention heads in parallel.
+    aliases: [MHA]
+
+  - slug: cross-attention
+    canonical_name: Cross-Attention
+    description: Q from one sequence, K/V from another.
+
+  - slug: rotary-positional-encoding
+    canonical_name: Rotary Positional Encoding
+    description: RoPE — rotates Q/K projections by position.
+    aliases: [RoPE, rotary embedding]
+
+  - slug: flash-attention
+    canonical_name: Flash Attention
+    description: IO-aware attention algorithm in a single fused CUDA kernel.
+    aliases: [FlashAttn]
+
+  # === Transformer architecture ===
+  - slug: transformer-block
+    canonical_name: Transformer Block
+    description: One attention + MLP layer with residuals and norm.
+
+  - slug: mlp
+    canonical_name: MLP / Feed-Forward Network
+    description: Two-layer FFN applied position-wise.
+    aliases: [FFN, feed-forward]
+
+  - slug: layer-norm
+    canonical_name: Layer Normalization
+    aliases: [LayerNorm, LN]
+
+  - slug: rms-norm
+    canonical_name: RMS Normalization
+    aliases: [RMSNorm]
+
+  # === Inference ===
+  - slug: kv-cache
+    canonical_name: KV Cache
+    description: Reusing previously computed keys and values during autoregressive decoding.
+
+  - slug: speculative-decoding
+    canonical_name: Speculative Decoding
+    aliases: [spec decoding]
+
+  - slug: prompt-caching
+    canonical_name: Prompt Caching
+    description: Reuse pre-computed KV for shared prompt prefixes to cut cost.
+
+  - slug: pagedattention
+    canonical_name: PagedAttention
+    description: vLLM's block-paged KV cache memory management.
+
+  # === Training ===
+  - slug: pretraining
+    canonical_name: Pretraining
+    description: Self-supervised next-token training on large unlabeled corpora.
+
+  - slug: fine-tuning
+    canonical_name: Fine-Tuning
+    aliases: [SFT, supervised fine-tuning]
+
+  - slug: rlhf
+    canonical_name: RLHF
+    description: Reinforcement Learning from Human Feedback.
+
+  - slug: dpo
+    canonical_name: Direct Preference Optimization
+    aliases: [DPO]
+
+  # === Diffusion / generative ===
+  - slug: diffusion-model
+    canonical_name: Diffusion Model
+    description: Iterative denoising generative model.
+
+  - slug: flow-matching
+    canonical_name: Flow Matching
+    description: Training continuous normalizing flows by regressing on a target vector field.
+
+  - slug: classifier-free-guidance
+    canonical_name: Classifier-Free Guidance
+    aliases: [CFG]
+
+  # === World models / agents ===
+  - slug: world-model
+    canonical_name: World Model
+    description: A learned predictive model of an environment, used for planning / imagination.
+
+  - slug: agent
+    canonical_name: Agent
+    description: A system that perceives, plans, and acts in an environment.
+    aliases: [LLM agent]
+
+  - slug: tool-use
+    canonical_name: Tool Use
+    description: LLMs invoking external functions via JSON output.
+    aliases: [function calling]
+
+  # === GPU / systems ===
+  - slug: gpu-memory-hierarchy
+    canonical_name: GPU Memory Hierarchy
+    description: Registers, shared memory, L1/L2, HBM.
+
+  - slug: tensor-parallelism
+    canonical_name: Tensor Parallelism
+    description: Splitting individual operators across GPUs.
+
+  - slug: pipeline-parallelism
+    canonical_name: Pipeline Parallelism
+    description: Splitting model layers across stages.
