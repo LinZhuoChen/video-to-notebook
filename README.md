@@ -41,7 +41,7 @@ sqlite3 .course-merger/db.sqlite "SELECT COUNT(*) FROM chunks;"
 - **Plan 1 (current):** Foundation + crawl. `init`, `crawl` for YouTube & Bilibili. ✅
 - **Plan 2 (next):** Tag + cluster. `tag`, `cluster`. Claude Haiku tagging + Sonnet cluster review.
 - **Plan 3:** Build + HTML. `build`, `serve`. Astro static site with cross-course concept pages.
-- **Plan 4:** Demo + deploy. `examples/frontier-notebook/` auto-deploys to GitHub Pages.
+- **Plan 4:** Demo + deploy + Claude Code skill wrapper. `examples/frontier-notebook/` auto-deploys to GitHub Pages. `skills/course-merger/SKILL.md` lets Claude Code users trigger crawl/tag/build via natural language.
 
 ## Design
 
