@@ -1,4 +1,4 @@
-"""Parse WebVTT / SRT subtitles into time-stamped cues."""
+"""Parse WebVTT subtitles into time-stamped cues."""
 from __future__ import annotations
 
 import html
@@ -25,7 +25,13 @@ def _hms_to_sec(h: str, m: str, s: str, ms: str) -> float:
 
 
 def parse_vtt(text: str) -> list[Cue]:
-    """Parse a WebVTT-format subtitle string. Dedupes identical text across all cues."""
+    """Parse a WebVTT-format subtitle string.
+
+    Dedupes globally: any cue whose text exactly matches an earlier cue's
+    text is dropped. This handles yt-dlp's repeated-line auto-caption
+    quirk well; rare cost is that legitimately repeated phrases get
+    consolidated into one cue.
+    """
     lines = text.splitlines()
     cues: list[Cue] = []
     i = 0

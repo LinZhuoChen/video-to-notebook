@@ -2,8 +2,8 @@
 from __future__ import annotations
 
 import importlib.metadata
-import re
 import shutil
+from enum import Enum
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -75,7 +75,45 @@ def _detect_platform(url: str) -> str:
     raise typer.BadParameter(f"Unrecognized platform for URL: {url}")
 
 
-def _slugify(text: str) -> str:
+class CookieBrowser(str, Enum):
+    edge = "edge"
+    chrome = "chrome"
+    firefox = "firefox"
+    safari = "safari"
+    brave = "brave"
+    opera = "opera"
+
+
+def _slug_from_url(url: str) -> str:
+    """Derive a short, meaningful slug from a video URL.
+
+    Prefers the playlist ID (?list=) or video ID (?v=, /video/BVxxx),
+    falls back to a hash of the URL.
+    """
+    import hashlib
+    import re
+    from urllib.parse import parse_qs, urlparse
+
+    parsed = urlparse(url)
+    qs = parse_qs(parsed.query)
+
+    # Prefer playlist id
+    if "list" in qs:
+        return _normalize_slug(qs["list"][0])
+    # Then YouTube ?v=
+    if "v" in qs:
+        return _normalize_slug(qs["v"][0])
+    # Then Bilibili /video/BVxxx/ path
+    m = re.search(r"/video/([A-Za-z0-9_-]+)", parsed.path)
+    if m:
+        return _normalize_slug(m.group(1))
+    # Fallback: short hash
+    return "course-" + hashlib.sha1(url.encode()).hexdigest()[:8]
+
+
+def _normalize_slug(text: str) -> str:
+    """Lowercase, replace non-alphanumeric with single hyphens, strip ends."""
+    import re
     s = re.sub(r"[^a-zA-Z0-9]+", "-", text.strip().lower())
     return s.strip("-") or "course"
 
@@ -84,7 +122,7 @@ def _slugify(text: str) -> str:
 def crawl_cmd(
     url: str = typer.Argument(..., help="Video or playlist URL"),
     name: str | None = typer.Option(
-        None, "--name", help="Course slug (defaults to a slugified domain+title)."
+        None, "--name", help="Course slug (defaults to a slug derived from the URL)."
     ),
     lang: list[str] | None = typer.Option(
         None,
@@ -92,10 +130,10 @@ def crawl_cmd(
         help="Subtitle language priority list. "
         "Defaults: YouTube=[en], Bilibili=[ai-zh, ai-en].",
     ),
-    cookies_from: str | None = typer.Option(
+    cookies_from: CookieBrowser | None = typer.Option(
         None,
         "--cookies-from",
-        help="Browser to extract cookies from (required for Bilibili): edge|chrome|firefox.",
+        help="Browser to extract cookies from (required for Bilibili).",
     ),
 ) -> None:
     """Crawl a course (single video or playlist) into the local DB."""
@@ -114,7 +152,7 @@ def crawl_cmd(
         crawler = YouTubeCrawler()
         default_lang = ["en"]
 
-    course_slug = name or _slugify(url)
+    course_slug = name or _slug_from_url(url)
 
     db_path = root / PROJECT_MARKER / "db.sqlite"
     try:
@@ -125,7 +163,7 @@ def crawl_cmd(
             course_slug=course_slug,
             course_title=name or course_slug,
             lang_priority=lang or default_lang,
-            cookies_from=cookies_from,
+            cookies_from=cookies_from.value if cookies_from else None,
         )
     except BilibiliCookieError as e:
         typer.echo(f"bilibili cookies missing: {e}")
@@ -136,3 +174,5 @@ def crawl_cmd(
         f"{report.lectures_no_subs} no-subs, {report.lectures_error} errors "
         f"(course: {report.course_slug})"
     )
+    if report.lectures_error:
+        raise typer.Exit(code=3)
