@@ -111,6 +111,15 @@ def test_cluster_merge_creates_aliases_and_chunk_concepts(tmp_path: Path, onto):
         (left,) = conn.execute("SELECT COUNT(*) FROM proposed_tags").fetchone()
         assert left == 0
 
+        # Plan 3 contract: dirty_concepts JSON array should include the merged slug.
+        import json
+        row = conn.execute(
+            "SELECT value FROM build_meta WHERE key='dirty_concepts'"
+        ).fetchone()
+        assert row is not None, "build_meta.dirty_concepts missing after merge"
+        dirty = json.loads(row[0])
+        assert "rotary-positional-encoding" in dirty
+
 
 def test_cluster_create_makes_new_concept(tmp_path: Path, onto):
     db = tmp_path / "db.sqlite"

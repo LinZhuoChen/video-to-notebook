@@ -7,6 +7,7 @@ from enum import Enum
 from pathlib import Path
 from urllib.parse import urlparse
 
+import anthropic
 import typer
 
 from course_merger.cluster.embedding import Embedder
@@ -212,7 +213,6 @@ def tag_cmd(
 
     onto = load_ontology(ontology)
 
-    import anthropic
     client = anthropic.Anthropic()  # picks up ANTHROPIC_API_KEY env
 
     tagger = ClaudeTagger(client=client, model=model, ontology=onto)
@@ -254,7 +254,6 @@ def cluster_cmd(
         raise typer.Exit(code=1)
 
     onto = load_ontology(ontology)
-    import anthropic
     client = anthropic.Anthropic()
 
     embedder = Embedder()

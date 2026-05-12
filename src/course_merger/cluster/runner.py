@@ -81,9 +81,7 @@ def _mark_dirty(conn, slugs: list[str]) -> None:
         )
 
 
-def _consume_proposed_for_cluster(
-    conn, cluster: Cluster, tag_to_chunks: dict[str, list[int]]
-) -> None:
+def _consume_proposed_for_cluster(conn, cluster: Cluster) -> None:
     raw_tags = list(cluster.items)
     if not raw_tags:
         return
@@ -153,7 +151,7 @@ def run_cluster(
                 _attach_chunks_to_concept(
                     conn, cluster, tag_to_chunks, target_id, reviewer.reviewer_model_id
                 )
-                _consume_proposed_for_cluster(conn, cluster, tag_to_chunks)
+                _consume_proposed_for_cluster(conn, cluster)
                 dirty.append(target_slug)
                 merged += 1
 
@@ -178,12 +176,12 @@ def run_cluster(
                 _attach_chunks_to_concept(
                     conn, cluster, tag_to_chunks, new_id, reviewer.reviewer_model_id
                 )
-                _consume_proposed_for_cluster(conn, cluster, tag_to_chunks)
+                _consume_proposed_for_cluster(conn, cluster)
                 dirty.append(new["slug"])
                 created += 1
 
             elif decision.decision == "reject":
-                _consume_proposed_for_cluster(conn, cluster, tag_to_chunks)
+                _consume_proposed_for_cluster(conn, cluster)
                 rejected += 1
 
             else:  # ambiguous
