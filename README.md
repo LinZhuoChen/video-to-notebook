@@ -88,6 +88,43 @@ Claude will walk through the 5 steps with you, asking for confirmation before ta
 
 The full skill manifest is at `skills/course-merger/SKILL.md`.
 
+## In-session mode (Claude Max users — no API key)
+
+If you have a Claude Max subscription (or any Claude Code subscription), you can skip the Anthropic API key. `course-merger tag` and `course-merger cluster` each accept two new flags:
+
+- `--print-prompts` — emits a JSON envelope of pending work to stdout.
+- `--apply-results <file>` — reads a decisions JSON and writes results to the DB.
+
+Inside Claude Code, the conversation looks like:
+
+```
+You: "Crawl this playlist and tag using examples/ontology-llm.yaml. I have Max."
+
+Claude:
+  - course-merger init && course-merger crawl <url>
+  - course-merger tag --ontology ... --print-prompts --limit 20 > p.json
+  - (reads p.json, decides tags via its own reasoning)
+  - writes r.json with decisions
+  - course-merger tag --ontology ... --apply-results r.json
+  - (repeats batch by batch until all chunks tagged)
+  - same loop for cluster (one bundle file with both prompts + decisions)
+  - course-merger build
+```
+
+The skill at `skills/course-merger/SKILL.md` automates this loop. Install with `bash skills/course-merger/scripts/install-locally.sh`.
+
+**Trade-offs:**
+
+| | API mode | In-session mode |
+|---|----------|----------------|
+| API key required | Yes | No |
+| Cost for demo corpus | ~$2-4 | $0 extra (covered by Max) |
+| Speed for 1000 chunks | ~5-10 min | ~1-2 hours |
+| Speed for 100 chunks | ~30 sec | ~5-10 min |
+| Best for | Large corpora | Small experiments |
+
+**Shipped in v1.1** (2026-05-13): in-session mode for Claude Max users via `--print-prompts` / `--apply-results` flags on `tag` and `cluster`.
+
 ## Customize for your own corpus
 
 The `examples/frontier-notebook/` directory is the recommended starting point:
