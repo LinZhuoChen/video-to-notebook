@@ -183,6 +183,83 @@ Apply:
 course-merger cluster --ontology <ont.yaml> --apply-results /tmp/cm-cluster-apply.json
 ```
 
+## Textbook generation (v1.2+, Plan 6)
+
+After tag + cluster complete, you can synthesize the corpus into a beginner-friendly textbook. This is the "pivot mode" — instead of indexing concepts, you produce a multi-chapter HTML reader for someone learning the topic from scratch.
+
+### Step T1: Design the curriculum
+
+```bash
+course-merger curriculum --print-prompts > /tmp/cm-curr.json
+```
+
+Read `/tmp/cm-curr.json`. It contains every concept that has chunks + sample chunks per concept. Decide a beginner-pedagogical chapter order. Write `/tmp/cm-curr-results.json`:
+
+```json
+{
+  "schema_version": "1",
+  "kind": "curriculum_results",
+  "designer": "claude-code-max:v1",
+  "chapters": [
+    {
+      "order_idx": 1,
+      "module": "Module 1: 数学直觉",
+      "title": "什么是向量",
+      "blurb": "数 ≠ 向量。向量是带方向的位移。",
+      "primary_concept_slug": "linear-algebra",
+      "related_concept_slugs": []
+    }
+  ]
+}
+```
+
+Apply:
+
+```bash
+course-merger curriculum --apply-results /tmp/cm-curr-results.json
+```
+
+### Step T2: Synthesize each chapter (one at a time)
+
+For each chapter N:
+
+```bash
+course-merger synthesize --chapter N --print-prompts > /tmp/cm-chN.json
+```
+
+Read the envelope: chapter spec + all source chunks for the chapter's primary + related concepts + style guide. Following the style guide:
+- Anti-bias opening
+- Inline SVG diagrams + CSS animations
+- One embedded source clip with `?start=N` timestamp
+- LaTeX math via `$...$` / `$$...$$`
+- End with `<div class="takeaways">` (3 bullets)
+
+Write the HTML fragment to `/tmp/cm-chN.html` (just `<article>...</article>` body content; no `<html><head><body>` wrapper).
+
+Apply:
+
+```bash
+cat > /tmp/cm-apply.json <<EOF
+{
+  "schema_version": "1",
+  "kind": "synthesize_results",
+  "synthesizer": "claude-code-max:v1",
+  "chapter_order_idx": N,
+  "html_fragment_path": "/tmp/cm-chN.html"
+}
+EOF
+course-merger synthesize --chapter N --apply-results /tmp/cm-apply.json
+```
+
+### Step T3: Build & view
+
+```bash
+course-merger build
+course-merger serve     # http://localhost:4321/textbook/
+```
+
+The textbook lives at `/textbook/<order>/` with sidebar nav + prev/next. Re-run `synthesize` on any chapter to overwrite. Re-run `build` after each `synthesize` to refresh the site.
+
 ## Quick recipes
 
 ### Run the whole pipeline at once (small corpus, you trust the defaults)
