@@ -173,6 +173,48 @@ const courseSlugsForCompare = Array.from(new Set(occurrences.map(o => o.course_s
     margin: 0; line-height: 1.5;
   }
 
+  /* Quick-reference card — search-result anchor + skim summary */
+  .cd-rich .concept-quickref {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 0.5rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-left: 4px solid var(--module-accent, var(--accent));
+    border-radius: var(--radius-lg);
+    padding: 1rem 1.3rem;
+    margin: 0 0 1.8rem;
+    font-size: 0.95em;
+    box-shadow: var(--shadow-sm);
+  }
+  .cd-rich .concept-quickref > div { line-height: 1.6; }
+  .cd-rich .concept-quickref strong {
+    display: inline-block;
+    min-width: 3.5em;
+    color: var(--module-accent, var(--accent));
+    font-weight: 600;
+    margin-right: 0.4rem;
+  }
+
+  /* Deep dive — main illustration container */
+  .cd-rich .concept-deepdive svg { margin: 1.4rem auto; }
+
+  /* Interactive widget container — visually distinct from prose */
+  .cd-rich .concept-interact {
+    background: var(--surface-soft);
+    border-radius: var(--radius-lg);
+    padding: 1.3rem 1.5rem;
+    margin-block: 1.8rem;
+  }
+  .cd-rich .concept-interact h2 {
+    border-left-color: var(--blue, var(--module-accent));
+  }
+  .cd-rich .concept-interact .cd-active-line,
+  .cd-rich .concept-interact [data-line].cd-active-line {
+    color: var(--module-accent, var(--accent));
+    font-weight: 600;
+  }
+
   .cd-rich section { margin-block: 2.2rem; }
   .cd-rich section > h2 {
     font-family: var(--font-serif); font-size: 1.45em; font-weight: 600;
