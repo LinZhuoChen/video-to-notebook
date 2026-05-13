@@ -15,6 +15,10 @@ import typer
 from course_merger.build.runner import run_build
 from course_merger.cluster.embedding import Embedder
 from course_merger.cluster.llm_review import Reviewer
+from course_merger.cluster.prompt_io import (
+    apply_cluster_results,
+    collect_cluster_prompts,
+)
 from course_merger.cluster.runner import run_cluster
 from course_merger.config import CONFIG_FILENAME, PROJECT_MARKER, ProjectNotInitializedError, find_project_root
 from course_merger.crawl.bilibili import BilibiliCrawler
@@ -273,30 +277,73 @@ def cluster_cmd(
         ..., "--ontology", help="Path to ontology YAML.", exists=True, dir_okay=False
     ),
     review_model: str = typer.Option(
-        "claude-sonnet-4-6", "--review-model", help="Claude model for cluster review."
+        "claude-sonnet-4-6", "--review-model", help="Claude model for review (API mode)."
     ),
     threshold: float = typer.Option(
         0.75, "--threshold", help="Cosine similarity threshold for merging proposed tags."
     ),
+    print_prompts: bool = typer.Option(
+        False, "--print-prompts",
+        help="Emit cluster decisions to stdout (in-session mode).",
+    ),
+    apply_results: Path | None = typer.Option(
+        None, "--apply-results",
+        help="Apply a cluster decisions JSON bundle to DB. The file must contain "
+        "both `_prompts_envelope` and `decisions_envelope` (or top-level decisions).",
+    ),
 ) -> None:
-    """Cluster proposed tags and ask Sonnet to merge / create / reject each cluster."""
+    """Cluster proposed tags. Default mode calls Claude Sonnet.
+
+    --print-prompts / --apply-results provide an API-free path.
+    """
     try:
         root = find_project_root(Path.cwd())
     except ProjectNotInitializedError as e:
         typer.echo(f"error: {e}")
         raise typer.Exit(code=1)
 
+    if print_prompts and apply_results is not None:
+        typer.echo("error: --print-prompts and --apply-results are mutually exclusive")
+        raise typer.Exit(code=1)
+
     onto = load_ontology(ontology)
-    client = anthropic.Anthropic()
-
-    embedder = Embedder()
-    reviewer = Reviewer(client=client, model=review_model, ontology=onto)
-
     db_path = root / PROJECT_MARKER / "db.sqlite"
-    report = run_cluster(
-        db_path=db_path, embedder=embedder, reviewer=reviewer, threshold=threshold
-    )
+    embedder = Embedder()
 
+    if print_prompts:
+        envelope = collect_cluster_prompts(
+            db_path=db_path, ontology=onto, embedder=embedder, threshold=threshold,
+        )
+        sys.stdout.write(json.dumps(envelope, ensure_ascii=False, indent=2))
+        sys.stdout.write("\n")
+        return
+
+    if apply_results is not None:
+        with apply_results.open("r", encoding="utf-8") as fh:
+            payload = json.load(fh)
+        prompts = payload.get("_prompts_envelope") or payload.get("prompts")
+        decisions = payload.get("decisions_envelope") or payload.get("decisions") or payload
+        if prompts is None or "clusters" not in prompts:
+            typer.echo(
+                "error: --apply-results JSON must include the original prompts envelope "
+                "(under `_prompts_envelope`) and the decisions (under `decisions_envelope`)."
+            )
+            raise typer.Exit(code=1)
+        report = apply_cluster_results(
+            db_path=db_path, ontology=onto, prompts=prompts, decisions=decisions,
+        )
+        typer.echo(
+            f"done (in-session): {report.clusters_reviewed} clusters reviewed | "
+            f"{report.merged} merged, {report.created} created, "
+            f"{report.rejected} rejected, {report.ambiguous} ambiguous"
+        )
+        return
+
+    client = anthropic.Anthropic()
+    reviewer = Reviewer(client=client, model=review_model, ontology=onto)
+    report = run_cluster(
+        db_path=db_path, embedder=embedder, reviewer=reviewer, threshold=threshold,
+    )
     typer.echo(
         f"done: {report.clusters_reviewed} clusters reviewed | "
         f"{report.merged} merged, {report.created} created, "

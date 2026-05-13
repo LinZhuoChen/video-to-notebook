@@ -62,7 +62,7 @@ def _sample_chunks_for_cluster(
     return [r[0] for r in rows]
 
 
-def _mark_dirty(conn, slugs: list[str]) -> None:
+def mark_dirty(conn, slugs: list[str]) -> None:
     """Append `slugs` to build_meta.dirty_concepts (JSON array)."""
     row = conn.execute(
         "SELECT value FROM build_meta WHERE key='dirty_concepts'"
@@ -81,7 +81,7 @@ def _mark_dirty(conn, slugs: list[str]) -> None:
         )
 
 
-def _consume_proposed_for_cluster(conn, cluster: Cluster) -> None:
+def consume_proposed_for_cluster(conn, cluster: Cluster) -> None:
     raw_tags = list(cluster.items)
     if not raw_tags:
         return
@@ -92,7 +92,7 @@ def _consume_proposed_for_cluster(conn, cluster: Cluster) -> None:
     )
 
 
-def _attach_chunks_to_concept(
+def attach_chunks_to_concept(
     conn,
     cluster: Cluster,
     tag_to_chunks: dict[str, list[int]],
@@ -148,10 +148,10 @@ def run_cluster(
                         "VALUES (?, ?)",
                         (target_id, raw_tag),
                     )
-                _attach_chunks_to_concept(
+                attach_chunks_to_concept(
                     conn, cluster, tag_to_chunks, target_id, reviewer.reviewer_model_id
                 )
-                _consume_proposed_for_cluster(conn, cluster)
+                consume_proposed_for_cluster(conn, cluster)
                 dirty.append(target_slug)
                 merged += 1
 
@@ -173,22 +173,22 @@ def run_cluster(
                             "VALUES (?, ?)",
                             (new_id, raw_tag),
                         )
-                _attach_chunks_to_concept(
+                attach_chunks_to_concept(
                     conn, cluster, tag_to_chunks, new_id, reviewer.reviewer_model_id
                 )
-                _consume_proposed_for_cluster(conn, cluster)
+                consume_proposed_for_cluster(conn, cluster)
                 dirty.append(new["slug"])
                 created += 1
 
             elif decision.decision == "reject":
-                _consume_proposed_for_cluster(conn, cluster)
+                consume_proposed_for_cluster(conn, cluster)
                 rejected += 1
 
             else:  # ambiguous
                 ambiguous += 1
 
         if dirty:
-            _mark_dirty(conn, dirty)
+            mark_dirty(conn, dirty)
 
     return ClusterReport(
         clusters_reviewed=len(clusters),
