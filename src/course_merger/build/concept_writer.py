@@ -12,7 +12,6 @@ from typing import Any
 
 from course_merger.db.session import connect
 
-
 MANIFEST_VERSION = "1"
 
 

@@ -6,6 +6,7 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
+from course_merger.build.concept_writer import write_concept_explainer_assets
 from course_merger.build.queries import (
     all_concepts_with_counts,
     all_courses_with_lecture_counts,
@@ -15,7 +16,6 @@ from course_merger.build.queries import (
 )
 from course_merger.build.template_copy import ensure_site_dir
 from course_merger.build.textbook_writer import write_textbook_assets
-from course_merger.build.concept_writer import write_concept_explainer_assets
 from course_merger.build.writers import (
     write_concept_md,
     write_course_md,

@@ -5,7 +5,7 @@ import importlib.metadata
 import json
 import shutil
 import sys
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -19,25 +19,30 @@ from course_merger.cluster.prompt_io import (
     apply_cluster_results,
     collect_cluster_prompts,
 )
+from course_merger.cluster.runner import run_cluster
+from course_merger.config import (
+    CONFIG_FILENAME,
+    PROJECT_MARKER,
+    ProjectNotInitializedError,
+    find_project_root,
+)
+from course_merger.crawl.bilibili import BilibiliCrawler
+from course_merger.crawl.exceptions import BilibiliCookieError, PlaylistFetchError
+from course_merger.crawl.runner import CrawlReport, _CrawlerLike, run_crawl
+from course_merger.crawl.youtube import YouTubeCrawler
 from course_merger.curriculum.prompt_io import (
     apply_curriculum_results,
     collect_curriculum_prompts,
+)
+from course_merger.db.session import init_db
+from course_merger.explain.prompt_io import (
+    apply_explain_results,
+    collect_explain_prompts,
 )
 from course_merger.synthesize.prompt_io import (
     apply_synthesize_results,
     collect_synthesize_prompts,
 )
-from course_merger.explain.prompt_io import (
-    apply_explain_results,
-    collect_explain_prompts,
-)
-from course_merger.cluster.runner import run_cluster
-from course_merger.config import CONFIG_FILENAME, PROJECT_MARKER, ProjectNotInitializedError, find_project_root
-from course_merger.crawl.bilibili import BilibiliCrawler
-from course_merger.crawl.exceptions import BilibiliCookieError, PlaylistFetchError
-from course_merger.crawl.runner import CrawlReport, _CrawlerLike, run_crawl
-from course_merger.crawl.youtube import YouTubeCrawler
-from course_merger.db.session import init_db
 from course_merger.tag.claude_tagger import ClaudeTagger
 from course_merger.tag.ontology import load_ontology
 from course_merger.tag.prompt_io import apply_tag_results, collect_tag_prompts
@@ -103,7 +108,7 @@ def _detect_platform(url: str) -> str:
     raise typer.BadParameter(f"Unrecognized platform for URL: {url}")
 
 
-class CookieBrowser(str, Enum):
+class CookieBrowser(StrEnum):
     edge = "edge"
     chrome = "chrome"
     firefox = "firefox"
@@ -169,7 +174,7 @@ def crawl_cmd(
         root = find_project_root(Path.cwd())
     except ProjectNotInitializedError as e:
         typer.echo(f"error: {e}")
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from e
 
     platform = _detect_platform(url)
     crawler: _CrawlerLike
@@ -195,10 +200,10 @@ def crawl_cmd(
         )
     except BilibiliCookieError as e:
         typer.echo(f"bilibili cookies missing: {e}")
-        raise typer.Exit(code=2)
+        raise typer.Exit(code=2) from e
     except PlaylistFetchError as e:
         typer.echo(f"playlist fetch failed: {e}")
-        raise typer.Exit(code=4)
+        raise typer.Exit(code=4) from e
 
     typer.echo(
         f"done: {report.lectures_ok} ok, "
@@ -241,7 +246,7 @@ def tag_cmd(
         root = find_project_root(Path.cwd())
     except ProjectNotInitializedError as e:
         typer.echo(f"error: {e}")
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from e
 
     if print_prompts and apply_results is not None:
         typer.echo("error: --print-prompts and --apply-results are mutually exclusive")
@@ -312,7 +317,7 @@ def cluster_cmd(
         root = find_project_root(Path.cwd())
     except ProjectNotInitializedError as e:
         typer.echo(f"error: {e}")
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from e
 
     if print_prompts and apply_results is not None:
         typer.echo("error: --print-prompts and --apply-results are mutually exclusive")
@@ -378,7 +383,7 @@ def build_cmd(
         root = find_project_root(Path.cwd())
     except ProjectNotInitializedError as e:
         typer.echo(f"error: {e}")
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from e
 
     db_path = root / PROJECT_MARKER / "db.sqlite"
     report = run_build(
@@ -404,7 +409,7 @@ def serve_cmd() -> None:
         root = find_project_root(Path.cwd())
     except ProjectNotInitializedError as e:
         typer.echo(f"error: {e}")
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from e
 
     from course_merger.build.template_copy import ensure_site_dir
     site_dir = ensure_site_dir(root)
@@ -440,7 +445,7 @@ def curriculum_cmd(
         root = find_project_root(Path.cwd())
     except ProjectNotInitializedError as e:
         typer.echo(f"error: {e}")
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from e
 
     if print_prompts and apply_results is not None:
         typer.echo("error: --print-prompts and --apply-results are mutually exclusive")
@@ -485,7 +490,7 @@ def synthesize_cmd(
         root = find_project_root(Path.cwd())
     except ProjectNotInitializedError as e:
         typer.echo(f"error: {e}")
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from e
 
     if print_prompts and apply_results is not None:
         typer.echo("error: --print-prompts and --apply-results are mutually exclusive")
@@ -539,7 +544,7 @@ def explain_cmd(
         root = find_project_root(Path.cwd())
     except ProjectNotInitializedError as e:
         typer.echo(f"error: {e}")
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from e
 
     if print_prompts and apply_results is not None:
         typer.echo("error: --print-prompts and --apply-results are mutually exclusive")

@@ -6,6 +6,7 @@ from unittest.mock import patch
 
 import pytest
 
+from course_merger.crawl.exceptions import PlaylistFetchError
 from course_merger.crawl.youtube import YouTubeCrawler
 
 
@@ -62,12 +63,11 @@ def test_download_subtitle_vtt_reads_file(tmp_path: Path):
     assert result.startswith("WEBVTT")
 
 
-from course_merger.crawl.exceptions import PlaylistFetchError
-
-
 def test_list_playlist_raises_on_nonzero_returncode():
     fake_run = _fake_completed(stderr="ERROR: Video unavailable", returncode=1)
-    with patch("subprocess.run", return_value=fake_run):
-        with pytest.raises(PlaylistFetchError) as exc:
-            YouTubeCrawler().list_playlist("https://www.youtube.com/playlist?list=invalid")
+    with (
+        patch("subprocess.run", return_value=fake_run),
+        pytest.raises(PlaylistFetchError) as exc,
+    ):
+        YouTubeCrawler().list_playlist("https://www.youtube.com/playlist?list=invalid")
     assert "Video unavailable" in str(exc.value)

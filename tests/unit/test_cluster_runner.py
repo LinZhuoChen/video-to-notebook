@@ -6,7 +6,6 @@ from unittest.mock import MagicMock
 import numpy as np
 import pytest
 
-from course_merger.cluster.clusterer import Cluster
 from course_merger.cluster.llm_review import ReviewDecision
 from course_merger.cluster.runner import ClusterReport, run_cluster
 from course_merger.db.session import connect, init_db

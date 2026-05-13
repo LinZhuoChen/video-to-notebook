@@ -131,7 +131,8 @@ def test_tag_apply_results_writes_db(tmp_project: Path, fixtures_dir: Path):
             "VALUES ('self-attention', 'Self-Attention', 'seed')"
         )
 
-    import shutil, json as _json
+    import json as _json
+    import shutil
     ont_path = tmp_project / "ontology.yaml"
     shutil.copy(fixtures_dir / "ontology.yaml", ont_path)
 

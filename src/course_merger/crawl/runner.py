@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol
 
@@ -47,7 +47,7 @@ def run_crawl(
 ) -> CrawlReport:
     """Crawl a course and persist into the DB. Idempotent on (course_slug, lecture.idx)."""
 
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(UTC).isoformat()
     entries = crawler.list_playlist(url)
     chunker = Chunker(target_tokens=target_tokens)
 

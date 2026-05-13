@@ -5,7 +5,6 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
-
 PROJECT_MARKER = ".course-merger"
 CONFIG_FILENAME = "config.toml"
 DB_FILENAME = "db.sqlite"

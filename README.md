@@ -150,6 +150,38 @@ Each chapter is a self-contained HTML fragment with inline SVG, CSS animations, 
 
 See `skills/course-merger/SKILL.md` for the full workflow inside Claude Code.
 
+## Concept encyclopedia (v1.3+)
+
+In addition to the linear textbook, you can generate a rich illustrated entry per concept — definition + intuition + SVG + interactive demo + worked example + common misconceptions + cross-links:
+
+```bash
+course-merger explain --concept linear-algebra --print-prompts > la.json
+# Claude reads la.json (concept + occurrences + co-occurring related slugs),
+# writes /tmp/la.html following the v2 style guide (namespace-prefixed
+# CSS, CSS-var color palette, one of three interactive widget templates)
+course-merger explain --concept linear-algebra --apply-results la-results.json
+
+course-merger build  # /concepts/<slug>/ now serves the rich explainer
+```
+
+The v2 style guide (`src/course_merger/explain/prompts.py`) enforces:
+- per-concept CSS namespace prefix to avoid collisions when multiple explainers share a page
+- CSS-variable-only colors (works in light + dark + per-module accent)
+- fixed section order: header + quickref + intuition + deepdive + interact + example + pitfalls + see-also + sources
+- anti-bias opener, one-invariant-per-animation, equation-chain math, counter-example misconceptions
+
+## Site features
+
+The built site (`course-merger build && course-merger serve`) ships with:
+
+- 🌓 dark mode (`prefers-color-scheme` + manual toggle in header, localStorage persistence)
+- 🎨 per-module accent palette (green / blue / purple / amber / rose) auto-applied via `data-module-idx`
+- 📊 chapter mini-map (right rail tracks `h2`/`h3` headings with `IntersectionObserver`)
+- ⌨️ keyboard navigation (← / → arrows step through chapters)
+- 📱 mobile drawer (hamburger menu, slide-in from left, mirrors textbook sidebar)
+- 🔍 client-side search via [Pagefind](https://pagefind.app/)
+- 🧮 LaTeX math via [KaTeX](https://katex.org/) (write `$...$` or `$$...$$` in fragments)
+
 ---
 
 ## Disclaimer
@@ -184,13 +216,18 @@ Per course (50-100 lectures, ~1500 chunks):
 
 For a 5-course corpus, expect ~$2-4 first run. Re-runs are free thanks to per-chunk idempotency.
 
-## Roadmap (deferred to v2)
+## Roadmap
+
+**Shipped:** v1.0 foundation · v1.1 in-session mode · v1.2 textbook generator · v1.3 concept explainer + design-system polish (see [CHANGELOG.md](CHANGELOG.md)).
+
+**Deferred:**
 
 - **Whisper fallback**: transcribe videos with no subtitles via mlx-whisper / Groq.
 - **Coursera/edX/MIT-OCW adapters**: more crawlers behind the `Crawler` Protocol.
 - **Live filter on compare view**: client-side `?courses=cs336,gpu-mode` selection.
 - **`review` CLI**: human-in-the-loop dispatch for `ambiguous` cluster decisions.
 - **Multi-language concept aliasing**: dedicated Chinese ↔ English concept name pairs.
+- **Automatic incremental rebuild**: `init_db()` on every CLI command + `ensure_site_dir` template sync on each `build`.
 
 ## Architecture & design
 
@@ -200,10 +237,11 @@ For a 5-course corpus, expect ~$2-4 first run. Re-runs are free thanks to per-ch
   - Plan 2: [Tag + Cluster](docs/superpowers/plans/2026-05-09-plan-2-tag-and-cluster.md)
   - Plan 3: [Build + HTML](docs/superpowers/plans/2026-05-09-plan-3-build-and-html.md)
   - Plan 4: [Demo + Deploy + Skill](docs/superpowers/plans/2026-05-09-plan-4-demo-deploy-skill.md)
+  - Plan 6: [Textbook generator](docs/superpowers/plans/2026-05-13-plan-6-textbook-generator.md)
 
 ## Contributing
 
-PRs welcome — particularly new crawler adapters and ontology files for non-AI/CS domains. Run `pytest -v` before sending.
+See [CONTRIBUTING.md](CONTRIBUTING.md). PRs welcome — particularly new crawler adapters and ontology files for non-AI/CS domains.
 
 ## License
 

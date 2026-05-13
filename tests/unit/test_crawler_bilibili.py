@@ -6,7 +6,8 @@ from unittest.mock import patch
 
 import pytest
 
-from course_merger.crawl.bilibili import BilibiliCrawler, BilibiliCookieError
+from course_merger.crawl.bilibili import BilibiliCookieError, BilibiliCrawler
+from course_merger.crawl.exceptions import PlaylistFetchError
 
 
 def _fake_completed(stdout: str = "", stderr: str = "", returncode: int = 0):
@@ -60,21 +61,19 @@ def test_download_subtitle_requires_cookies():
 def test_download_subtitle_detects_403_and_raises():
     crawler = BilibiliCrawler()
     fake_run = _fake_completed(stderr="HTTP Error 403: Forbidden", returncode=1)
-    with patch("subprocess.run", return_value=fake_run):
-        with pytest.raises(BilibiliCookieError) as exc:
-            crawler.download_subtitle_vtt(
-                "https://www.bilibili.com/video/BVxxx/?p=1",
-                lang_priority=["ai-zh"],
-                cookies_from="edge",
-            )
+    with (
+        patch("subprocess.run", return_value=fake_run),
+        pytest.raises(BilibiliCookieError) as exc,
+    ):
+        crawler.download_subtitle_vtt(
+            "https://www.bilibili.com/video/BVxxx/?p=1",
+            lang_priority=["ai-zh"],
+            cookies_from="edge",
+        )
     assert "edge" in str(exc.value)
-
-
-from course_merger.crawl.exceptions import PlaylistFetchError
 
 
 def test_list_playlist_raises_on_nonzero_returncode():
     fake_run = _fake_completed(stderr="ERROR: BVxxx not found", returncode=1)
-    with patch("subprocess.run", return_value=fake_run):
-        with pytest.raises(PlaylistFetchError):
-            BilibiliCrawler().list_playlist("https://www.bilibili.com/video/BVxxx/")
+    with patch("subprocess.run", return_value=fake_run), pytest.raises(PlaylistFetchError):
+        BilibiliCrawler().list_playlist("https://www.bilibili.com/video/BVxxx/")

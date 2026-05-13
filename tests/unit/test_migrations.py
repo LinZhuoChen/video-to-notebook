@@ -72,12 +72,11 @@ def test_concept_aliases_enforce_unique(tmp_path: Path):
             "VALUES (1, 'shared-alias')"
         )
 
-    with pytest.raises(sqlite3.IntegrityError):
-        with connect(db_path) as conn:
-            conn.execute(
-                "INSERT INTO concept_aliases (concept_id, alias) "
-                "VALUES (2, 'shared-alias')"
-            )
+    with pytest.raises(sqlite3.IntegrityError), connect(db_path) as conn:
+        conn.execute(
+            "INSERT INTO concept_aliases (concept_id, alias) "
+            "VALUES (2, 'shared-alias')"
+        )
 
 
 def test_0003_creates_curriculum_chapters_table(tmp_path: Path):
@@ -89,7 +88,25 @@ def test_0003_creates_curriculum_chapters_table(tmp_path: Path):
         ).fetchall()]
         (version,) = conn.execute("PRAGMA user_version").fetchone()
     assert "curriculum_chapters" in names
-    assert version == 3
+    # version reflects the latest migration applied; bumps each time a new
+    # migration is added. As of 0004 (concept_explanations), this is 4.
+    assert version >= 3
+
+
+def test_0004_creates_concept_explanations_table(tmp_path: Path):
+    db_path = tmp_path / "db.sqlite"
+    init_db(db_path)
+    with connect(db_path) as conn:
+        names = [r[0] for r in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
+        ).fetchall()]
+        cols = [r[1] for r in conn.execute(
+            "PRAGMA table_info(concept_explanations)"
+        ).fetchall()]
+        (version,) = conn.execute("PRAGMA user_version").fetchone()
+    assert "concept_explanations" in names
+    assert set(cols) == {"id", "concept_id", "html_fragment", "explainer", "generated_at"}
+    assert version >= 4
 
 
 def test_curriculum_chapters_order_idx_is_unique(tmp_path: Path):
@@ -107,11 +124,10 @@ def test_curriculum_chapters_order_idx_is_unique(tmp_path: Path):
             "VALUES (1, 'M1', 'Ch 1', 'b', 'a', '[]', 'haiku:v1', 'planned')"
         )
     import sqlite3
-    with pytest.raises(sqlite3.IntegrityError):
-        with connect(db_path) as conn:
-            conn.execute(
-                "INSERT INTO curriculum_chapters "
-                "(order_idx, module, title, blurb, primary_concept_slug, "
-                "related_concept_slugs, curriculum_designer, status) "
-                "VALUES (1, 'M1', 'duplicate', 'b', 'a', '[]', 'haiku:v1', 'planned')"
-            )
+    with pytest.raises(sqlite3.IntegrityError), connect(db_path) as conn:
+        conn.execute(
+            "INSERT INTO curriculum_chapters "
+            "(order_idx, module, title, blurb, primary_concept_slug, "
+            "related_concept_slugs, curriculum_designer, status) "
+            "VALUES (1, 'M1', 'duplicate', 'b', 'a', '[]', 'haiku:v1', 'planned')"
+        )

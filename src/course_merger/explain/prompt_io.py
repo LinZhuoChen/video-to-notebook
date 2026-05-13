@@ -2,18 +2,16 @@
 apply results (HTML fragment file → state_dir/concepts/<slug>.html + DB row)."""
 from __future__ import annotations
 
-import json
 import shutil
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from course_merger.db.session import connect
 from course_merger.explain.prompts import (
-    EXPLAINER_VERSION,
     EXPLAIN_STYLE_GUIDE,
+    EXPLAINER_VERSION,
 )
-
 
 SCHEMA_VERSION = "1"
 DEFAULT_EXPLAINER_ID = "claude-code-max:v1"
@@ -165,7 +163,7 @@ def apply_explain_results(
         dst_path = concepts_dir / dst_name
         shutil.copyfile(src_path, dst_path)
 
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
         conn.execute(
             """
             INSERT INTO concept_explanations

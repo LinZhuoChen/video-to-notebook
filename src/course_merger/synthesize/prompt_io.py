@@ -4,16 +4,14 @@ from __future__ import annotations
 
 import json
 import shutil
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from course_merger.db.session import connect
 from course_merger.synthesize.prompts import (
-    SYNTHESIZER_VERSION,
     SYNTHESIZE_STYLE_GUIDE,
 )
-
 
 SCHEMA_VERSION = "1"
 DEFAULT_SYNTHESIZER_ID = "claude-code-max:v1"
@@ -127,7 +125,7 @@ def apply_synthesize_results(
         dst_path = textbook_dir / dst_name
         shutil.copyfile(src_path, dst_path)
 
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
         conn.execute(
             """
             UPDATE curriculum_chapters

@@ -5,5 +5,9 @@ target-version = "py312"
 select = ["E", "F", "I", "B", "UP", "SIM"]
 ignore = ["E501"]
 
+[lint.per-file-ignores]
+# typer idiomatically calls Option/Argument as default values; not a bug.
+"src/course_merger/cli.py" = ["B008"]
+
 [format]
 quote-style = "double"

@@ -3,8 +3,6 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import patch
 
-import pytest
-
 from course_merger.build.runner import BuildReport, run_build
 from course_merger.db.session import connect, init_db
 

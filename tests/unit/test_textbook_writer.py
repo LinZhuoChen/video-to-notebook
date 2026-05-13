@@ -3,8 +3,6 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
-
 from course_merger.build.textbook_writer import write_textbook_assets
 from course_merger.db.session import connect, init_db
 

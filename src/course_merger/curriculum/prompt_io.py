@@ -8,7 +8,6 @@ from typing import Any
 from course_merger.curriculum.prompts import CURRICULUM_INSTRUCTIONS
 from course_merger.db.session import connect
 
-
 SCHEMA_VERSION = "1"
 DEFAULT_DESIGNER_ID = "claude-code-max:v1"
 
@@ -63,8 +62,8 @@ def collect_curriculum_prompts(
                 (slug, samples_per_concept),
             ).fetchall()
             concept_chunks[slug] = [
-                {"course_slug": c, "lecture_idx": l, "text": t}
-                for c, l, t in chunks
+                {"course_slug": c, "lecture_idx": idx, "text": t}
+                for c, idx, t in chunks
             ]
 
     return {

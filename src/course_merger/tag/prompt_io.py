@@ -15,7 +15,6 @@ from course_merger.db.session import connect
 from course_merger.tag.ontology import Ontology
 from course_merger.tag.runner import TagReport, _untagged_chunks_query
 
-
 SCHEMA_VERSION = "1"
 DEFAULT_TAGGER_MODEL_ID = "claude-code-max:v1"
 

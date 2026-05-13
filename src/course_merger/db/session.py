@@ -3,9 +3,9 @@ from __future__ import annotations
 
 import re
 import sqlite3
+from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Iterator
 
 _MIGRATIONS_DIR = Path(__file__).parent / "migrations"
 _MIGRATION_FILE_RE = re.compile(r"^(\d{4})_[a-z0-9_]+\.sql$")

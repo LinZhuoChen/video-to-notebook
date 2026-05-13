@@ -13,7 +13,6 @@ from course_merger.cluster.prompts import (
 )
 from course_merger.tag.ontology import Ontology
 
-
 Decision = Literal["merge", "create", "reject", "ambiguous"]
 
 

@@ -1,7 +1,7 @@
 [project]
 name = "course-merger"
-version = "0.1.0"
-description = "Crawl, merge, and visualize open-courseware by concept"
+version = "1.3.0"
+description = "Crawl open-courseware, tag with concepts via Claude, and render an interactive textbook + concept encyclopedia"
 readme = "README.md"
 requires-python = ">=3.12"
 license = "MIT"

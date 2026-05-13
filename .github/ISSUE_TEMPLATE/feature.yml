@@ -1,0 +1,39 @@
+name: Feature request
+description: Suggest an idea or new capability
+title: "[feature] "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: Describe the user-facing pain or missing capability — start from the problem, not the solution.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: Optional. Sketch how you'd approach it. Don't worry about getting it right — it's a starting point for discussion.
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you've considered
+      description: Workarounds, existing tools, etc.
+
+  - type: dropdown
+    id: scope
+    attributes:
+      label: Which surface does this touch?
+      multiple: true
+      options:
+        - CLI command / flag
+        - Crawler (new platform adapter)
+        - Tag / cluster (LLM workflow)
+        - Curriculum / synthesize (textbook generator)
+        - Explain (concept encyclopedia)
+        - Astro site UI / UX
+        - Docs / examples
+        - Other / unsure

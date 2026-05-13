@@ -1,0 +1,46 @@
+name: Bug report
+description: Something doesn't work as expected
+title: "[bug] "
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What command did you run, and what went wrong?
+      placeholder: |
+        $ course-merger crawl https://www.youtube.com/playlist?list=PLxxx --name cs336
+        Traceback (most recent call last):
+        ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: course-merger version
+      description: "Output of `course-merger version`"
+      placeholder: "1.3.0"
+    validations:
+      required: true
+
+  - type: input
+    id: env
+    attributes:
+      label: OS + Python version
+      placeholder: "macOS 14.5 / Python 3.12.4"
+    validations:
+      required: true
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Additional context
+      description: Logs, screenshots, ontology YAML, etc. Wrap large pastes in `<details>`.

@@ -21,7 +21,6 @@ from course_merger.cluster.runner import (
 from course_merger.db.session import connect
 from course_merger.tag.ontology import Ontology
 
-
 SCHEMA_VERSION = "1"
 DEFAULT_REVIEWER_MODEL_ID = "claude-code-max:v1"
 

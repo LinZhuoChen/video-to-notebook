@@ -12,7 +12,6 @@ from typing import Any
 from course_merger.tag.ontology import Ontology
 from course_merger.tag.prompts import TAGGER_PROMPT_VERSION, TAGGER_SYSTEM_TEMPLATE
 
-
 _PROPOSED_PREFIX = "proposed:"
 _MIN_CONFIDENCE = 0.5
 _MAX_RETRIES = 1  # one retry, so total attempts is 2
@@ -100,7 +99,7 @@ class ClaudeTagger:
 
     def tag_chunk(self, chunk_text: str) -> TagResult:
         last_error = ""
-        for attempt in range(_MAX_RETRIES + 1):
+        for _attempt in range(_MAX_RETRIES + 1):
             try:
                 resp = self.client.messages.create(
                     model=self.model,

@@ -3,9 +3,9 @@ from __future__ import annotations
 
 import subprocess
 import tempfile
+from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Iterator
 
 from course_merger.crawl.exceptions import PlaylistFetchError
 
