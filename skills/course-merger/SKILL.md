@@ -95,6 +95,94 @@ The user can browse and tell you what to tweak. Common follow-ups:
 - "Re-render after editing ontology": `course-merger build --incremental` only re-renders concepts marked dirty by the last `cluster` run.
 - "Deploy": see `examples/frontier-notebook/` for the GitHub Pages pattern.
 
+## In-session mode (Claude Max users — no API key)
+
+If the user has Claude Max (or any Claude Code subscription), they should NOT need a separate Anthropic API key. The tag and cluster commands each support a two-step pattern: emit work to JSON, decide in this conversation, apply back.
+
+### When to recommend this mode
+
+After Step 2 (crawl), check chunk count:
+
+```bash
+sqlite3 .course-merger/db.sqlite "SELECT COUNT(*) FROM chunks"
+```
+
+| Chunk count | Mode |
+|-------------|------|
+| **< 200** | **In-session** (no API key, free via subscription) |
+| 200–1000 | Either; in-session is slower but free |
+| > 1000 | **API mode** — too slow to batch through conversation |
+
+If the user explicitly says "I have Max" or "no API key", default to in-session regardless of size.
+
+### In-session tag loop
+
+```bash
+course-merger tag --ontology <ont.yaml> --print-prompts --limit 20 > /tmp/cm-prompts.json
+```
+
+Read `/tmp/cm-prompts.json`:
+
+```json
+{
+  "schema_version": "1",
+  "kind": "tag_prompts",
+  "ontology_slugs": ["self-attention", "..."],
+  "chunks": [{"chunk_id": 1, "text": "..."}]
+}
+```
+
+For each chunk, decide tags (your own reasoning) and write `/tmp/cm-results.json`:
+
+```json
+{
+  "schema_version": "1",
+  "kind": "tag_results",
+  "tagger_model_id": "claude-code-max:v1",
+  "results": [
+    {"chunk_id": 1, "tags": [{"slug": "self-attention", "confidence": 0.9}]}
+  ]
+}
+```
+
+Apply:
+
+```bash
+course-merger tag --ontology <ont.yaml> --apply-results /tmp/cm-results.json
+```
+
+Repeat until `--print-prompts` returns empty `chunks` array.
+
+### In-session cluster
+
+```bash
+course-merger cluster --ontology <ont.yaml> --print-prompts > /tmp/cm-cluster-prompts.json
+```
+
+Read the envelope. For each cluster, decide merge / create / reject / ambiguous.
+
+Construct apply bundle (single file with BOTH envelopes):
+
+```json
+{
+  "_prompts_envelope": { ... full /tmp/cm-cluster-prompts.json content ... },
+  "decisions_envelope": {
+    "schema_version": "1",
+    "kind": "cluster_results",
+    "reviewer_model_id": "claude-code-max:v1",
+    "decisions": [
+      {"cluster_id": 0, "decision": "merge", "target_slug": "rotary-positional-encoding"}
+    ]
+  }
+}
+```
+
+Apply:
+
+```bash
+course-merger cluster --ontology <ont.yaml> --apply-results /tmp/cm-cluster-apply.json
+```
+
 ## Quick recipes
 
 ### Run the whole pipeline at once (small corpus, you trust the defaults)
