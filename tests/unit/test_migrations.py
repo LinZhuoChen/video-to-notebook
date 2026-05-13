@@ -51,7 +51,7 @@ def test_0002_creates_concept_tables(tmp_path: Path):
 
     for required in ["concepts", "concept_aliases", "chunk_concepts", "build_meta", "proposed_tags"]:
         assert required in names, f"table {required} missing"
-    assert version == 2
+    assert version >= 2
 
 
 def test_concept_aliases_enforce_unique(tmp_path: Path):
@@ -77,4 +77,41 @@ def test_concept_aliases_enforce_unique(tmp_path: Path):
             conn.execute(
                 "INSERT INTO concept_aliases (concept_id, alias) "
                 "VALUES (2, 'shared-alias')"
+            )
+
+
+def test_0003_creates_curriculum_chapters_table(tmp_path: Path):
+    db_path = tmp_path / "db.sqlite"
+    init_db(db_path)
+    with connect(db_path) as conn:
+        names = [r[0] for r in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
+        ).fetchall()]
+        (version,) = conn.execute("PRAGMA user_version").fetchone()
+    assert "curriculum_chapters" in names
+    assert version == 3
+
+
+def test_curriculum_chapters_order_idx_is_unique(tmp_path: Path):
+    db_path = tmp_path / "db.sqlite"
+    init_db(db_path)
+    with connect(db_path) as conn:
+        conn.execute(
+            "INSERT INTO concepts (slug, canonical_name, ontology_source) "
+            "VALUES ('a', 'A', 'seed')"
+        )
+        conn.execute(
+            "INSERT INTO curriculum_chapters "
+            "(order_idx, module, title, blurb, primary_concept_slug, "
+            "related_concept_slugs, curriculum_designer, status) "
+            "VALUES (1, 'M1', 'Ch 1', 'b', 'a', '[]', 'haiku:v1', 'planned')"
+        )
+    import sqlite3
+    with pytest.raises(sqlite3.IntegrityError):
+        with connect(db_path) as conn:
+            conn.execute(
+                "INSERT INTO curriculum_chapters "
+                "(order_idx, module, title, blurb, primary_concept_slug, "
+                "related_concept_slugs, curriculum_designer, status) "
+                "VALUES (1, 'M1', 'duplicate', 'b', 'a', '[]', 'haiku:v1', 'planned')"
             )
