@@ -12,7 +12,7 @@ Turn a pile of YouTube / Bilibili playlists into a beginner-friendly merged cour
 [![Astro](https://img.shields.io/badge/Astro-5-FF5D01?logo=astro&logoColor=white)](https://astro.build/)
 [![Claude](https://img.shields.io/badge/powered_by-Claude-D97757)](https://anthropic.com/)
 
-[**Live demo**](https://chenlinzhuo.github.io/course-merger/) · [**Quickstart**](#-quickstart) · [**How it works**](#-how-it-works) · [**Use as Claude Code skill**](#-use-as-a-claude-code-skill) · [**Roadmap**](#-roadmap)
+[**Live demo**](https://chenlinzhuo.github.io/course-merger/) · [**Quickstart**](#-quickstart) · [**How it works**](#-how-it-works) · [**Use with Claude Code / Codex / any agent**](#-drive-it-from-your-ai-coding-agent) · [**Roadmap**](#-roadmap)
 
 ---
 
@@ -130,9 +130,9 @@ course-merger serve    # http://localhost:4321
 
 Total cost for a 5-course corpus: **~$2-4** first run, **$0** on re-runs (idempotent).
 
-### Option B — no API key, Claude Max subscription
+### Option B — no API key, drive from an AI agent
 
-Every LLM stage (`tag`, `cluster`, `curriculum`, `synthesize`, `explain`) has `--print-prompts` / `--apply-results` flags. Drive the pipeline from inside Claude Code using your Max subscription — no separate API key needed. See [**§ In-session mode**](#-in-session-mode-claude-max-users--no-api-key) below.
+Every LLM stage (`tag`, `cluster`, `curriculum`, `synthesize`, `explain`) has `--print-prompts` / `--apply-results` flags. Drive the pipeline from inside **Claude Code**, **OpenAI Codex**, **Cursor**, **Continue**, or your own script — no separate API key needed. See [**§ Drive it from your AI coding agent**](#-drive-it-from-your-ai-coding-agent) below for setup.
 
 ## 🏗 How it works
 
@@ -177,9 +177,15 @@ playwright install chromium    # only if running e2e tests
 
 For Bilibili crawling you also need a logged-in browser (`--cookies-from edge|chrome|firefox`).
 
-## 🤖 Use as a Claude Code skill
+## 🤖 Drive it from your AI coding agent
 
-Install once:
+Every LLM stage supports a **`--print-prompts` / `--apply-results`** two-phase flow. The CLI emits a JSON envelope of pending work; the agent reads it, reasons, writes a results JSON; the CLI applies that to SQLite. The protocol is **agent-agnostic** — schemas + conventions live in [`docs/AGENT_PROTOCOL.md`](docs/AGENT_PROTOCOL.md).
+
+<table>
+<tr>
+<td width="50%" valign="top">
+
+### 🟠 Claude Code
 
 ```bash
 git clone https://github.com/chenlinzhuo/course-merger.git
@@ -190,44 +196,80 @@ Then in Claude Code:
 
 > Build me a study site from these courses: `<playlist1>` `<playlist2>` `<playlist3>` using `examples/ontology-llm.yaml`.
 
-Claude walks through the pipeline, asking for confirmation before each paid step (tag/cluster).
+Full skill manifest at [`skills/course-merger/SKILL.md`](skills/course-merger/SKILL.md). Claude Max users skip the Anthropic API key entirely — the in-session flow covers tag/cluster/curriculum/synthesize/explain.
 
-The full skill manifest is at [`skills/course-merger/SKILL.md`](skills/course-merger/SKILL.md).
+</td>
+<td width="50%" valign="top">
 
-## 🌐 In-session mode (Claude Max users — no API key)
+### 🔵 OpenAI Codex
 
-If you have a Claude Max subscription, skip the Anthropic API key. Every LLM stage accepts two flags:
-
-- `--print-prompts` — emits a JSON envelope of pending work to stdout.
-- `--apply-results <file>` — reads a decisions JSON and writes results to the DB.
-
-Inside Claude Code:
-
-```
-You: "Crawl this playlist and tag using examples/ontology-llm.yaml. I have Max."
-
-Claude:
-  - course-merger init && course-merger crawl <url>
-  - course-merger tag --ontology ... --print-prompts --limit 20 > p.json
-  - (reads p.json, decides tags via its own reasoning)
-  - writes r.json with decisions
-  - course-merger tag --ontology ... --apply-results r.json
-  - (repeats batch by batch until all chunks tagged)
-  - same loop for cluster, curriculum, synthesize, explain
-  - course-merger build
+```bash
+git clone https://github.com/chenlinzhuo/course-merger.git
+cd my-study-site
+bash course-merger/skills/course-merger/scripts/install-codex.sh
+codex                  # Codex reads AGENTS.md
 ```
 
-The skill at [`skills/course-merger/SKILL.md`](skills/course-merger/SKILL.md) automates this loop.
+Or install globally so Codex knows about course-merger from anywhere:
 
-### Trade-offs
+```bash
+bash course-merger/skills/course-merger/scripts/install-codex.sh --global
+```
 
-|                          | API mode | In-session mode |
-|--------------------------|----------|-----------------|
-| API key required         | ✅ yes   | ❌ no           |
-| Cost for demo corpus     | ~$2-4   | $0 extra (covered by Max) |
-| Speed for 1000 chunks    | ~5-10 min | ~1-2 hours    |
-| Speed for 100 chunks     | ~30 sec | ~5-10 min       |
-| Best for                 | Large corpora | Small experiments |
+Codex reads [`AGENTS.md`](AGENTS.md) (Codex's equivalent of CLAUDE.md) and [`docs/AGENT_PROTOCOL.md`](docs/AGENT_PROTOCOL.md). Same in-session flow.
+
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+
+### 🟣 Cursor / Continue / Aider / your own script
+
+Any agent that reads JSON, reasons, writes JSON can drive the pipeline. The [`AGENTS.md`](AGENTS.md) + [`docs/AGENT_PROTOCOL.md`](docs/AGENT_PROTOCOL.md) pair is the contract — no Claude-specific assumptions.
+
+When writing the results envelope, set the agent-id (`tagger_model_id`, `synthesizer`, etc.) to a string that identifies you — `cursor:v1`, `continue:v1`, `my-script:v1`. Persisted in the DB so audits work.
+
+</td>
+<td width="50%" valign="top">
+
+### ⚙️ Plain API key
+
+If you don't use an agent, set `ANTHROPIC_API_KEY` and run `tag` + `cluster` without `--print-prompts`. They'll call the Anthropic API directly with prompt caching. ~$0.30-0.80 per course.
+
+The textbook-generation stages (`curriculum`, `synthesize`, `explain`) currently only work via the in-session flow — they're built for an agent's reasoning, not one-shot API calls.
+
+</td>
+</tr>
+</table>
+
+### 📋 In-session flow (any agent)
+
+```
+agent says        "Crawl this playlist and tag using examples/ontology-llm.yaml."
+
+CLI loop:
+  course-merger init && course-merger crawl <url>
+  for batch in chunks_of(20):
+    course-merger tag --print-prompts --limit 20 > p.json
+    agent reads p.json, writes r.json
+    course-merger tag --apply-results r.json
+  course-merger cluster --print-prompts > c.json
+  agent reads c.json, writes c-apply.json
+  course-merger cluster --apply-results c-apply.json
+  same for curriculum / synthesize (per chapter) / explain (per concept)
+  course-merger build
+```
+
+### Cost & speed trade-offs
+
+|                          | API key mode | In-session mode |
+|--------------------------|--------------|------------------|
+| API key required         | ✅ yes       | ❌ no            |
+| Cost for demo corpus     | ~$2-4       | $0 extra (covered by your agent's subscription) |
+| Speed for 1000 chunks    | ~5-10 min   | ~1-2 hours       |
+| Speed for 100 chunks     | ~30 sec     | ~5-10 min        |
+| Curriculum / synthesize / explain | ❌ not available | ✅ this is the only mode |
+| Best for                 | Large corpora, one-shot batch | Small/medium corpora + textbook generation |
 
 ## 📖 Textbook generation (v1.2+)
 
@@ -322,7 +364,7 @@ The build script chains crawl/tag/cluster/build, reads `courses.toml`, and lands
 
 ## 🗺 Roadmap
 
-**Shipped:** v1.0 foundation · v1.1 in-session mode · v1.2 textbook generator · v1.3 concept encyclopedia + design-system polish (see [CHANGELOG.md](CHANGELOG.md)).
+**Shipped:** v1.0 foundation · v1.1 in-session mode · v1.2 textbook generator · v1.3 concept encyclopedia + design-system polish · v1.4 multi-agent support (Codex + Cursor + Continue alongside Claude Code) (see [CHANGELOG.md](CHANGELOG.md)).
 
 **Deferred:**
 

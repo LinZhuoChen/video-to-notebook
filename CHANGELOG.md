@@ -4,6 +4,20 @@ All notable changes to course-merger. Follows [Keep a Changelog](https://keepach
 
 ## [Unreleased]
 
+## [1.4.0] — 2026-05-14
+
+### Added — multi-agent support
+
+- **`AGENTS.md`** at repo root — OpenAI Codex CLI's equivalent of Claude Code's `CLAUDE.md`. Orients any AI coding agent (Codex, Cursor, Continue, Aider, your own script) to the codebase, conventions, and safety rules.
+- **`docs/AGENT_PROTOCOL.md`** — canonical JSON envelope schemas for all five LLM stages (tag / cluster / curriculum / synthesize / explain). Documents the `--print-prompts` / `--apply-results` contract in an agent-agnostic way so any client can drive the pipeline. Includes error semantics, idempotency guarantees, agent-id conventions.
+- **`skills/course-merger/scripts/install-codex.sh`** — installer for Codex CLI. Two modes: `--project` symlinks `AGENTS.md` into the cwd (default), `--global` appends a course-merger stanza to `~/.codex/AGENTS.md`.
+- **Agent-id conventions** documented in protocol — `claude-code-max:v1`, `codex-cli:v1`, `cursor:v1`, etc. Free-form strings, persisted to DB so audits can attribute decisions to the agent that produced them.
+
+### Changed
+
+- README "Use as Claude Code skill" section becomes "Drive it from your AI coding agent" with a 4-quadrant card layout: Claude Code · OpenAI Codex · Cursor/Continue/Aider · plain API key.
+- README's "Option B" in quickstart now mentions Codex + Cursor + Continue alongside Claude Code.
+
 ## [1.3.0] — 2026-05-14
 
 ### Added
@@ -58,7 +72,8 @@ All notable changes to course-merger. Follows [Keep a Changelog](https://keepach
 - Skill-driven UX via Claude Code (install with `bash skills/course-merger/scripts/install-locally.sh`).
 - Example corpus: `examples/frontier-notebook/` with 5 World-Models × Agents courses.
 
-[Unreleased]: https://github.com/chenlinzhuo/course-merger/compare/v1.3.0...HEAD
+[Unreleased]: https://github.com/chenlinzhuo/course-merger/compare/v1.4.0...HEAD
+[1.4.0]: https://github.com/chenlinzhuo/course-merger/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/chenlinzhuo/course-merger/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/chenlinzhuo/course-merger/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/chenlinzhuo/course-merger/compare/v1.0.0...v1.1.0
