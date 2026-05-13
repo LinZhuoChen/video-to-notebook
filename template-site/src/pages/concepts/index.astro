@@ -2,35 +2,240 @@
 import Base from '../../layouts/Base.astro';
 import { getCollection } from 'astro:content';
 
+let manifest: any = { explainers: [] };
+try {
+  const data = await import('../../content/concept-explainers/manifest.json');
+  manifest = data.default || data;
+} catch (e) {
+  manifest = { explainers: [] };
+}
+const explainedSlugs = new Set(manifest.explainers.map((e: any) => e.slug));
+
+let curriculum: any = { chapters: [] };
+try {
+  const data = await import('../../content/textbook/curriculum.json');
+  curriculum = data.default || data;
+} catch (e) {}
+
+const slugToModule = new Map<string, string>();
+const moduleOrder: string[] = [];
+for (const ch of curriculum.chapters || []) {
+  if (!moduleOrder.includes(ch.module)) moduleOrder.push(ch.module);
+  slugToModule.set(ch.primary_concept_slug, ch.module);
+  for (const s of ch.related_concept_slugs || []) {
+    if (!slugToModule.has(s)) slugToModule.set(s, ch.module);
+  }
+}
+const moduleIdxOf = (m: string | undefined) =>
+  m ? ((moduleOrder.indexOf(m) % 5) + 1) : 0;
+
 const concepts = (await getCollection('concept'))
   .sort((a, b) => a.data.canonical_name.localeCompare(b.data.canonical_name));
 
-const grouped: Record<string, typeof concepts> = {};
-for (const c of concepts) {
-  const letter = c.data.canonical_name[0].toUpperCase();
-  (grouped[letter] ??= []).push(c);
+type ConceptItem = (typeof concepts)[number] & { _module?: string; _mIdx?: number; _explained?: boolean };
+const items: ConceptItem[] = concepts.map(c => {
+  const mod = slugToModule.get(c.slug);
+  return Object.assign(c, {
+    _module: mod,
+    _mIdx: moduleIdxOf(mod),
+    _explained: explainedSlugs.has(c.slug),
+  }) as ConceptItem;
+});
+
+const totalExplained = items.filter(i => i._explained).length;
+
+// Group: by module (Module 1..N), with an "其它" bucket for un-mapped
+const groups = new Map<string, ConceptItem[]>();
+for (const m of moduleOrder) groups.set(m, []);
+groups.set('其它', []);
+for (const it of items) {
+  const key = it._module && groups.has(it._module) ? it._module : '其它';
+  groups.get(key)!.push(it);
 }
-const letters = Object.keys(grouped).sort();
+
+// Pinned "已详解" rail of explained concepts
+const explainedItems = items.filter(i => i._explained);
 ---
-<Base title="Concepts">
-  <h1>All Concepts</h1>
-  <p>{concepts.length} concepts indexed.</p>
-  {letters.map(letter => (
-    <section>
-      <h2 id={letter}>{letter}</h2>
-      <ul>
-        {grouped[letter].map(c => (
-          <li>
-            <a href={`/concepts/${c.slug}/`}>{c.data.canonical_name}</a>
-            <span class="count">({c.data.occurrence_count})</span>
-          </li>
-        ))}
-      </ul>
-    </section>
-  ))}
+<Base title="概念百科">
+  <div class="cx-page">
+    <header class="cx-header">
+      <div class="cx-eyebrow">course-merger encyclopedia</div>
+      <h1 class="cx-title">概念百科</h1>
+      <p class="cx-stats">
+        <strong>{items.length}</strong> 个概念 ·
+        <strong>{totalExplained}</strong> 个已配图文详解
+      </p>
+      <p class="cx-help">
+        每个概念都是一份独立的图文解释：直觉 → 公式 → 图示 → 动画 → 例题 → 常见误区。
+      </p>
+    </header>
+
+    {explainedItems.length > 0 && (
+      <section class="cx-featured">
+        <h2 class="cx-section-title">已详解</h2>
+        <div class="cx-featured-grid">
+          {explainedItems.map(c => (
+            <a class="cx-card" href={`/concepts/${c.slug}/`} data-module-idx={c._mIdx || 1}>
+              <span class="cx-card-badge">已详解</span>
+              <h3 class="cx-card-title">{c.data.canonical_name}</h3>
+              {c.data.description && <p class="cx-card-desc">{c.data.description}</p>}
+              {c._module && <span class="cx-card-module">{c._module}</span>}
+            </a>
+          ))}
+        </div>
+      </section>
+    )}
+
+    {Array.from(groups.entries()).filter(([_, lst]) => lst.length > 0).map(([module, lst], i) => (
+      <section class="cx-module" data-module-idx={module === '其它' ? 0 : ((moduleOrder.indexOf(module) % 5) + 1)}>
+        <div class="cx-module-header">
+          <span class="cx-module-num">{module === '其它' ? '—' : `Module ${moduleOrder.indexOf(module) + 1}`}</span>
+          <h2 class="cx-module-title">{module}</h2>
+          <span class="cx-module-count">{lst.length}</span>
+        </div>
+        <ul class="cx-list">
+          {lst.map(c => (
+            <li class:list={['cx-item', c._explained ? 'explained' : 'planned']}>
+              <a href={`/concepts/${c.slug}/`}>
+                <span class="cx-item-name">{c.data.canonical_name}</span>
+                {c._explained && <span class="cx-item-dot" aria-hidden="true"></span>}
+                <span class="cx-item-count">{c.data.occurrence_count}</span>
+              </a>
+            </li>
+          ))}
+        </ul>
+      </section>
+    ))}
+  </div>
 </Base>
 
 <style>
-  h2 { margin-top: 2rem; }
-  .count { color: #888; font-size: 0.9em; margin-left: 0.3rem; }
+  .cx-page { max-width: 1080px; margin-inline: auto; }
+  .cx-header { margin-bottom: 2.8rem; }
+  .cx-eyebrow {
+    font-size: 0.82em; text-transform: uppercase; letter-spacing: 0.18em;
+    color: var(--accent); font-weight: 600; margin-bottom: 0.5rem;
+  }
+  .cx-title {
+    font-family: var(--font-serif); font-size: 3em; font-weight: 700;
+    margin: 0.1rem 0 0.6rem; letter-spacing: -0.02em;
+  }
+  .cx-stats { color: var(--text-muted); font-size: 1.0em; margin: 0.2rem 0; }
+  .cx-stats strong { color: var(--accent); font-weight: 700; }
+  .cx-help { color: var(--text-faint); font-size: 0.95em; margin: 0.4rem 0 0; }
+
+  .cx-section-title {
+    font-family: var(--font-serif); font-size: 1.3em; font-weight: 600;
+    margin: 0 0 1rem; color: var(--text);
+    padding-bottom: 0.4rem;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .cx-featured { margin-bottom: 3rem; }
+  .cx-featured-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: 1rem;
+  }
+  .cx-card {
+    display: block;
+    padding: 1.1rem 1.2rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    text-decoration: none;
+    color: inherit;
+    box-shadow: var(--shadow-sm);
+    transition: border-color 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
+    position: relative;
+    border-top: 3px solid var(--module-accent, var(--accent));
+  }
+  .cx-card:hover {
+    border-color: var(--module-accent, var(--accent));
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-md);
+  }
+  .cx-card-badge {
+    position: absolute; top: 0.6rem; right: 0.8rem;
+    font-size: 0.65em; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.06em;
+    color: var(--module-accent, var(--accent));
+    background: var(--module-accent-soft, var(--accent-soft));
+    padding: 0.15em 0.45em;
+    border-radius: 3px;
+  }
+  .cx-card-title {
+    font-family: var(--font-serif); font-size: 1.2em; font-weight: 600;
+    margin: 0 0 0.4rem; color: var(--text); line-height: 1.3;
+    padding-right: 4rem;
+  }
+  .cx-card-desc {
+    color: var(--text-muted); font-size: 0.9em; margin: 0;
+    line-height: 1.5;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .cx-card-module {
+    display: inline-block; margin-top: 0.6rem;
+    font-size: 0.72em; color: var(--text-faint);
+    text-transform: uppercase; letter-spacing: 0.08em;
+  }
+
+  .cx-module { margin-block: 2.5rem; }
+  .cx-module-header {
+    display: flex; align-items: baseline; gap: 0.8rem;
+    padding-bottom: 0.7rem;
+    border-bottom: 2px solid var(--module-accent, var(--text-faint));
+    margin-bottom: 0.8rem;
+  }
+  .cx-module-num {
+    font-family: var(--font-mono); font-size: 0.78em;
+    color: var(--module-accent, var(--text-faint));
+    text-transform: uppercase; letter-spacing: 0.1em; font-weight: 600;
+  }
+  .cx-module-title {
+    font-family: var(--font-serif); font-size: 1.3em; font-weight: 600;
+    margin: 0; color: var(--text); flex: 1;
+  }
+  .cx-module-count {
+    color: var(--text-faint); font-size: 0.85em;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .cx-list {
+    list-style: none; padding: 0; margin: 0;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 0.1rem 1rem;
+  }
+  .cx-item a {
+    display: flex; align-items: center; gap: 0.4rem;
+    padding: 0.4rem 0.2rem;
+    color: var(--text); text-decoration: none;
+    border-bottom: 1px dashed transparent;
+    transition: color 0.15s ease, border-color 0.15s ease;
+  }
+  .cx-item a:hover {
+    color: var(--module-accent, var(--accent));
+    border-bottom-color: var(--module-accent, var(--accent));
+  }
+  .cx-item-name { flex: 1; font-size: 0.95em; }
+  .cx-item-dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--module-accent, var(--accent));
+    flex-shrink: 0;
+  }
+  .cx-item-count {
+    color: var(--text-faint); font-size: 0.8em;
+    font-variant-numeric: tabular-nums;
+  }
+  .cx-item.planned a { color: var(--text-muted); }
+
+  @media (max-width: 700px) {
+    .cx-title { font-size: 2.2em; }
+    .cx-featured-grid { grid-template-columns: 1fr; }
+    .cx-list { grid-template-columns: 1fr; }
+  }
 </style>

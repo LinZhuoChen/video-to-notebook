@@ -5,10 +5,60 @@ import { getCollection } from 'astro:content';
 
 export async function getStaticPaths() {
   const concepts = await getCollection('concept');
-  return concepts.map(c => ({ params: { slug: c.slug }, props: { concept: c } }));
+
+  let manifest: any = { explainers: [] };
+  try {
+    const data = await import('../../../content/concept-explainers/manifest.json');
+    manifest = data.default || data;
+  } catch (e) {}
+  const bySlug = new Map<string, any>(
+    (manifest.explainers || []).map((e: any) => [e.slug, e]),
+  );
+
+  const fragments = import.meta.glob('../../../content/concept-explainers/*.html', {
+    query: '?raw', import: 'default', eager: true,
+  });
+
+  let curriculum: any = { chapters: [] };
+  try {
+    const data = await import('../../../content/textbook/curriculum.json');
+    curriculum = data.default || data;
+  } catch (e) {}
+  const moduleOrder: string[] = [];
+  const slugToModule = new Map<string, string>();
+  for (const ch of curriculum.chapters || []) {
+    if (!moduleOrder.includes(ch.module)) moduleOrder.push(ch.module);
+    slugToModule.set(ch.primary_concept_slug, ch.module);
+    for (const s of ch.related_concept_slugs || []) {
+      if (!slugToModule.has(s)) slugToModule.set(s, ch.module);
+    }
+  }
+  const mIdx = (slug: string) => {
+    const mod = slugToModule.get(slug);
+    return mod ? ((moduleOrder.indexOf(mod) % 5) + 1) : 1;
+  };
+
+  return concepts.map(c => {
+    const meta = bySlug.get(c.slug);
+    let html = '';
+    if (meta) {
+      const fragKey = `../../../content/concept-explainers/${meta.html_fragment}`;
+      html = (fragments[fragKey] as string) || '';
+    }
+    return {
+      params: { slug: c.slug },
+      props: {
+        concept: c,
+        html,
+        explained: !!meta,
+        module: slugToModule.get(c.slug) || null,
+        mIdx: mIdx(c.slug),
+      },
+    };
+  });
 }
 
-const { concept } = Astro.props;
+const { concept, html, explained, module, mIdx } = Astro.props;
 const lectures = await getCollection('lecture');
 
 const occurrences = lectures.flatMap(l =>
@@ -28,32 +78,262 @@ const occurrences = lectures.flatMap(l =>
 const courseSlugsForCompare = Array.from(new Set(occurrences.map(o => o.course_slug)));
 ---
 <Base title={concept.data.canonical_name}>
-  <h1>{concept.data.canonical_name}</h1>
-  {concept.data.description && <p>{concept.data.description}</p>}
-  <p class="meta">
-    <code>{concept.slug}</code> ·
-    source: {concept.data.ontology_source} ·
-    {occurrences.length} occurrence{occurrences.length === 1 ? '' : 's'}
-    {concept.data.aliases.length > 0 && (
-      <> · aliases: {concept.data.aliases.map(a => <code>{a}</code>).join(', ')}</>
+  <div class="cd-page" data-module-idx={mIdx}>
+    <nav class="cd-breadcrumb" aria-label="面包屑">
+      <a href="/concepts/">概念百科</a>
+      <span class="cd-sep">›</span>
+      {module && <><span class="cd-module-name">{module}</span><span class="cd-sep">›</span></>}
+      <span class="cd-here">{concept.data.canonical_name}</span>
+    </nav>
+
+    {explained && html ? (
+      <article class="cd-rich">
+        <Fragment set:html={html} />
+      </article>
+    ) : (
+      <section class="cd-stub">
+        <header class="concept-header">
+          <span class="concept-eyebrow">概念</span>
+          <h1>{concept.data.canonical_name}</h1>
+          {concept.data.description && <p class="concept-tagline">{concept.data.description}</p>}
+        </header>
+        <div class="cd-pending">
+          <p>这个概念暂时还没有详细解释。我们正在编写图文教程，包括：</p>
+          <ul>
+            <li>📐 直觉与定义（生活类比 + 形式化表达）</li>
+            <li>🎨 SVG 图示 + 动画演示</li>
+            <li>🧮 手算示例</li>
+            <li>⚠️ 常见误区</li>
+            <li>🔗 相关概念交叉链接</li>
+          </ul>
+          <p class="cd-pending-help">
+            CLI 生成命令：<br/>
+            <code>course-merger explain --concept {concept.slug} --print-prompts</code>
+          </p>
+        </div>
+      </section>
     )}
-  </p>
 
-  {courseSlugsForCompare.length > 1 && (
-    <p>
-      <a class="compare-link" href={`/concepts/${concept.slug}/compare/?courses=${courseSlugsForCompare.join(',')}`}>
-        Compare across {courseSlugsForCompare.length} courses →
-      </a>
-    </p>
-  )}
+    {(concept.data.aliases.length > 0 || courseSlugsForCompare.length > 0) && (
+      <aside class="cd-meta">
+        <dl>
+          <dt>概念 slug</dt>
+          <dd><code>{concept.slug}</code></dd>
+          <dt>来源</dt>
+          <dd>{concept.data.ontology_source}</dd>
+          {concept.data.aliases.length > 0 && (
+            <>
+              <dt>别名</dt>
+              <dd>{concept.data.aliases.map((a: string) => <code>{a}</code>).join(', ')}</dd>
+            </>
+          )}
+          <dt>出现次数</dt>
+          <dd>{occurrences.length}</dd>
+        </dl>
+        {courseSlugsForCompare.length > 1 && (
+          <a class="cd-compare" href={`/concepts/${concept.slug}/compare/?courses=${courseSlugsForCompare.join(',')}`}>
+            跨课程对比 ({courseSlugsForCompare.length} 门) →
+          </a>
+        )}
+      </aside>
+    )}
 
-  <ConceptOccurrenceTable occurrences={occurrences} />
+    {occurrences.length > 0 && (
+      <details class="cd-sources">
+        <summary>查看 {occurrences.length} 条课程原文出处</summary>
+        <ConceptOccurrenceTable occurrences={occurrences} />
+      </details>
+    )}
+  </div>
 </Base>
 
-<style>
-  .meta { color: #666; font-size: 0.9em; }
-  .compare-link {
-    display: inline-block; padding: 0.5rem 1rem; background: #0b5; color: #fff;
-    text-decoration: none; border-radius: 4px; font-weight: 500;
+<style is:global>
+  /* Styles for the LLM-emitted explainer HTML.
+     The fragment uses these class names so it can be authored once and styled here. */
+
+  .cd-rich .concept-header {
+    margin: 0 0 2rem;
+    padding-bottom: 1.3rem;
+    border-bottom: 1px solid var(--border);
   }
+  .cd-rich .concept-eyebrow {
+    display: inline-block;
+    font-size: 0.78em; text-transform: uppercase; letter-spacing: 0.16em;
+    color: var(--module-accent, var(--accent));
+    font-weight: 600; margin-bottom: 0.5rem;
+  }
+  .cd-rich h1 {
+    font-family: var(--font-serif); font-size: 2.8em;
+    line-height: 1.1; letter-spacing: -0.02em;
+    margin: 0.2rem 0 0.6rem;
+  }
+  .cd-rich .concept-tagline {
+    font-family: var(--font-serif); font-style: italic;
+    font-size: 1.2em; color: var(--text-muted);
+    margin: 0; line-height: 1.5;
+  }
+
+  .cd-rich section { margin-block: 2.2rem; }
+  .cd-rich section > h2 {
+    font-family: var(--font-serif); font-size: 1.45em; font-weight: 600;
+    margin: 0 0 0.6rem;
+    color: var(--text);
+    border-left: 3px solid var(--module-accent, var(--accent));
+    padding-left: 0.7rem;
+  }
+  .cd-rich p { line-height: 1.85; margin: 0.7rem 0; }
+  .cd-rich svg { max-width: 100%; height: auto; display: block; margin: 1.2rem auto; }
+
+  .cd-rich .concept-intuition {
+    background: var(--module-accent-soft, var(--accent-soft));
+    border-radius: var(--radius-lg);
+    padding: 1.3rem 1.5rem;
+  }
+  .cd-rich .concept-intuition p:first-child { margin-top: 0; }
+  .cd-rich .concept-intuition p:last-child { margin-bottom: 0; }
+
+  .cd-rich .concept-example {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 1.3rem 1.5rem;
+    box-shadow: var(--shadow-sm);
+  }
+  .cd-rich .concept-pitfalls ul,
+  .cd-rich .concept-pitfalls ol {
+    padding-left: 1.4rem;
+  }
+  .cd-rich .concept-pitfalls li {
+    margin-block: 0.5rem;
+    line-height: 1.7;
+  }
+  .cd-rich .concept-pitfalls li::marker {
+    color: var(--red, #b91c1c);
+  }
+
+  .cd-rich .concept-seealso ul {
+    list-style: none; padding: 0; margin: 0;
+    display: flex; flex-wrap: wrap; gap: 0.6rem;
+  }
+  .cd-rich .concept-seealso li a {
+    display: inline-block;
+    padding: 0.35em 0.8em;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    color: var(--text);
+    text-decoration: none;
+    font-size: 0.92em;
+    transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
+  }
+  .cd-rich .concept-seealso li a:hover {
+    border-color: var(--module-accent, var(--accent));
+    color: var(--module-accent, var(--accent));
+    background: var(--module-accent-soft, var(--accent-soft));
+  }
+
+  .cd-rich .concept-sources {
+    border-top: 1px solid var(--border);
+    padding-top: 1.2rem;
+    font-size: 0.92em;
+  }
+  .cd-rich .concept-sources ul { list-style: none; padding: 0; margin: 0; }
+  .cd-rich .concept-sources li { margin-block: 0.4rem; }
+  .cd-rich .concept-sources a { color: var(--text-muted); }
+  .cd-rich .concept-sources a:hover { color: var(--module-accent, var(--accent)); }
+</style>
+
+<style>
+  .cd-page { max-width: 820px; margin-inline: auto; }
+
+  .cd-breadcrumb {
+    font-size: 0.85em;
+    color: var(--text-muted);
+    margin-bottom: 1.5rem;
+  }
+  .cd-breadcrumb a { color: var(--module-accent, var(--accent)); text-decoration: none; }
+  .cd-breadcrumb a:hover { text-decoration: underline; }
+  .cd-sep { margin: 0 0.4em; color: var(--text-faint); }
+  .cd-module-name { color: var(--text-muted); }
+  .cd-here { color: var(--text); font-weight: 500; }
+
+  .cd-rich { font-size: 1.04em; }
+
+  .cd-stub .concept-header {
+    margin: 0 0 1.5rem;
+    padding-bottom: 1rem;
+    border-bottom: 1px solid var(--border);
+  }
+  .cd-stub .concept-eyebrow {
+    display: inline-block;
+    font-size: 0.78em; text-transform: uppercase; letter-spacing: 0.16em;
+    color: var(--text-faint); font-weight: 600;
+  }
+  .cd-stub h1 {
+    font-family: var(--font-serif); font-size: 2.4em;
+    line-height: 1.1; margin: 0.2rem 0 0.4rem;
+  }
+  .cd-stub .concept-tagline {
+    color: var(--text-muted); font-family: var(--font-serif);
+    font-style: italic; font-size: 1.1em; margin: 0;
+  }
+  .cd-pending {
+    background: var(--surface);
+    border: 1px dashed var(--border-strong);
+    border-radius: var(--radius-lg);
+    padding: 1.5rem;
+    color: var(--text-muted);
+  }
+  .cd-pending ul { padding-left: 1.4rem; }
+  .cd-pending-help { font-size: 0.9em; color: var(--text-faint); }
+  .cd-pending-help code {
+    display: inline-block;
+    background: var(--surface-soft);
+    padding: 0.3em 0.6em;
+    border-radius: 4px;
+    font-size: 0.92em;
+    margin-top: 0.4rem;
+  }
+
+  .cd-meta {
+    margin-top: 2.5rem;
+    padding: 1.3rem 1.5rem;
+    background: var(--surface-soft);
+    border-radius: var(--radius-lg);
+    font-size: 0.92em;
+  }
+  .cd-meta dl {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 0.4rem 1.2rem;
+    margin: 0;
+  }
+  .cd-meta dt {
+    color: var(--text-faint);
+    font-size: 0.85em;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+  .cd-meta dd { margin: 0; color: var(--text); }
+  .cd-compare {
+    display: inline-block;
+    margin-top: 1rem;
+    color: var(--module-accent, var(--accent));
+    text-decoration: none;
+    font-weight: 500;
+  }
+  .cd-compare:hover { text-decoration: underline; }
+
+  .cd-sources {
+    margin-top: 2.5rem;
+    border-top: 1px solid var(--border);
+    padding-top: 1.5rem;
+  }
+  .cd-sources summary {
+    cursor: pointer;
+    font-weight: 500;
+    color: var(--text-muted);
+    padding: 0.5rem 0;
+    user-select: none;
+  }
+  .cd-sources summary:hover { color: var(--module-accent, var(--accent)); }
 </style>

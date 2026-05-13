@@ -15,6 +15,7 @@ from course_merger.build.queries import (
 )
 from course_merger.build.template_copy import ensure_site_dir
 from course_merger.build.textbook_writer import write_textbook_assets
+from course_merger.build.concept_writer import write_concept_explainer_assets
 from course_merger.build.writers import (
     write_concept_md,
     write_course_md,
@@ -98,6 +99,7 @@ def run_build(
 
     state_dir = project_root / ".course-merger"
     write_textbook_assets(db_path=db_path, state_dir=state_dir, site_dir=site_dir)
+    write_concept_explainer_assets(db_path=db_path, state_dir=state_dir, site_dir=site_dir)
 
     npm_code: int | None = None
     if npm_build:

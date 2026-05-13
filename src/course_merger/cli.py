@@ -27,6 +27,10 @@ from course_merger.synthesize.prompt_io import (
     apply_synthesize_results,
     collect_synthesize_prompts,
 )
+from course_merger.explain.prompt_io import (
+    apply_explain_results,
+    collect_explain_prompts,
+)
 from course_merger.cluster.runner import run_cluster
 from course_merger.config import CONFIG_FILENAME, PROJECT_MARKER, ProjectNotInitializedError, find_project_root
 from course_merger.crawl.bilibili import BilibiliCrawler
@@ -505,6 +509,60 @@ def synthesize_cmd(
     envelope = collect_synthesize_prompts(
         db_path=db_path, chapter_order_idx=chapter,
         max_source_chunks=max_source_chunks,
+    )
+    sys.stdout.write(json.dumps(envelope, ensure_ascii=False, indent=2))
+    sys.stdout.write("\n")
+
+
+@app.command("explain")
+def explain_cmd(
+    concept: str = typer.Option(
+        ..., "--concept", help="The concept slug to explain (e.g. 'gradient-descent').",
+    ),
+    print_prompts: bool = typer.Option(
+        False, "--print-prompts",
+        help="Emit concept + occurrences + related as JSON envelope.",
+    ),
+    apply_results: Path | None = typer.Option(
+        None, "--apply-results",
+        help="Read explain_results JSON and copy the HTML fragment into state.",
+    ),
+    max_source_chunks: int = typer.Option(
+        12, "--max-chunks", help="Cap source chunks for the concept envelope.",
+    ),
+    max_related: int = typer.Option(
+        6, "--max-related", help="Cap related concepts surfaced in the envelope.",
+    ),
+) -> None:
+    """Generate a rich illustrated explanation for ONE concept (in-session mode)."""
+    try:
+        root = find_project_root(Path.cwd())
+    except ProjectNotInitializedError as e:
+        typer.echo(f"error: {e}")
+        raise typer.Exit(code=1)
+
+    if print_prompts and apply_results is not None:
+        typer.echo("error: --print-prompts and --apply-results are mutually exclusive")
+        raise typer.Exit(code=1)
+
+    db_path = root / PROJECT_MARKER / "db.sqlite"
+    state_dir = root / PROJECT_MARKER
+
+    if apply_results is not None:
+        with apply_results.open("r", encoding="utf-8") as fh:
+            results = json.load(fh)
+        dst = apply_explain_results(
+            db_path=db_path, state_dir=state_dir, results=results,
+        )
+        typer.echo(
+            f"done: explained concept '{results['concept_slug']}' → "
+            f"{state_dir / 'concepts' / dst}"
+        )
+        return
+
+    envelope = collect_explain_prompts(
+        db_path=db_path, concept_slug=concept,
+        max_source_chunks=max_source_chunks, max_related=max_related,
     )
     sys.stdout.write(json.dumps(envelope, ensure_ascii=False, indent=2))
     sys.stdout.write("\n")
