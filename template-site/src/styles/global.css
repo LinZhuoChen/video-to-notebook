@@ -1,15 +1,283 @@
-*, *::before, *::after { box-sizing: border-box; }
-html { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; line-height: 1.5; }
-body { margin: 0; max-width: 960px; margin-inline: auto; padding: 1rem; color: #111; background: #fff; }
-header { display: flex; justify-content: space-between; align-items: center; padding-block: 1rem; border-bottom: 1px solid #eee; }
-header nav a { margin-right: 1rem; text-decoration: none; color: #0b5; font-weight: 500; }
-header nav a:hover { text-decoration: underline; }
-#pagefind-search { padding: 0.4rem 0.8rem; border: 1px solid #ccc; border-radius: 4px; min-width: 200px; }
-footer { margin-top: 4rem; padding-block: 1rem; border-top: 1px solid #eee; color: #888; text-align: center; }
-main { padding-block: 2rem; }
-h1 { margin-top: 0; }
-a { color: #0b5; }
-table { border-collapse: collapse; width: 100%; }
-th, td { padding: 0.5rem 0.8rem; border-bottom: 1px solid #eee; text-align: left; }
-th { background: #fafafa; font-weight: 600; }
-code { background: #f4f4f4; padding: 0.1em 0.3em; border-radius: 3px; font-size: 0.95em; }
+/* ============================================================
+   Design system tokens
+   ============================================================ */
+:root {
+  /* Surfaces */
+  --bg: #faf9f6;          /* warm cream */
+  --surface: #ffffff;
+  --surface-soft: #f4f3ee;
+
+  /* Ink */
+  --text: #1f1f1f;
+  --text-muted: #6b6b6b;
+  --text-faint: #a09e95;
+
+  /* Lines */
+  --border: #e8e5db;
+  --border-strong: #d4d2c8;
+
+  /* Accent: deeper, more sophisticated green */
+  --accent: #0a6e3a;
+  --accent-hover: #084d27;
+  --accent-soft: #e8f3eb;
+
+  /* Warmth + warning */
+  --amber: #b8860b;
+  --amber-soft: #fdf6e3;
+  --red: #b91c1c;
+  --red-soft: #fef2f2;
+  --blue: #1d4ed8;
+  --blue-soft: #eff6ff;
+
+  /* Type */
+  --font-serif: "Source Serif Pro", "Iowan Old Style", "Apple Garamond",
+                Georgia, "PingFang SC", "Noto Serif SC", "Microsoft YaHei", serif;
+  --font-sans:  "Inter", -apple-system, BlinkMacSystemFont,
+                "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  --font-mono:  "JetBrains Mono", "SF Mono", "Menlo", "Consolas", monospace;
+
+  /* Elevation */
+  --shadow-sm: 0 1px 2px rgba(15, 15, 15, 0.04);
+  --shadow-md: 0 4px 14px rgba(15, 15, 15, 0.06);
+  --shadow-lg: 0 14px 38px rgba(15, 15, 15, 0.09);
+
+  --radius: 6px;
+  --radius-lg: 12px;
+}
+
+/* ============================================================
+   Reset + base
+   ============================================================ */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html {
+  font-family: var(--font-sans);
+  font-size: 17px;
+  line-height: 1.7;
+  color: var(--text);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  max-width: 1180px;
+  margin-inline: auto;
+  padding: 1.5rem 2rem 6rem;
+}
+
+/* ============================================================
+   Header / nav
+   ============================================================ */
+body > header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-block: 1.6rem;
+  margin-bottom: 1rem;
+  border-bottom: 1px solid var(--border);
+}
+body > header nav { display: flex; gap: 1.75rem; }
+body > header nav a {
+  color: var(--text);
+  text-decoration: none;
+  font-weight: 500;
+  font-size: 0.96em;
+  position: relative;
+  padding-block: 0.2rem;
+  transition: color 0.15s ease;
+}
+body > header nav a:hover { color: var(--accent); }
+body > header nav a::after {
+  content: '';
+  position: absolute;
+  left: 0; right: 0; bottom: -3px;
+  height: 2px;
+  background: var(--accent);
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform 0.2s ease;
+}
+body > header nav a:hover::after { transform: scaleX(1); }
+
+#pagefind-search {
+  padding: 0.55rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  min-width: 240px;
+  font-size: 0.94em;
+  background: var(--surface);
+  color: var(--text);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  font-family: inherit;
+}
+#pagefind-search:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+/* ============================================================
+   Main + footer
+   ============================================================ */
+main { padding-block: 1.5rem; }
+
+footer {
+  margin-top: 6rem;
+  padding-block: 2rem;
+  border-top: 1px solid var(--border);
+  color: var(--text-faint);
+  text-align: center;
+  font-size: 0.88em;
+}
+
+/* ============================================================
+   Headings
+   ============================================================ */
+h1 {
+  font-family: var(--font-serif);
+  font-size: 2.5em;
+  font-weight: 700;
+  line-height: 1.15;
+  letter-spacing: -0.01em;
+  margin-block: 0.4em 0.6em;
+}
+
+h2 {
+  font-family: var(--font-serif);
+  font-size: 1.8em;
+  font-weight: 600;
+  line-height: 1.25;
+  letter-spacing: -0.003em;
+  margin-block: 2.6rem 0.8rem;
+}
+
+h3 {
+  font-size: 1.2em;
+  font-weight: 600;
+  margin-block: 1.6rem 0.5rem;
+}
+
+h4 {
+  font-size: 0.85em;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  margin-block: 1.4rem 0.6rem;
+}
+
+/* ============================================================
+   Inline elements
+   ============================================================ */
+strong { font-weight: 600; color: var(--text); }
+em { font-style: italic; }
+
+a {
+  color: var(--accent);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+  transition: color 0.15s ease;
+}
+a:hover { color: var(--accent-hover); }
+
+p { margin: 0.85rem 0; }
+
+/* ============================================================
+   Code
+   ============================================================ */
+code {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  background: var(--accent-soft);
+  padding: 0.12em 0.42em;
+  border-radius: 4px;
+  color: var(--accent-hover);
+}
+pre {
+  background: #1f2024;
+  color: #e8e8e3;
+  padding: 1.1rem 1.5rem;
+  border-radius: var(--radius);
+  overflow-x: auto;
+  margin: 1.6rem 0;
+  box-shadow: var(--shadow-sm);
+  line-height: 1.6;
+}
+pre code { background: none; color: inherit; padding: 0; font-size: 0.86em; }
+
+/* ============================================================
+   Tables
+   ============================================================ */
+table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 1.8rem 0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  box-shadow: var(--shadow-sm);
+  font-size: 0.95em;
+}
+th, td {
+  padding: 0.7rem 1rem;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  vertical-align: top;
+}
+th {
+  background: var(--surface-soft);
+  font-weight: 600;
+  font-size: 0.88em;
+  letter-spacing: 0.01em;
+}
+tr:last-child td { border-bottom: 0; }
+
+/* ============================================================
+   Lists
+   ============================================================ */
+ul, ol { padding-left: 1.5em; margin: 0.7rem 0; }
+li { margin: 0.35rem 0; }
+li > p { margin: 0.4rem 0; }
+
+/* ============================================================
+   Article reading width
+   ============================================================ */
+article {
+  max-width: 720px;
+  margin-inline: auto;
+  font-size: 1.04em;
+}
+article p, article li { line-height: 1.85; }
+
+/* First-paragraph drop cap (subtle, only for article body) */
+article > p:first-of-type::first-letter {
+  font-family: var(--font-serif);
+  font-size: 3.4em;
+  font-weight: 700;
+  float: left;
+  line-height: 0.95;
+  margin: 0.05em 0.1em 0 0;
+  color: var(--accent);
+}
+
+/* ============================================================
+   Selection color
+   ============================================================ */
+::selection { background: var(--accent-soft); color: var(--accent-hover); }
+
+/* ============================================================
+   Responsive
+   ============================================================ */
+@media (max-width: 900px) {
+  body { padding: 1rem 1.2rem 4rem; }
+  body > header { flex-direction: column; align-items: stretch; gap: 1rem; }
+  body > header nav { justify-content: center; flex-wrap: wrap; }
+  h1 { font-size: 2em; }
+  h2 { font-size: 1.5em; }
+  article { font-size: 1.0em; }
+  article > p:first-of-type::first-letter { font-size: 2.6em; }
+}

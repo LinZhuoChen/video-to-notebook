@@ -11,30 +11,73 @@ const { prev, next } = Astro.props;
 ---
 <nav class="chapter-nav">
   {prev ? (
-    <a class="prev" href={`/textbook/${prev.order_idx}/`}>
-      <span class="dir">← 上一章</span>
-      <span class="title">{prev.title}</span>
+    <a class="ch-nav-card prev" href={`/textbook/${prev.order_idx}/`}>
+      <span class="ch-nav-dir">← 上一章</span>
+      <span class="ch-nav-num">第 {prev.order_idx} 章</span>
+      <span class="ch-nav-title">{prev.title}</span>
     </a>
-  ) : <span></span>}
+  ) : <span class="ch-nav-placeholder"></span>}
   {next ? (
-    <a class="next" href={`/textbook/${next.order_idx}/`}>
-      <span class="dir">下一章 →</span>
-      <span class="title">{next.title}</span>
+    <a class="ch-nav-card next" href={`/textbook/${next.order_idx}/`}>
+      <span class="ch-nav-dir">下一章 →</span>
+      <span class="ch-nav-num">第 {next.order_idx} 章</span>
+      <span class="ch-nav-title">{next.title}</span>
     </a>
-  ) : <span></span>}
+  ) : <span class="ch-nav-placeholder"></span>}
 </nav>
 
 <style>
   .chapter-nav {
-    display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;
-    margin-top: 4rem; padding-top: 1.5rem; border-top: 1px solid #eee;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+    margin-top: 5rem;
+    max-width: 720px;
+    margin-inline: auto;
   }
-  .chapter-nav a {
-    display: block; padding: 1rem; border: 1px solid #eee; border-radius: 6px;
-    text-decoration: none; color: inherit;
+  .ch-nav-card {
+    display: block;
+    padding: 1.2rem 1.4rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    text-decoration: none;
+    color: inherit;
+    transition: border-color 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
+    box-shadow: var(--shadow-sm);
   }
-  .chapter-nav a:hover { background: #fafafa; border-color: #0b5; }
-  .chapter-nav .next { text-align: right; }
-  .chapter-nav .dir { display: block; font-size: 0.8em; color: #888; }
-  .chapter-nav .title { display: block; font-weight: 600; color: #0a4; }
+  .ch-nav-card:hover {
+    border-color: var(--accent);
+    transform: translateY(-1px);
+    box-shadow: var(--shadow-md);
+  }
+  .ch-nav-card.next { text-align: right; }
+  .ch-nav-dir {
+    display: block;
+    font-size: 0.78em;
+    color: var(--accent);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+  .ch-nav-num {
+    display: block;
+    font-size: 0.78em;
+    color: var(--text-faint);
+    margin-block: 0.3rem 0.1rem;
+  }
+  .ch-nav-title {
+    display: block;
+    font-family: var(--font-serif);
+    font-weight: 600;
+    color: var(--text);
+    font-size: 1.05em;
+    line-height: 1.3;
+  }
+  .ch-nav-placeholder { display: block; }
+
+  @media (max-width: 700px) {
+    .chapter-nav { grid-template-columns: 1fr; }
+    .ch-nav-card.next { text-align: left; }
+  }
 </style>

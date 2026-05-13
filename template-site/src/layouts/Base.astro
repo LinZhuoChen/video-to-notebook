@@ -7,21 +7,25 @@ interface Props {
 const { title } = Astro.props;
 ---
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
   <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
   <title>{title} · course-merger</title>
+  <link rel="preconnect" href="https://rsms.me/" />
+  <link rel="stylesheet" href="https://rsms.me/inter/inter.css" />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Source+Serif+Pro:wght@400;600;700&display=swap" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.10/dist/katex.min.css">
 </head>
 <body>
   <header>
     <nav>
-      <a href="/">Home</a>
-      <a href="/courses/">Courses</a>
-      <a href="/concepts/">Concepts</a>
-      <a href="/about/">About</a>
+      <a href="/">首页</a>
+      <a href="/textbook/">教材</a>
+      <a href="/courses/">课程</a>
+      <a href="/concepts/">概念</a>
+      <a href="/about/">关于</a>
     </nav>
     <div id="pagefind-search"></div>
   </header>

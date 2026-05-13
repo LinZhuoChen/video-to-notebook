@@ -28,32 +28,107 @@ export async function getStaticPaths() {
 const { chapter, html, prev, next } = Astro.props;
 ---
 <Base title={chapter.title}>
+  <div class="reading-progress"><div class="reading-progress-bar" id="reading-bar"></div></div>
   <div class="textbook-layout">
     <TextbookNav current={chapter.order_idx} />
     <div class="chapter-content">
       <div class="chapter-header">
-        <div class="module-label">{chapter.module}</div>
-        <h1>第 {chapter.order_idx} 章 · {chapter.title}</h1>
-        <p class="blurb">{chapter.blurb}</p>
+        <div class="chapter-meta">
+          <span class="chapter-num">第 {chapter.order_idx} 章</span>
+          <span class="chapter-dot">·</span>
+          <span class="module-label">{chapter.module}</span>
+        </div>
+        <h1 class="chapter-title">{chapter.title}</h1>
+        <p class="chapter-blurb">{chapter.blurb}</p>
+        <hr class="chapter-rule" />
       </div>
       <Fragment set:html={html} />
       <ChapterNav prev={prev} next={next} />
     </div>
   </div>
+
+  <script>
+    const bar = document.getElementById("reading-bar");
+    if (bar) {
+      const update = () => {
+        const h = document.documentElement;
+        const ratio = h.scrollTop / Math.max(1, h.scrollHeight - h.clientHeight);
+        bar.style.transform = `scaleX(${Math.min(1, Math.max(0, ratio))})`;
+      };
+      update();
+      window.addEventListener("scroll", update, { passive: true });
+      window.addEventListener("resize", update);
+    }
+  </script>
 </Base>
 
 <style>
+  .reading-progress {
+    position: fixed; top: 0; left: 0; right: 0;
+    height: 3px;
+    background: transparent;
+    z-index: 100;
+    pointer-events: none;
+  }
+  .reading-progress-bar {
+    height: 100%;
+    background: var(--accent);
+    transform: scaleX(0);
+    transform-origin: left;
+    transition: transform 0.1s ease-out;
+  }
+
   .textbook-layout {
     display: grid;
-    grid-template-columns: 220px 1fr;
-    gap: 2rem;
-    margin-top: 1rem;
+    grid-template-columns: 260px 1fr;
+    gap: 3rem;
+    margin-top: 1.5rem;
+    align-items: start;
   }
-  @media (max-width: 800px) {
-    .textbook-layout { grid-template-columns: 1fr; }
+  @media (max-width: 900px) {
+    .textbook-layout { grid-template-columns: 1fr; gap: 1.5rem; }
   }
-  .chapter-header { margin-bottom: 2rem; }
-  .module-label { font-size: 0.85em; color: #888; text-transform: uppercase; letter-spacing: 0.05em; }
-  .chapter-header h1 { margin: 0.3rem 0; font-size: 2em; }
-  .chapter-header .blurb { color: #555; font-size: 1.05em; }
+
+  .chapter-content { min-width: 0; }
+  .chapter-header { margin-bottom: 2.5rem; max-width: 720px; margin-inline: auto; }
+  .chapter-meta {
+    font-size: 0.82em;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    margin-bottom: 0.6rem;
+  }
+  .chapter-num { color: var(--accent); font-weight: 600; }
+  .chapter-dot { margin: 0 0.55rem; color: var(--text-faint); }
+  .module-label { color: var(--text-muted); }
+
+  .chapter-title {
+    font-family: var(--font-serif);
+    font-size: 2.8em;
+    line-height: 1.15;
+    margin: 0.3rem 0 0.8rem;
+    color: var(--text);
+    letter-spacing: -0.015em;
+  }
+
+  .chapter-blurb {
+    color: var(--text-muted);
+    font-size: 1.15em;
+    font-style: italic;
+    font-family: var(--font-serif);
+    margin-block: 0.5rem 1.5rem;
+    line-height: 1.55;
+  }
+
+  .chapter-rule {
+    border: 0;
+    height: 1px;
+    background: var(--border);
+    margin-block: 1.5rem;
+  }
+
+  @media (max-width: 900px) {
+    .chapter-title { font-size: 2em; }
+    .chapter-blurb { font-size: 1.05em; }
+  }
 </style>
