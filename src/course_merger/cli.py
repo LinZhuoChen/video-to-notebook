@@ -19,6 +19,10 @@ from course_merger.cluster.prompt_io import (
     apply_cluster_results,
     collect_cluster_prompts,
 )
+from course_merger.curriculum.prompt_io import (
+    apply_curriculum_results,
+    collect_curriculum_prompts,
+)
 from course_merger.cluster.runner import run_cluster
 from course_merger.config import CONFIG_FILENAME, PROJECT_MARKER, ProjectNotInitializedError, find_project_root
 from course_merger.crawl.bilibili import BilibiliCrawler
@@ -403,3 +407,49 @@ def serve_cmd() -> None:
 
     typer.echo(f"running: npm run dev (in {site_dir})")
     subprocess.run(["npm", "run", "dev"], cwd=site_dir, check=False)
+
+
+@app.command("curriculum")
+def curriculum_cmd(
+    print_prompts: bool = typer.Option(
+        False, "--print-prompts",
+        help="Emit concepts + sample chunks as JSON envelope (in-session mode).",
+    ),
+    apply_results: Path | None = typer.Option(
+        None, "--apply-results",
+        help="Read curriculum_results JSON and write chapters to DB.",
+    ),
+    samples_per_concept: int = typer.Option(
+        5, "--samples", help="Sample chunks per concept in the prompts envelope.",
+    ),
+) -> None:
+    """Design the chapter sequence for the merged textbook.
+
+    Default behavior is print-prompts (the in-session designer flow).
+    Use --apply-results to commit a designer's decisions to the DB.
+    """
+    try:
+        root = find_project_root(Path.cwd())
+    except ProjectNotInitializedError as e:
+        typer.echo(f"error: {e}")
+        raise typer.Exit(code=1)
+
+    if print_prompts and apply_results is not None:
+        typer.echo("error: --print-prompts and --apply-results are mutually exclusive")
+        raise typer.Exit(code=1)
+
+    db_path = root / PROJECT_MARKER / "db.sqlite"
+
+    if apply_results is not None:
+        with apply_results.open("r", encoding="utf-8") as fh:
+            results = json.load(fh)
+        n = apply_curriculum_results(db_path=db_path, results=results)
+        typer.echo(f"done: wrote {n} chapters to curriculum_chapters")
+        return
+
+    # Default = print prompts (the in-session designer path)
+    envelope = collect_curriculum_prompts(
+        db_path=db_path, samples_per_concept=samples_per_concept,
+    )
+    sys.stdout.write(json.dumps(envelope, ensure_ascii=False, indent=2))
+    sys.stdout.write("\n")
