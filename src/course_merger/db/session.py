@@ -53,9 +53,17 @@ def connect(db_path: Path) -> Iterator[sqlite3.Connection]:
     """Open a connection with sane defaults inside a transaction.
 
     Auto-commits on clean exit; rolls back on exception.
+
+    `busy_timeout` is set to 5 minutes so concurrent `course-merger crawl`
+    invocations queue politely instead of failing immediately. A single
+    course's crawl can take ~10 min on a long playlist, but the 5-min
+    window is enough for a parallel crawl to land behind it without errors
+    in the common 2-3-course case. (If a user genuinely wants 10+ courses
+    crawled simultaneously they should serialize them with a wrapper.)
     """
-    conn = sqlite3.connect(db_path, isolation_level=None)
+    conn = sqlite3.connect(db_path, isolation_level=None, timeout=300.0)
     conn.execute("PRAGMA foreign_keys = ON")
+    conn.execute("PRAGMA busy_timeout = 300000")
     conn.execute("BEGIN")
     try:
         yield conn

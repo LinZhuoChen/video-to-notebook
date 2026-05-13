@@ -66,3 +66,12 @@ def test_wal_mode_enabled(tmp_path: Path):
     with connect(db_path) as conn:
         (mode,) = conn.execute("PRAGMA journal_mode").fetchone()
     assert mode == "wal"
+
+
+def test_busy_timeout_at_least_5_minutes(tmp_path: Path):
+    """Concurrent crawls must wait politely, not fail immediately."""
+    db_path = tmp_path / "db.sqlite"
+    init_db(db_path)
+    with connect(db_path) as conn:
+        (timeout_ms,) = conn.execute("PRAGMA busy_timeout").fetchone()
+    assert timeout_ms >= 300_000  # 5 min
