@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import importlib.metadata
+import json
 import shutil
+import sys
 from enum import Enum
 from pathlib import Path
 from urllib.parse import urlparse
@@ -22,6 +24,7 @@ from course_merger.crawl.youtube import YouTubeCrawler
 from course_merger.db.session import init_db
 from course_merger.tag.claude_tagger import ClaudeTagger
 from course_merger.tag.ontology import load_ontology
+from course_merger.tag.prompt_io import apply_tag_results, collect_tag_prompts
 from course_merger.tag.runner import run_tag
 
 app = typer.Typer(
@@ -196,37 +199,66 @@ def tag_cmd(
         ..., "--ontology", help="Path to ontology YAML.", exists=True, dir_okay=False
     ),
     model: str = typer.Option(
-        "claude-haiku-4-5", "--model", help="Claude model id for tagging."
+        "claude-haiku-4-5", "--model", help="Claude model id (API mode only)."
     ),
     course: str | None = typer.Option(
         None, "--course", help="Only tag chunks of this course slug."
     ),
     limit: int | None = typer.Option(
-        None, "--limit", help="Max chunks to process this run (for cost control)."
+        None, "--limit", help="Max chunks to process this run."
+    ),
+    print_prompts: bool = typer.Option(
+        False, "--print-prompts",
+        help="Emit untagged chunks as JSON envelope to stdout (in-session mode).",
+    ),
+    apply_results: Path | None = typer.Option(
+        None, "--apply-results",
+        help="Read tag results JSON from this path and write to DB (in-session mode).",
     ),
 ) -> None:
-    """Assign concept tags to every untagged chunk via Claude Haiku."""
+    """Assign concept tags to chunks. Default mode calls Claude Haiku.
+
+    --print-prompts / --apply-results provide an API-free path for Claude
+    Max subscribers running inside a Claude Code conversation.
+    """
     try:
         root = find_project_root(Path.cwd())
     except ProjectNotInitializedError as e:
         typer.echo(f"error: {e}")
         raise typer.Exit(code=1)
 
+    if print_prompts and apply_results is not None:
+        typer.echo("error: --print-prompts and --apply-results are mutually exclusive")
+        raise typer.Exit(code=1)
+
     onto = load_ontology(ontology)
-
-    client = anthropic.Anthropic()  # picks up ANTHROPIC_API_KEY env
-
-    tagger = ClaudeTagger(client=client, model=model, ontology=onto)
-
     db_path = root / PROJECT_MARKER / "db.sqlite"
-    report = run_tag(
-        db_path=db_path,
-        tagger=tagger,
-        ontology=onto,
-        course_slug=course,
-        limit=limit,
-    )
 
+    if print_prompts:
+        envelope = collect_tag_prompts(
+            db_path=db_path, ontology=onto, course_slug=course, limit=limit,
+        )
+        sys.stdout.write(json.dumps(envelope, ensure_ascii=False, indent=2))
+        sys.stdout.write("\n")
+        return
+
+    if apply_results is not None:
+        with apply_results.open("r", encoding="utf-8") as fh:
+            results = json.load(fh)
+        report = apply_tag_results(db_path=db_path, ontology=onto, results=results)
+        typer.echo(
+            f"done (in-session): {report.chunks_tagged} chunks tagged, "
+            f"{report.tags_known_written} known tags, "
+            f"{report.tags_proposed_written} proposed tags"
+        )
+        return
+
+    client = anthropic.Anthropic()
+    tagger = ClaudeTagger(client=client, model=model, ontology=onto)
+    report = run_tag(
+        db_path=db_path, tagger=tagger, ontology=onto,
+        course_slug=course, limit=limit,
+    )
     typer.echo(
         f"done: {report.chunks_tagged} chunks tagged, "
         f"{report.tags_known_written} known tags, "
