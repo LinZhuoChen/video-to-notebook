@@ -14,6 +14,7 @@ from course_merger.build.queries import (
     lectures_for_course,
 )
 from course_merger.build.template_copy import ensure_site_dir
+from course_merger.build.textbook_writer import write_textbook_assets
 from course_merger.build.writers import (
     write_concept_md,
     write_course_md,
@@ -94,6 +95,9 @@ def run_build(
             occurrences=concept_occurrences(db_path, concept["slug"]),
         )
         (content_dir / "concept" / f"{concept['slug']}.md").write_text(md, encoding="utf-8")
+
+    state_dir = project_root / ".course-merger"
+    write_textbook_assets(db_path=db_path, state_dir=state_dir, site_dir=site_dir)
 
     npm_code: int | None = None
     if npm_build:
