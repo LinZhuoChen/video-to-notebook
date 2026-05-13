@@ -23,6 +23,10 @@ from course_merger.curriculum.prompt_io import (
     apply_curriculum_results,
     collect_curriculum_prompts,
 )
+from course_merger.synthesize.prompt_io import (
+    apply_synthesize_results,
+    collect_synthesize_prompts,
+)
 from course_merger.cluster.runner import run_cluster
 from course_merger.config import CONFIG_FILENAME, PROJECT_MARKER, ProjectNotInitializedError, find_project_root
 from course_merger.crawl.bilibili import BilibiliCrawler
@@ -450,6 +454,57 @@ def curriculum_cmd(
     # Default = print prompts (the in-session designer path)
     envelope = collect_curriculum_prompts(
         db_path=db_path, samples_per_concept=samples_per_concept,
+    )
+    sys.stdout.write(json.dumps(envelope, ensure_ascii=False, indent=2))
+    sys.stdout.write("\n")
+
+
+@app.command("synthesize")
+def synthesize_cmd(
+    chapter: int = typer.Option(
+        ..., "--chapter", help="The order_idx of the chapter to synthesize.",
+    ),
+    print_prompts: bool = typer.Option(
+        False, "--print-prompts",
+        help="Emit chapter spec + source chunks as JSON envelope.",
+    ),
+    apply_results: Path | None = typer.Option(
+        None, "--apply-results",
+        help="Read synthesize_results JSON and copy the HTML fragment into state.",
+    ),
+    max_source_chunks: int = typer.Option(
+        20, "--max-chunks", help="Cap source chunks per chapter to control context size.",
+    ),
+) -> None:
+    """Generate the HTML for one textbook chapter (in-session mode)."""
+    try:
+        root = find_project_root(Path.cwd())
+    except ProjectNotInitializedError as e:
+        typer.echo(f"error: {e}")
+        raise typer.Exit(code=1)
+
+    if print_prompts and apply_results is not None:
+        typer.echo("error: --print-prompts and --apply-results are mutually exclusive")
+        raise typer.Exit(code=1)
+
+    db_path = root / PROJECT_MARKER / "db.sqlite"
+    state_dir = root / PROJECT_MARKER
+
+    if apply_results is not None:
+        with apply_results.open("r", encoding="utf-8") as fh:
+            results = json.load(fh)
+        apply_synthesize_results(
+            db_path=db_path, state_dir=state_dir, results=results,
+        )
+        typer.echo(
+            f"done: synthesized chapter {results['chapter_order_idx']} → "
+            f"{state_dir / 'textbook' / (str(results['chapter_order_idx']) + '.html')}"
+        )
+        return
+
+    envelope = collect_synthesize_prompts(
+        db_path=db_path, chapter_order_idx=chapter,
+        max_source_chunks=max_source_chunks,
     )
     sys.stdout.write(json.dumps(envelope, ensure_ascii=False, indent=2))
     sys.stdout.write("\n")
