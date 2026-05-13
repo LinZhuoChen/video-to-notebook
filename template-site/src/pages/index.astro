@@ -4,16 +4,40 @@ import { getCollection } from 'astro:content';
 
 const courses = await getCollection('course');
 const concepts = await getCollection('concept');
+
+let chapters: any[] = [];
+try {
+  const data = await import('../content/textbook/curriculum.json');
+  chapters = (data.default || data).chapters || [];
+} catch (e) {
+  chapters = [];
+}
+const synthesizedCount = chapters.filter((c: any) => c.status === 'synthesized').length;
 ---
 <Base title="Home">
   <h1>course-merger</h1>
+  <p class="lead">把多门公开课合并成一本可读的教材。</p>
+
+  {synthesizedCount > 0 && (
+    <section class="cta">
+      <h2>📖 开始阅读</h2>
+      <p>已生成 <strong>{synthesizedCount}/{chapters.length}</strong> 章。</p>
+      <p><a class="primary-cta" href="/textbook/">进入教材目录 →</a></p>
+    </section>
+  )}
+
+  <h2>原始资源（lookup）</h2>
   <p>
-    {courses.length} course{courses.length === 1 ? '' : 's'} ·
-    {concepts.length} concept{concepts.length === 1 ? '' : 's'} indexed.
+    {courses.length} 门课程 · {concepts.length} 个概念已索引。
   </p>
   <p>
-    Pick a starting point:
-    <a href="/courses/">browse by course</a> or
-    <a href="/concepts/">browse by concept</a>.
+    <a href="/courses/">按课程浏览</a> · <a href="/concepts/">按概念浏览</a>
   </p>
 </Base>
+
+<style>
+  .lead { color: #555; font-size: 1.1em; }
+  .cta { background: #f0f9f4; padding: 1.5rem; border-radius: 8px; border-left: 4px solid #0b5; margin: 2rem 0; }
+  .cta h2 { margin-top: 0; }
+  .primary-cta { display: inline-block; padding: 0.6rem 1.2rem; background: #0b5; color: #fff; text-decoration: none; border-radius: 4px; font-weight: 600; }
+</style>

@@ -13,6 +13,7 @@ const { title } = Astro.props;
   <meta name="viewport" content="width=device-width" />
   <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
   <title>{title} · course-merger</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.10/dist/katex.min.css">
 </head>
 <body>
   <header>
@@ -41,6 +42,51 @@ const { title } = Astro.props;
         if (el) el.innerHTML = '<input type="search" placeholder="Search (build first)…" style="padding:0.4rem 0.8rem;border:1px solid #ccc;border-radius:4px;min-width:200px;" />';
       });
     }
+  </script>
+  <script type="module">
+    import katex from "https://cdn.jsdelivr.net/npm/katex@0.16.10/dist/katex.mjs";
+
+    function renderInlineMath() {
+      const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+      const matches = [];
+      let node;
+      while (node = walker.nextNode()) {
+        const text = node.nodeValue;
+        if (!text || !text.includes('$')) continue;
+        const re = /\$\$(.+?)\$\$|\$([^\$\n]+?)\$/gs;
+        if (re.test(text)) {
+          re.lastIndex = 0;
+          matches.push(node);
+        }
+      }
+      for (const n of matches) {
+        const text = n.nodeValue;
+        const frag = document.createDocumentFragment();
+        const re = /\$\$(.+?)\$\$|\$([^\$\n]+?)\$/gs;
+        let last = 0;
+        let m;
+        while ((m = re.exec(text)) !== null) {
+          if (m.index > last) {
+            frag.appendChild(document.createTextNode(text.slice(last, m.index)));
+          }
+          const span = document.createElement('span');
+          const tex = m[1] || m[2];
+          const isBlock = !!m[1];
+          try {
+            katex.render(tex, span, { displayMode: isBlock, throwOnError: false });
+          } catch (e) {
+            span.textContent = (isBlock ? '$$' : '$') + tex + (isBlock ? '$$' : '$');
+          }
+          frag.appendChild(span);
+          last = re.lastIndex;
+        }
+        if (last < text.length) {
+          frag.appendChild(document.createTextNode(text.slice(last)));
+        }
+        n.parentNode.replaceChild(frag, n);
+      }
+    }
+    renderInlineMath();
   </script>
 </body>
 </html>

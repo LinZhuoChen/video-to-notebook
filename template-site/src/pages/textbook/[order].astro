@@ -1,0 +1,59 @@
+---
+import Base from '../../layouts/Base.astro';
+import TextbookNav from '../../components/TextbookNav.astro';
+import ChapterNav from '../../components/ChapterNav.astro';
+
+export async function getStaticPaths() {
+  let chapters: any[] = [];
+  try {
+    const data = await import('../../content/textbook/curriculum.json');
+    chapters = (data.default || data).chapters || [];
+  } catch (e) {
+    return [];
+  }
+  const synthesized = chapters.filter((c: any) => c.status === 'synthesized');
+  const fragments = import.meta.glob('../../content/textbook/*.html', { query: '?raw', import: 'default', eager: true });
+  return synthesized.map((ch: any, idx: number) => {
+    const prev = idx > 0 ? synthesized[idx - 1] : null;
+    const next = idx < synthesized.length - 1 ? synthesized[idx + 1] : null;
+    const fragKey = `../../content/textbook/${ch.html_fragment}`;
+    const html = (fragments[fragKey] as string) || '';
+    return {
+      params: { order: String(ch.order_idx) },
+      props: { chapter: ch, html, prev, next },
+    };
+  });
+}
+
+const { chapter, html, prev, next } = Astro.props;
+---
+<Base title={chapter.title}>
+  <div class="textbook-layout">
+    <TextbookNav current={chapter.order_idx} />
+    <div class="chapter-content">
+      <div class="chapter-header">
+        <div class="module-label">{chapter.module}</div>
+        <h1>第 {chapter.order_idx} 章 · {chapter.title}</h1>
+        <p class="blurb">{chapter.blurb}</p>
+      </div>
+      <Fragment set:html={html} />
+      <ChapterNav prev={prev} next={next} />
+    </div>
+  </div>
+</Base>
+
+<style>
+  .textbook-layout {
+    display: grid;
+    grid-template-columns: 220px 1fr;
+    gap: 2rem;
+    margin-top: 1rem;
+  }
+  @media (max-width: 800px) {
+    .textbook-layout { grid-template-columns: 1fr; }
+  }
+  .chapter-header { margin-bottom: 2rem; }
+  .module-label { font-size: 0.85em; color: #888; text-transform: uppercase; letter-spacing: 0.05em; }
+  .chapter-header h1 { margin: 0.3rem 0; font-size: 2em; }
+  .chapter-header .blurb { color: #555; font-size: 1.05em; }
+</style>

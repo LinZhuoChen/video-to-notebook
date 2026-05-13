@@ -1,0 +1,49 @@
+---
+import Base from '../../layouts/Base.astro';
+
+let chapters: any[] = [];
+try {
+  const data = await import('../../content/textbook/curriculum.json');
+  chapters = (data.default || data).chapters || [];
+} catch (e) {
+  chapters = [];
+}
+
+const byModule = new Map<string, any[]>();
+for (const ch of chapters) {
+  if (!byModule.has(ch.module)) byModule.set(ch.module, []);
+  byModule.get(ch.module)!.push(ch);
+}
+---
+<Base title="教材目录">
+  <h1>教材目录</h1>
+  {chapters.length === 0 && (
+    <p><em>暂无课程内容。先运行 <code>course-merger curriculum --apply-results &lt;file&gt;</code> 设计目录，再运行 <code>course-merger synthesize</code> 生成章节。</em></p>
+  )}
+  {Array.from(byModule.entries()).map(([module, items]) => (
+    <section class="module">
+      <h2>{module}</h2>
+      <ol>
+        {items.map(ch => (
+          <li>
+            {ch.status === 'synthesized' ? (
+              <a href={`/textbook/${ch.order_idx}/`}><strong>{ch.title}</strong></a>
+            ) : (
+              <span class="planned"><strong>{ch.title}</strong> <em>(待生成)</em></span>
+            )}
+            <p class="blurb">{ch.blurb}</p>
+          </li>
+        ))}
+      </ol>
+    </section>
+  ))}
+</Base>
+
+<style>
+  .module { margin: 2rem 0; }
+  .module h2 { border-bottom: 1px solid #eee; padding-bottom: 0.5rem; }
+  .module ol { padding-left: 1.5rem; }
+  .module li { margin: 0.8rem 0; }
+  .blurb { color: #555; font-size: 0.95em; margin: 0.2rem 0 0; }
+  .planned { color: #aaa; }
+</style>

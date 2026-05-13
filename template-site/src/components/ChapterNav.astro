@@ -1,0 +1,40 @@
+---
+interface ChapterMeta {
+  order_idx: number;
+  title: string;
+}
+interface Props {
+  prev: ChapterMeta | null;
+  next: ChapterMeta | null;
+}
+const { prev, next } = Astro.props;
+---
+<nav class="chapter-nav">
+  {prev ? (
+    <a class="prev" href={`/textbook/${prev.order_idx}/`}>
+      <span class="dir">← 上一章</span>
+      <span class="title">{prev.title}</span>
+    </a>
+  ) : <span></span>}
+  {next ? (
+    <a class="next" href={`/textbook/${next.order_idx}/`}>
+      <span class="dir">下一章 →</span>
+      <span class="title">{next.title}</span>
+    </a>
+  ) : <span></span>}
+</nav>
+
+<style>
+  .chapter-nav {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;
+    margin-top: 4rem; padding-top: 1.5rem; border-top: 1px solid #eee;
+  }
+  .chapter-nav a {
+    display: block; padding: 1rem; border: 1px solid #eee; border-radius: 6px;
+    text-decoration: none; color: inherit;
+  }
+  .chapter-nav a:hover { background: #fafafa; border-color: #0b5; }
+  .chapter-nav .next { text-align: right; }
+  .chapter-nav .dir { display: block; font-size: 0.8em; color: #888; }
+  .chapter-nav .title { display: block; font-weight: 600; color: #0a4; }
+</style>

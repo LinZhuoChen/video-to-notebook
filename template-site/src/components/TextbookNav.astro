@@ -1,0 +1,63 @@
+---
+interface ChapterMeta {
+  order_idx: number;
+  module: string;
+  title: string;
+  status: string;
+}
+interface Props {
+  current: number;
+}
+const { current } = Astro.props;
+
+let chapters: ChapterMeta[] = [];
+try {
+  const data = await import('../content/textbook/curriculum.json');
+  chapters = (data.default || data).chapters || [];
+} catch (e) {
+  chapters = [];
+}
+
+const byModule = new Map<string, ChapterMeta[]>();
+for (const ch of chapters) {
+  if (!byModule.has(ch.module)) byModule.set(ch.module, []);
+  byModule.get(ch.module)!.push(ch);
+}
+---
+<aside class="textbook-nav">
+  <h3><a href="/textbook/">教材目录</a></h3>
+  {Array.from(byModule.entries()).map(([module, items]) => (
+    <section>
+      <h4>{module}</h4>
+      <ol>
+        {items.map(ch => (
+          <li class:list={[
+            ch.order_idx === current ? 'current' : '',
+            ch.status === 'synthesized' ? '' : 'unsynthesized',
+          ]}>
+            {ch.status === 'synthesized' ? (
+              <a href={`/textbook/${ch.order_idx}/`}>{ch.title}</a>
+            ) : (
+              <span>{ch.title} (待生成)</span>
+            )}
+          </li>
+        ))}
+      </ol>
+    </section>
+  ))}
+</aside>
+
+<style>
+  .textbook-nav {
+    font-size: 0.9em;
+    border-right: 1px solid #eee;
+    padding-right: 1.2rem;
+  }
+  .textbook-nav h3 { margin-top: 0; font-size: 1em; text-transform: uppercase; letter-spacing: 0.05em; color: #666; }
+  .textbook-nav h3 a { color: inherit; text-decoration: none; }
+  .textbook-nav h4 { margin-top: 1rem; font-size: 0.85em; color: #888; text-transform: uppercase; }
+  .textbook-nav ol { padding-left: 1.3rem; }
+  .textbook-nav li { margin: 0.3rem 0; line-height: 1.35; }
+  .textbook-nav li.current > a { font-weight: 600; color: #0b5; }
+  .textbook-nav li.unsynthesized > span { color: #bbb; font-style: italic; }
+</style>
