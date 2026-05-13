@@ -11,6 +11,13 @@ export async function getStaticPaths() {
   } catch (e) {
     return [];
   }
+
+  const moduleOrder: string[] = [];
+  for (const ch of chapters) {
+    if (!moduleOrder.includes(ch.module)) moduleOrder.push(ch.module);
+  }
+  const moduleIdx = (m: string) => (moduleOrder.indexOf(m) % 5) + 1;
+
   const synthesized = chapters.filter((c: any) => c.status === 'synthesized');
   const fragments = import.meta.glob('../../content/textbook/*.html', { query: '?raw', import: 'default', eager: true });
   return synthesized.map((ch: any, idx: number) => {
@@ -20,19 +27,21 @@ export async function getStaticPaths() {
     const html = (fragments[fragKey] as string) || '';
     return {
       params: { order: String(ch.order_idx) },
-      props: { chapter: ch, html, prev, next },
+      props: { chapter: ch, html, prev, next, mIdx: moduleIdx(ch.module) },
     };
   });
 }
 
-const { chapter, html, prev, next } = Astro.props;
+const { chapter, html, prev, next, mIdx } = Astro.props;
+const prevHref = prev ? `/textbook/${prev.order_idx}/` : '';
+const nextHref = next ? `/textbook/${next.order_idx}/` : '';
 ---
 <Base title={chapter.title}>
   <div class="reading-progress"><div class="reading-progress-bar" id="reading-bar"></div></div>
-  <div class="textbook-layout">
+  <div class="textbook-layout" data-module-idx={mIdx}>
     <TextbookNav current={chapter.order_idx} />
-    <div class="chapter-content">
-      <div class="chapter-header">
+    <article class="chapter-content" data-module-idx={mIdx}>
+      <header class="chapter-header" data-module-idx={mIdx}>
         <div class="chapter-meta">
           <span class="chapter-num">第 {chapter.order_idx} 章</span>
           <span class="chapter-dot">·</span>
@@ -41,13 +50,23 @@ const { chapter, html, prev, next } = Astro.props;
         <h1 class="chapter-title">{chapter.title}</h1>
         <p class="chapter-blurb">{chapter.blurb}</p>
         <hr class="chapter-rule" />
+      </header>
+      <div class="chapter-body" id="chapter-body">
+        <Fragment set:html={html} />
       </div>
-      <Fragment set:html={html} />
       <ChapterNav prev={prev} next={next} />
-    </div>
+    </article>
+    <aside class="chapter-minimap" aria-label="本章大纲">
+      <div class="minimap-label">本章大纲</div>
+      <ol class="minimap-list" id="minimap-list"></ol>
+    </aside>
   </div>
 
-  <script>
+  <div class="keyhint" aria-hidden="true">
+    <span>← →</span> 切换章节
+  </div>
+
+  <script is:inline define:vars={{ prevHref, nextHref }}>
     const bar = document.getElementById("reading-bar");
     if (bar) {
       const update = () => {
@@ -59,6 +78,55 @@ const { chapter, html, prev, next } = Astro.props;
       window.addEventListener("scroll", update, { passive: true });
       window.addEventListener("resize", update);
     }
+
+    // Build mini-map from h2/h3 inside chapter body
+    (function () {
+      const body = document.getElementById('chapter-body');
+      const list = document.getElementById('minimap-list');
+      if (!body || !list) return;
+      const headings = body.querySelectorAll('h2, h3');
+      const items = [];
+      headings.forEach((h, i) => {
+        if (!h.id) h.id = 'sec-' + i;
+        const li = document.createElement('li');
+        li.className = 'minimap-item lvl-' + h.tagName.toLowerCase();
+        const a = document.createElement('a');
+        a.href = '#' + h.id;
+        a.textContent = h.textContent || '';
+        li.appendChild(a);
+        list.appendChild(li);
+        items.push({ id: h.id, el: li });
+      });
+
+      if (items.length === 0) {
+        list.innerHTML = '<li class="minimap-empty">（无小节）</li>';
+        return;
+      }
+
+      const byId = new Map(items.map(x => [x.id, x.el]));
+      const io = new IntersectionObserver((entries) => {
+        for (const e of entries) {
+          const li = byId.get(e.target.id);
+          if (!li) continue;
+          if (e.isIntersecting) {
+            list.querySelectorAll('.active').forEach(x => x.classList.remove('active'));
+            li.classList.add('active');
+          }
+        }
+      }, { rootMargin: '-20% 0px -70% 0px' });
+      headings.forEach(h => io.observe(h));
+    })();
+
+    // Keyboard navigation: ← → arrows switch chapters
+    document.addEventListener('keydown', (e) => {
+      if (e.target && /input|textarea|select/i.test((e.target.tagName || ''))) return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (e.key === 'ArrowLeft' && prevHref) {
+        window.location.href = prevHref;
+      } else if (e.key === 'ArrowRight' && nextHref) {
+        window.location.href = nextHref;
+      }
+    });
   </script>
 </Base>
 
@@ -72,7 +140,7 @@ const { chapter, html, prev, next } = Astro.props;
   }
   .reading-progress-bar {
     height: 100%;
-    background: var(--accent);
+    background: var(--module-accent, var(--accent));
     transform: scaleX(0);
     transform-origin: left;
     transition: transform 0.1s ease-out;
@@ -80,10 +148,14 @@ const { chapter, html, prev, next } = Astro.props;
 
   .textbook-layout {
     display: grid;
-    grid-template-columns: 260px 1fr;
-    gap: 3rem;
+    grid-template-columns: 240px minmax(0, 1fr) 200px;
+    gap: 2.5rem;
     margin-top: 1.5rem;
     align-items: start;
+  }
+  @media (max-width: 1200px) {
+    .textbook-layout { grid-template-columns: 240px minmax(0, 1fr); }
+    .chapter-minimap { display: none; }
   }
   @media (max-width: 900px) {
     .textbook-layout { grid-template-columns: 1fr; gap: 1.5rem; }
@@ -98,7 +170,7 @@ const { chapter, html, prev, next } = Astro.props;
     letter-spacing: 0.1em;
     margin-bottom: 0.6rem;
   }
-  .chapter-num { color: var(--accent); font-weight: 600; }
+  .chapter-num { color: var(--module-accent, var(--accent)); font-weight: 600; }
   .chapter-dot { margin: 0 0.55rem; color: var(--text-faint); }
   .module-label { color: var(--text-muted); }
 
@@ -125,6 +197,71 @@ const { chapter, html, prev, next } = Astro.props;
     height: 1px;
     background: var(--border);
     margin-block: 1.5rem;
+  }
+
+  .chapter-minimap {
+    position: sticky;
+    top: 1.5rem;
+    max-height: calc(100vh - 3rem);
+    overflow-y: auto;
+    font-size: 0.86em;
+    border-left: 1px solid var(--border);
+    padding-left: 1rem;
+  }
+  .minimap-label {
+    font-size: 0.7em;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--text-faint);
+    font-weight: 600;
+    margin-bottom: 0.7rem;
+  }
+  .minimap-list { list-style: none; padding: 0; margin: 0; }
+  .minimap-item {
+    margin: 0.3rem 0;
+    padding: 0.25rem 0 0.25rem 0.7rem;
+    border-left: 2px solid transparent;
+    line-height: 1.35;
+    transition: border-color 0.15s ease, color 0.15s ease;
+  }
+  .minimap-item.lvl-h3 { padding-left: 1.4rem; font-size: 0.92em; }
+  .minimap-item a {
+    color: var(--text-muted);
+    text-decoration: none;
+  }
+  .minimap-item a:hover { color: var(--module-accent, var(--accent)); }
+  .minimap-item.active {
+    border-left-color: var(--module-accent, var(--accent));
+  }
+  .minimap-item.active a {
+    color: var(--module-accent, var(--accent));
+    font-weight: 600;
+  }
+  .minimap-empty { color: var(--text-faint); font-style: italic; }
+
+  .keyhint {
+    position: fixed;
+    bottom: 1rem;
+    right: 1rem;
+    font-size: 0.75em;
+    color: var(--text-faint);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 0.35rem 0.8rem;
+    box-shadow: var(--shadow-sm);
+    opacity: 0.7;
+    pointer-events: none;
+  }
+  .keyhint span {
+    font-family: var(--font-mono);
+    background: var(--surface-soft);
+    padding: 0 0.35em;
+    border-radius: 3px;
+    margin-right: 0.3em;
+  }
+  @media (max-width: 900px) {
+    .keyhint { display: none; }
   }
 
   @media (max-width: 900px) {

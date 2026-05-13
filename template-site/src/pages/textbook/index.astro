@@ -39,7 +39,7 @@ const done = chapters.filter(c => c.status === 'synthesized').length;
     )}
 
     {Array.from(byModule.entries()).map(([module, items], moduleIdx) => (
-      <section class="toc-module">
+      <section class="toc-module" data-module-idx={(moduleIdx % 5) + 1}>
         <div class="toc-module-header">
           <span class="toc-module-num">Module {moduleIdx + 1}</span>
           <h2 class="toc-module-title">{module}</h2>
@@ -124,15 +124,16 @@ const done = chapters.filter(c => c.status === 'synthesized').length;
   .toc-module-header {
     display: flex; align-items: baseline; gap: 1rem;
     padding-bottom: 1rem;
-    border-bottom: 2px solid var(--text);
+    border-bottom: 2px solid var(--module-accent, var(--text));
     margin-bottom: 0.8rem;
   }
   .toc-module-num {
     font-family: var(--font-mono);
     font-size: 0.8em;
-    color: var(--text-faint);
+    color: var(--module-accent, var(--text-faint));
     text-transform: uppercase;
     letter-spacing: 0.1em;
+    font-weight: 600;
   }
   .toc-module-title {
     font-family: var(--font-serif);
@@ -165,7 +166,7 @@ const done = chapters.filter(c => c.status === 'synthesized').length;
     text-align: right;
     font-variant-numeric: tabular-nums;
   }
-  .toc-chapter.done .toc-chapter-num { color: var(--accent); }
+  .toc-chapter.done .toc-chapter-num { color: var(--module-accent, var(--accent)); }
 
   .toc-chapter-link {
     display: block;
@@ -173,7 +174,7 @@ const done = chapters.filter(c => c.status === 'synthesized').length;
     color: inherit;
     transition: opacity 0.15s ease;
   }
-  .toc-chapter-link:hover .toc-chapter-title { color: var(--accent); }
+  .toc-chapter-link:hover .toc-chapter-title { color: var(--module-accent, var(--accent)); }
 
   .toc-chapter-title {
     font-family: var(--font-serif);
