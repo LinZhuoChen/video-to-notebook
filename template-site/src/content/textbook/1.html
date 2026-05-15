@@ -1,162 +1,654 @@
 <style>
-  .ar-vs-diff svg { display: block; margin: 1.2rem auto; max-width: 100%; height: auto; }
-  .ar-vs-diff .clip-frame { max-width: 720px; margin: 1.4rem auto; }
-  .ar-vs-diff .clip-frame iframe { width: 100%; aspect-ratio: 16/9; border: 0; border-radius: 6px; }
-  .ar-vs-diff .clip-frame figcaption { color: var(--text-muted); font-size: 0.85rem; margin-top: 0.4rem; text-align: center; }
-  .ar-vs-diff .note { background: var(--surface-soft); border-left: 3px solid var(--accent); padding: 0.7rem 1rem; margin: 1rem 0; border-radius: 0 4px 4px 0; }
-  .ar-vs-diff .my-addition { background: #fff7d6; border-left: 3px solid var(--m4); padding: 0.7rem 1rem; margin: 1rem 0; border-radius: 0 4px 4px 0; font-size: 0.95rem; }
-  .ar-vs-diff .source-quote { font-style: italic; color: var(--text-muted); border-left: 2px solid var(--border); padding: 0.2rem 0.8rem; margin: 0.6rem 0; font-size: 0.92rem; }
-  .ar-vs-diff table { width: 100%; border-collapse: collapse; margin: 1.4rem 0; font-size: 0.92rem; }
-  .ar-vs-diff th, .ar-vs-diff td { border-bottom: 1px solid var(--border); padding: 0.6rem 0.8rem; text-align: left; vertical-align: top; }
-  .ar-vs-diff th { background: var(--surface-soft); font-weight: 600; }
+  .vae-ch { line-height: 1.7; }
+  .vae-ch svg { display: block; margin: 1.2rem auto; max-width: 100%; height: auto; }
+  .vae-ch .clip-frame { max-width: 720px; margin: 1.4rem auto; }
+  .vae-ch .clip-frame iframe { width: 100%; aspect-ratio: 16/9; border: 0; border-radius: 6px; }
+  .vae-ch .clip-frame figcaption { color: var(--text-muted); font-size: 0.85rem; margin-top: 0.4rem; text-align: center; }
+  .vae-ch .tldr { background: var(--surface-soft); border-left: 4px solid var(--module-accent); padding: 1rem 1.2rem; border-radius: 0 6px 6px 0; margin: 1.4rem 0; }
+  .vae-ch .tldr h2 { margin-top: 0; font-size: 1.05rem; }
+  .vae-ch .callout { padding: 0.7rem 1rem; margin: 1rem 0; border-radius: 0 6px 6px 0; }
+  .vae-ch .callout-info { background: #eef6fc; border-left: 4px solid #2b80c4; }
+  .vae-ch .callout-note { background: #f3f0fa; border-left: 4px solid #6f4dd0; }
+  .vae-ch .callout-warning { background: #fff6e0; border-left: 4px solid #d4a017; }
+  .vae-ch .callout-tip { background: #e8f5e9; border-left: 4px solid #0b5; }
+  .vae-ch .callout-quote { background: var(--surface-soft); border-left: 3px solid var(--border-strong); padding: 0.5rem 1rem; margin: 0.8rem 0; font-style: italic; color: var(--text-muted); }
+  .vae-ch .my-addition { background: #fff7d6; border-left: 4px solid #b8860b; padding: 0.7rem 1rem; margin: 1rem 0; border-radius: 0 6px 6px 0; }
+  .vae-ch pre { background: #1f1f1f; color: #f6f4ee; padding: 1rem; border-radius: 6px; font-size: 0.86rem; line-height: 1.55; overflow-x: auto; }
+  .vae-ch code:not(pre code) { background: var(--surface-soft); padding: 0.1rem 0.35rem; border-radius: 3px; font-size: 0.9em; }
+  .vae-ch h2 { border-bottom: 1px solid var(--border); padding-bottom: 0.3rem; margin-top: 2.4rem; }
+  .vae-ch h3 { color: var(--module-accent); margin-top: 1.6rem; }
+  .vae-ch .deriv-step { margin: 0.8rem 0; padding: 0.6rem 0.8rem; background: var(--surface-soft); border-radius: 4px; }
+  .vae-ch .deriv-step strong { color: var(--module-accent); }
+  @keyframes vae-pulse { 0%, 100% { r: 6; } 50% { r: 9; } }
+  .vae-ch .z-dot { animation: vae-pulse 2.4s ease-in-out infinite; }
 </style>
 
-<article class="ar-vs-diff">
+<article class="vae-ch">
 
-<h1>1. 为什么需要扩散？AR 和 Diffusion 的对比</h1>
+<p style="font-size:0.95rem; color:var(--text-muted);">主源：Vizuara《Principles of Diffusion Models》Lecture 2（讲师 Dr. Raj Dandekar）；副源：CMU 10799 Lecture 1。</p>
 
-<p class="lead">这一节的"题眼"不是技术对比，而是 Vizuara 的 Dr. Raj Dandekar 在 Lecture 5 里反复追问的那个反直觉问题——<strong>「为什么只有文本一定要用自回归？图像 / 视频已经投降给 diffusion，为什么语言不行？」</strong>他借了 Andrej Karpathy 的话来锚定研究方向：好研究始于一个看起来"counterintuitive"的问题。这一章我们就钻这个"rabbit hole"。</p>
+<div class="tldr">
+  <h2>📌 TL;DR</h2>
+  <p><strong>VAE = Autoencoder + 概率视角 + 变分推断。</strong>它把"压缩-重建"的瓶颈从一个<em>点</em>升级成一个<em>分布</em> $\mathcal{N}(\mu, \sigma^2)$，目标是最大化数据的对数似然 $\log p(x)$。但 $\log p(x) = \log \int p(x|z) p(z) dz$ 在高维不可解，所以引入近似后验 $q(z|x)$（即 encoder），通过 Jensen 不等式得到 <strong>ELBO</strong>（Evidence Lower BOund，证据下界）：</p>
+  $$\log p(x) \;\geq\; \mathbb{E}_{q(z|x)}[\log p(x|z)] \;-\; D_{\mathrm{KL}}\!\big(q(z|x) \,\|\, p(z)\big)$$
+  <p>最大化 ELBO 等价于：</p>
+  <ul>
+    <li><strong>重构项</strong>：让 decoder 把 z 解码出的图像接近原图 x</li>
+    <li><strong>正则项</strong>：让 encoder 输出的潜在分布贴近先验 $\mathcal{N}(0, I)$</li>
+  </ul>
+  <p>为了让从 $q(z|x)$ 采样的 z 可以反传梯度，引入 <strong>重参数化技巧</strong> $z = \mu + \sigma \odot \epsilon$。</p>
+  <p><strong>为什么开篇讲 VAE？</strong>因为 DDPM 本质上是 T 步 hierarchical VAE，它的训练损失就是 ELBO 的扩展。本章打下的每一块砖（潜变量、变分推断、ELBO、KL、重参数化）后面会逐砖复用。</p>
+</div>
 
-<h2>1.1 讲师的开篇追问</h2>
+<h2>一、为什么从 VAE 开始讲 Diffusion？</h2>
 
-<blockquote class="source-quote">「研究者应该问的最好的问题，往往是反直觉的。如果你问『为什么 diffusion 只能用在图像上？我们脑子里是不是有什么偏见？』——你就会一路掉进 rabbit hole，最后可能找到一个新的研究问题、做出有影响力的发现。Karpathy 也在反复问这件事。」</blockquote>
+<p>Dr. Raj 在 L2 开场就强调：理解 diffusion model 必须先扎实理解 VAE。原因有三：</p>
 
-<p>Dr. Raj 还特地点名了 2024 年那篇打开"语言扩散"工业化大门的论文出处：<strong>Cornell University 的 MDLM 团队</strong>（Sahoo et al.），他们在 intro 里直接问<em>"why should images and video generation models have all the fun?"</em>——把这件事从隐性偏见变成了正式研究问题。</p>
+<ol>
+  <li><strong>数学骨架同源</strong>：DDPM 的训练损失 = T 步 hierarchical VAE 的 ELBO 拆解。如果你不懂 VAE 的 ELBO 怎么从 $\log p(x)$ 推出来，DDPM 的损失公式看起来就像天书。</li>
+  <li><strong>思想同源</strong>：VAE 的"先压成 latent、再从 latent 还原"思想，在 diffusion 里变成"先一步步加噪进 latent，再一步步去噪还原"。Diffusion 是 VAE 的"时间展开版"。</li>
+  <li><strong>第一性原理</strong>：先理解 vanilla VAE → 再理解 hierarchical VAE → 再理解 DDPM。每步都在前一步基础上加深度，跳过 VAE 直接学 DDPM 是危险的。</li>
+</ol>
 
-<h2>1.2 你以为的「生成」：AR 一字一字</h2>
+<div class="callout-quote">
+讲师引用 Karpathy：「whenever you learn something from scratch, you understand the gaps in your knowledge.」—— 本讲就是要把网上散乱的 VAE 资料<strong>揉成一条 0 到 1 的认知坡道</strong>。
+</div>
 
-<p>讲师在 Lecture 6 走到白板前重新讲了一遍 ARM：</p>
+<h2>二、问题设定：从 100 个学生的「hello」说起</h2>
 
-<blockquote class="source-quote">「我给模型 prompt `once upon a time`，让它续写。它会怎么做？<strong>它<em>不会</em>同时从所有方向生成 token，它一次只生成下一个</strong>，然后接着前面的输出再预测下一个，再下一个……one token at a time, 而下一个 token 永远依赖于前面所有的 token。」</blockquote>
+<p>Dr. Raj 用了一个非常具象的例子（L9 chunk #6-8）：</p>
 
-<p>形式化就是：</p>
+<div class="callout-quote">
+假设你的班级有 100 个学生，每人在纸上写一个"hello"。每个人的笔迹各不相同——有人字迹斜向左，有人斜向右；有人写得整洁，有人潦草；有人写连笔（cursive），有人不写连笔。<br><br>
+现在有人要求你造一台机器：<em>按一下按钮，机器吐出一张纸，上面写着"hello"，且这个"hello"的风格必须像班里某位同学写的</em>。
+</div>
 
-$$p(x_1, \dots, x_T) \;=\; \prod_{t=1}^{T} p(x_t \mid x_1, \dots, x_{t-1})$$
+<p>用形式化语言：</p>
 
-<p>这套思路叫 <strong>autoregressive modeling (ARM)</strong>。它统治力的来源是工程优势——训练时 teacher forcing 一次算完所有位置的 loss、推理时 KV cache 让每步只算新 token。简单、可扩展。</p>
+<blockquote>我们想构造一个<strong>采样器</strong>（机器），使其产生的样本服从你们班同学手写"hello"的<em>真实概率分布</em>。</blockquote>
 
-<h2>1.3 AR 的具体短板：reversal curse + 推理慢</h2>
+<p>这正是 Deep Generative Modeling 的核心目标——<strong>学习真实数据分布并从中采样</strong>。</p>
 
-<p>讲师给了两个非常具体的 AR 限制：</p>
+<div class="callout callout-note">
+🧭 <strong>直觉锚点</strong>：整章你都把 VAE 想象成"那台 hello 机器"。所有数学符号都是为了把这台机器<strong>形式化、可训练</strong>。
+</div>
 
-<h3>反转诅咒（Reversal Curse）</h3>
+<h2>三、第一性原理思考：什么决定笔迹？</h2>
 
-<blockquote class="source-quote">「问模型『Who is Tom Cruise's mother?』——它能答 Mary Lee。但反过来问『Who is Mary Lee's son?』——它经常答不出来。<strong>这是 reversal reasoning，AR 模型天生很难做。</strong>因为训练时它学的是『前文 → 后文』的单向条件，反向那个方向它从来没显式地学过。」</blockquote>
+<p>最直觉的思路：<strong>笔迹是被一组隐藏因素（hidden factors）决定的</strong>。Dr. Raj 在 L9 chunk #10 列举（原话节选）：</p>
 
-<h3>推理步数</h3>
+<ul>
+  <li>写字时施加的<strong>压力</strong>（pressure）</li>
+  <li>字是否<strong>倾斜</strong>（slant）、向左还是向右</li>
+  <li>字母<strong>宽度</strong>（wide / narrow）</li>
+  <li>写字<strong>速度</strong>（speed）</li>
+  <li><strong>整洁程度</strong>（neatness）</li>
+</ul>
 
-<blockquote class="source-quote">「生成同样长度的文本，diffusion 大概要 <strong>14 步</strong>，AR 要 <strong>75 步</strong>——diffusion 推理快得多。」</blockquote>
+<p>这些因素在最终图像里<em>看不到</em>，但<em>完全决定了</em>字的形状。所以朴素的想法是：</p>
 
-<p>这两个例子讲师都没用花哨术语，但都是 AR 真正会撞墙的硬限制。</p>
+<ol>
+  <li>找出所有影响笔迹的隐藏因素；</li>
+  <li>学一个映射 <code>f(隐藏因素) → 笔迹图像</code>；</li>
+  <li>给 f 喂任意一组隐藏因素，就得到一张笔迹。</li>
+</ol>
 
-<h2>1.4 Diffusion 的"另一种姿势"</h2>
+<p>讲师给这组隐藏因素起了个生动的名字：<strong>secret recipe（秘密配方）</strong>。</p>
 
-<p>讲师在 Lecture 5 用了一个简洁的对比框架——<strong>都是在逼近真实语言分布 $p_{\text{data}}(\text{text})$，只是用不同的"路线"</strong>。</p>
+<div class="callout-quote">
+如果一个学生的 secret recipe 是「微微右倾、笔画细、中速、中等整洁度」，那他的 hello 长什么样几乎就被锁死了。
+</div>
 
-<blockquote class="source-quote">「图像我们曾这样想：把图拆成 pixels；扩散模型在 high-dim pixel 空间里学习『有意义的图』的概率分布，然后从中采样。<strong>那同样的事可以搬到文本：把文本拆成 token；扩散在 high-dim token 空间里学『有意义文本』的概率分布</strong>——『有意义』意思是 grammar 和 logic 都对，它们在 high-dim 里只占一小块小空间。」</blockquote>
+<p>把这台机器画成硬件：想象一台老式机器，前面板有 5 个旋钮（每个旋钮对应一个 hidden factor），每个旋钮可以拨到 low/medium/high。你拨好 5 个旋钮，按下按钮，机器吐出一张纸——上面就是对应那组 recipe 的 hello。</p>
 
-<svg viewBox="0 0 720 280" role="img" aria-label="AR vs Diffusion 范式对比">
-  <text x="120" y="22" font-size="14" font-weight="600" fill="#0a6e3a">Autoregressive (AR)</text>
-  <text x="490" y="22" font-size="14" font-weight="600" fill="#1d4ed8">Diffusion</text>
+<p>这台<strong>接收 secret recipe、输出图像</strong>的机器，在 VAE 里有个正式名字：<strong>Decoder（解码器）</strong>。</p>
 
-  <g transform="translate(20, 40)" font-family="ui-monospace, monospace" font-size="13">
-    <text x="0" y="20">step 1</text>
-    <rect x="50" y="6" width="40" height="20" rx="3" fill="#0a6e3a"/><text x="56" y="21" fill="#fff">从</text>
-    <rect x="92" y="6" width="40" height="20" rx="3" fill="#e8e5db"/>
-    <rect x="134" y="6" width="40" height="20" rx="3" fill="#e8e5db"/>
-    <rect x="176" y="6" width="40" height="20" rx="3" fill="#e8e5db"/>
-    <rect x="218" y="6" width="40" height="20" rx="3" fill="#e8e5db"/>
+<h2>四、Latent Variables（潜变量）：把「secret recipe」形式化</h2>
 
-    <text x="0" y="58">step 2</text>
-    <rect x="50" y="44" width="40" height="20" rx="3" fill="#0a6e3a"/><text x="56" y="59" fill="#fff">从</text>
-    <rect x="92" y="44" width="40" height="20" rx="3" fill="#0a6e3a"/><text x="98" y="59" fill="#fff">前</text>
-    <rect x="134" y="44" width="40" height="20" rx="3" fill="#e8e5db"/>
-    <rect x="176" y="44" width="40" height="20" rx="3" fill="#e8e5db"/>
-    <rect x="218" y="44" width="40" height="20" rx="3" fill="#e8e5db"/>
+<p>讲师在 L9 chunk #14 正式给出术语：</p>
 
-    <text x="0" y="100">…</text>
+<blockquote><strong>secret recipe = latent variables</strong>，记作 <strong>z</strong>。</blockquote>
 
-    <text x="0" y="134">step 5</text>
-    <rect x="50" y="120" width="40" height="20" rx="3" fill="#0a6e3a"/><text x="56" y="135" fill="#fff">从</text>
-    <rect x="92" y="120" width="40" height="20" rx="3" fill="#0a6e3a"/><text x="98" y="135" fill="#fff">前</text>
-    <rect x="134" y="120" width="40" height="20" rx="3" fill="#0a6e3a"/><text x="140" y="135" fill="#fff">有</text>
-    <rect x="176" y="120" width="40" height="20" rx="3" fill="#0a6e3a"/><text x="182" y="135" fill="#fff">座</text>
-    <rect x="218" y="120" width="40" height="20" rx="3" fill="#0a6e3a"/><text x="224" y="135" fill="#fff">山</text>
-    <text x="0" y="178" font-size="11" fill="#6b6b6b">↑ 75 steps 才生成完，已生成的 token 不可改</text>
-  </g>
+<p>为什么叫 latent（潜在的）？因为它们是隐藏的、看不见的因素，但它们决定了观测到的数据。</p>
 
-  <line x1="370" y1="40" x2="370" y2="240" stroke="#d4d2c8" stroke-dasharray="3,3"/>
+<p><strong>关键约定</strong>：在本讲剩余部分，为了可视化方便，假设只用 <strong>2 个潜变量</strong> $z_1, z_2$：</p>
 
-  <g transform="translate(390, 40)" font-family="ui-monospace, monospace" font-size="13">
-    <text x="0" y="20">step 1</text>
-    <rect x="50" y="6" width="40" height="20" rx="3" fill="#cfd9eb"/><text x="62" y="21" fill="#6b6b6b">▒</text>
-    <rect x="92" y="6" width="40" height="20" rx="3" fill="#cfd9eb"/><text x="104" y="21" fill="#6b6b6b">▒</text>
-    <rect x="134" y="6" width="40" height="20" rx="3" fill="#cfd9eb"/><text x="146" y="21" fill="#6b6b6b">▒</text>
-    <rect x="176" y="6" width="40" height="20" rx="3" fill="#cfd9eb"/><text x="188" y="21" fill="#6b6b6b">▒</text>
-    <rect x="218" y="6" width="40" height="20" rx="3" fill="#cfd9eb"/><text x="230" y="21" fill="#6b6b6b">▒</text>
+<ul>
+  <li>$z_1$ = slantness（倾斜度）</li>
+  <li>$z_2$ = neatness（整洁度）</li>
+</ul>
 
-    <text x="0" y="58">step 2</text>
-    <rect x="50" y="44" width="40" height="20" rx="3" fill="#9bb4d8"/><text x="58" y="59" fill="#fff">从</text>
-    <rect x="92" y="44" width="40" height="20" rx="3" fill="#cfd9eb"/><text x="104" y="59" fill="#6b6b6b">▒</text>
-    <rect x="134" y="44" width="40" height="20" rx="3" fill="#9bb4d8"/><text x="142" y="59" fill="#fff">有</text>
-    <rect x="176" y="44" width="40" height="20" rx="3" fill="#cfd9eb"/><text x="188" y="59" fill="#6b6b6b">▒</text>
-    <rect x="218" y="44" width="40" height="20" rx="3" fill="#9bb4d8"/><text x="226" y="59" fill="#fff">山</text>
+<div class="callout callout-warning">
+⚠️ <strong>真实场景中我们不知道 z 是什么</strong>。在手写 hello 例子里我们假装知道 z 的语义（slant + neat），是为了讲解直觉。<em>真实问题里，神经网络会自己学出 z</em>，而 z 的每个维度对应什么"语义因素"我们通常无法解释。这是神经网络的强项也是弱点。
+</div>
 
-    <text x="0" y="100">…</text>
+<h3>4.1 为什么是「潜」变量？</h3>
 
-    <text x="0" y="134">step 5</text>
-    <rect x="50" y="120" width="40" height="20" rx="3" fill="#1d4ed8"/><text x="58" y="135" fill="#fff">从</text>
-    <rect x="92" y="120" width="40" height="20" rx="3" fill="#1d4ed8"/><text x="100" y="135" fill="#fff">前</text>
-    <rect x="134" y="120" width="40" height="20" rx="3" fill="#1d4ed8"/><text x="142" y="135" fill="#fff">有</text>
-    <rect x="176" y="120" width="40" height="20" rx="3" fill="#1d4ed8"/><text x="184" y="135" fill="#fff">座</text>
-    <rect x="218" y="120" width="40" height="20" rx="3" fill="#1d4ed8"/><text x="226" y="135" fill="#fff">山</text>
-    <text x="0" y="178" font-size="11" fill="#6b6b6b">↑ 14 步同时精修；任意位置可重写</text>
+<p>讲师打了个比方：<strong>像潜水员潜入海底再浮回水面</strong>：</p>
+
+<ul>
+  <li>你想生成水面上的东西（图像）；</li>
+  <li>但要先潜到水下找到产生它的"暗流"（潜变量）；</li>
+  <li>再带着这些信息浮回水面。</li>
+</ul>
+
+<p><strong>Generative modeling 本质上就是"探水深"</strong>——找到驱动表面变化的潜在因素。</p>
+
+<h3>4.2 二维 latent space 的可视化</h3>
+
+<p>把 $z_1$ 作为 x 轴、$z_2$ 作为 y 轴，得到一个二维平面：</p>
+
+<ul>
+  <li>平面上<strong>每一个点</strong>对应一种特定的笔迹风格；</li>
+  <li>横轴右边 → 字向右倾斜，左边 → 字向左倾斜；</li>
+  <li>纵轴远离原点 → 字越潦草，靠近原点 → 字越整洁；</li>
+  <li>100 个学生 → 平面上 100 个点；这 100 个点的分布就是 latent space 上的概率分布。</li>
+</ul>
+
+<p>注意一个非常重要的观察：</p>
+
+<blockquote>一个 28×28 的 hello 图像有 784 个像素值。我们用 <strong>2 个数字（$z_1, z_2$）</strong> 就把它"压缩"了。</blockquote>
+
+<p>这就是 VAE 的另一面：<strong>降维 / 表示学习</strong>。Latent space 通常<em>远低于</em>数据空间维度（784 → 2 是 392 倍压缩）。</p>
+
+<div class="callout callout-tip">
+💡 <strong>讲师埋下的伏笔</strong>：如果你画 100 个学生在 latent space 的分布，会发现它们大致聚在原点周围、形状像椭圆球。这暗示：<strong>真实笔迹的潜在因素很可能服从高斯分布 $\mathcal{N}(0, I)$</strong>（多数人中庸、极端少）。这个观察后来变成 VAE 的<em>先验假设</em> $p(z) = \mathcal{N}(0, I)$，并通过 KL 项<em>强制实现</em>。
+</div>
+
+<h2>五、Decoder 内部：从 latent 到像素</h2>
+
+<p>我们已经画了 decoder 的"接口"：输入 z（2 维），输出 image（784 维）。但<strong>机器里到底发生了什么</strong>？</p>
+
+<h3>5.1 像素级表示</h3>
+
+<p>数字图像 = 28×28 = 784 个像素，每个像素值 0（黑）或 1（白）。最朴素的 decoder：</p>
+
+<blockquote>输入 z，输出 784 个 0/1 值，<em>确定地</em>画出一张数字。</blockquote>
+
+<p>但这有个问题：<strong>同一个 z，每次都得到完全相同的图像</strong>。可现实中我们用 Stable Diffusion / Midjourney 时，<em>同一个 prompt 会得到不同的图</em>——输出是<strong>概率性的</strong>。</p>
+
+<h3>5.2 概率 decoder：每个像素输出一个分布</h3>
+
+<p>升级版思路：<strong>每个像素不输出一个值，而是输出一个概率分布</strong>（通常是 Gaussian 或 Bernoulli）。</p>
+
+<ul>
+  <li>对每个像素 i，decoder 输出 $(\mu_i, \sigma_i)$；</li>
+  <li>实际像素值从 $\mathcal{N}(\mu_i, \sigma_i^2)$ 采样得到；</li>
+  <li>黑像素 → $\mu \approx 0$；白像素 → $\mu \approx 1$；$\sigma$ 给出"灰度抖动"的允许范围。</li>
+</ul>
+
+<p>这样，<strong>同一个 z 可以采出有微小差别的多个图像</strong>，更逼近真实生成过程。</p>
+
+<div class="callout callout-note">
+🛠️ <strong>实践中的简化</strong>：讲师指出，在本讲后面实战代码中，会用<strong>确定性 decoder</strong>（只输出 mean、无 sigma）以简化实现。<br>
+• 确定性 decoder：784 个输出<br>
+• 概率 decoder：784 × 2 = 1568 个输出（每像素 mean + sigma）<br>
+这个简化在 vanilla MNIST VAE 里完全够用。<em>但概率视角的形式化在 ELBO 推导里仍要保留</em>。
+</div>
+
+<h3>5.3 Decoder = 神经网络</h3>
+
+<p>到这里 decoder 的本质浮现：<strong>它就是一个神经网络</strong> $f_\theta(z) \to x$，$\theta$ 是网络参数。</p>
+
+<ul>
+  <li>输入：低维 latent（比如 2 维）；</li>
+  <li>隐藏层：若干全连接层；</li>
+  <li>输出：高维像素（784 维）。</li>
+</ul>
+
+<p>形式化记号：</p>
+
+$$p_\theta(x|z)$$
+
+<p>意思是"给定潜变量 z，输出图像 x 的概率"。这就是 <strong>decoder 分布</strong>。</p>
+
+<h2>六、为什么需要 Encoder？发现 latent space 的「地图」</h2>
+
+<p>我们说"假设数字 5 落在 latent space 的某块区域"——但<strong>这个假设是怎么来的</strong>？</p>
+
+<blockquote>你怎么知道数字 5 应该被画在 latent space 的左上角而不是右下角？</blockquote>
+
+<p>如果你不知道这一点，要生成一个 5 就只能：</p>
+
+<ul>
+  <li><strong>暴力扫描整个 latent space</strong> 的每一个点；</li>
+  <li>把每个点送进 decoder；</li>
+  <li>看哪些点产出的图像像 5。</li>
+</ul>
+
+<p>这是<strong>完全不可行的</strong>（intractable）—— 就像在大海里捞针。</p>
+
+<p><strong>Encoder 的作用</strong>：给定一张真实图像 x（比如一个 5），Encoder 直接告诉我们 latent space 中<em>最有可能产生这张图像的区域</em>。</p>
+
+<blockquote>不再"地毯式搜索"，而是"按图索骥"。</blockquote>
+
+<h3>6.1 Encoder = 反方向的神经网络</h3>
+
+$$q_\phi(z|x)$$
+
+<ul>
+  <li>输入：图像 x（784 维）；</li>
+  <li>输出：latent z 的分布参数 $(\mu, \sigma^2)$；</li>
+  <li>$\phi$ 是 encoder 网络的参数。</li>
+</ul>
+
+<div class="callout callout-note">
+📝 <strong>P 和 Q 的记号约定</strong>：<br>
+• <strong>$p_\theta(x|z)$</strong> = decoder（参数 $\theta$）：给定 latent，生成图像。<br>
+• <strong>$q_\phi(z|x)$</strong> = encoder（参数 $\phi$）：给定图像，推断 latent。<br>
+顺序看起来"反"，是因为 P 是真实的生成方向（z → x），Q 是 encoder 学到的近似后验（x → z）。这两个字母是 VAE / 变分推断的标准记号。
+</div>
+
+<h3>6.2 为什么 Encoder 也输出「分布」而不是「点」？这就是 Variational 的来源</h3>
+
+<p>这是讲师强调的本讲<strong>最容易被滑过去的关键点</strong>。</p>
+
+<p><strong>普通 Autoencoder</strong>：encoder 给每张图一个<em>点</em>。</p>
+<ul>
+  <li>5 → $(-3, 2)$</li>
+  <li>1 → $(3, -3)$</li>
+  <li>2 → $(\ldots)$</li>
+</ul>
+
+<p>问题：<strong>latent space 上点和点之间是空的</strong>！如果你从 $(0, 0)$ 这种"中间地带"采样并送入 decoder，输出几乎都是垃圾噪声。Latent space 是<em>离散的、不连续的</em>，无法在它上面自由采样生成新样本。</p>
+
+<p><strong>Variational Autoencoder</strong>：encoder 给每张图一个<em>区域（分布）</em>。</p>
+<ul>
+  <li>5 → $\mathcal{N}(\mu_5, \Sigma_5)$，是一片"5 最可能出现的区域"；</li>
+  <li>1 → $\mathcal{N}(\mu_1, \Sigma_1)$，是另一片区域；</li>
+</ul>
+
+<p>这些区域<strong>会重叠</strong>，重叠处的点既可能解码成 5 也可能解码成 1（或它们的混合）。<em>分布之间没有缝隙</em>——latent space 变成连续的。</p>
+
+<blockquote>"Variational" 这个词的来源就是：encoder 输出<strong>变分</strong>的分布而非确定的点。
+</blockquote>
+
+<h3>6.3 这步为什么如此关键？</h3>
+
+<ul>
+  <li><strong>可生成新样本</strong>：从 latent space 任意一点采样都得到合理图像（不再是噪声）；</li>
+  <li><strong>平滑插值</strong>：在 latent space 沿一条线走，图像平滑地从 5 渐变到 1；</li>
+  <li><strong>防止 overfit</strong>：encoder 不能把每张图死死映到一个点，必须学到"邻近图像应该有邻近 latent 区域"的语义结构。</li>
+</ul>
+
+<svg viewBox="0 0 600 220" role="img" aria-label="encoder 输出分布而非点">
+  <g font-family="ui-sans-serif" font-size="11" fill="var(--text)">
+    <text x="150" y="20" text-anchor="middle" font-weight="600">普通 AE（点）</text>
+    <text x="450" y="20" text-anchor="middle" font-weight="600">VAE（分布）</text>
+
+    <g transform="translate(40, 40)">
+      <rect x="0" y="0" width="220" height="160" rx="6" fill="var(--red-soft)" stroke="var(--red)"/>
+      <circle cx="60" cy="60" r="4" fill="var(--blue)"/>
+      <text x="60" y="50" text-anchor="middle" font-size="10">5</text>
+      <circle cx="160" cy="80" r="4" fill="var(--blue)"/>
+      <text x="160" y="70" text-anchor="middle" font-size="10">1</text>
+      <circle cx="110" cy="120" r="4" fill="var(--blue)"/>
+      <text x="110" y="140" text-anchor="middle" font-size="10">2</text>
+      <text x="110" y="155" text-anchor="middle" font-size="10" fill="var(--red)">点与点之间是空的 → 采样得垃圾</text>
+    </g>
+
+    <g transform="translate(340, 40)">
+      <rect x="0" y="0" width="220" height="160" rx="6" fill="var(--module-accent-soft)" stroke="var(--module-accent)"/>
+      <ellipse cx="60" cy="60" rx="30" ry="20" fill="var(--blue)" opacity="0.4"/>
+      <text x="60" y="50" text-anchor="middle" font-size="10">5 区域</text>
+      <ellipse cx="160" cy="80" rx="30" ry="20" fill="var(--blue)" opacity="0.4"/>
+      <text x="160" y="70" text-anchor="middle" font-size="10">1 区域</text>
+      <ellipse cx="110" cy="120" rx="35" ry="20" fill="var(--blue)" opacity="0.4"/>
+      <text x="110" y="155" text-anchor="middle" font-size="10" fill="var(--module-accent)">区域重叠 → 连续 latent space</text>
+    </g>
   </g>
 </svg>
 
-<h2>1.5 关键差异表</h2>
+<h2>七、概率视角：Latent Variable Model</h2>
 
-<table>
-  <thead>
-    <tr><th></th><th>Autoregressive (AR)</th><th>Diffusion</th></tr>
-  </thead>
-  <tbody>
-    <tr><td>预测目标</td><td>下一个 token</td><td>从噪声 / MASK 还原所有 token</td></tr>
-    <tr><td>推理步数（讲师举例）</td><td>~75 步生同样长文</td><td>~14 步</td></tr>
-    <tr><td>顺序约束</td><td>必须左 → 右</td><td>可任意顺序、可并行</td></tr>
-    <tr><td>infilling</td><td>不原生支持</td><td>原生支持</td></tr>
-    <tr><td>reversal reasoning</td><td>"Mary Lee 的儿子是谁？" 经常答不出</td><td>双向训练 → 更对称</td></tr>
-    <tr><td>错了能改</td><td>不能</td><td>可以——后续步骤会修正</td></tr>
-  </tbody>
-</table>
+<p>现在切到<strong>概率论视角</strong>，为后面 ELBO 推导铺路。</p>
 
-<h2>1.6 讲师对学习态度的强调</h2>
+<h3>7.1 基本设定</h3>
 
-<p>这门 Vizuara 课贯穿的一个 ethos 是<strong>"from scratch"——从零开始</strong>。讲师在每一节都重申：</p>
+<p>定义联合分布：</p>
 
-<blockquote class="source-quote">「我会展示我自己是怎么学的，包括我直接跟 Gemini 对话的过程。从零开始学某件事，你会知道自己的<em>知识缺口</em>在哪里——这是真正搞懂的方式。」</blockquote>
+$$p(x, z) = p(x|z) \, p(z)$$
+
+<p>其中：</p>
+<ul>
+  <li><strong>$p(z)$</strong> = <strong>prior（先验）</strong>：通常取 $p(z) = \mathcal{N}(0, I)$。这就是为什么 VAE 训完后的 latent space 是球形高斯。</li>
+  <li><strong>$p(x|z)$</strong> = <strong>likelihood（似然）</strong>：给定 z 生成 x 的概率，由 decoder 网络实现。</li>
+</ul>
+
+<p>想最大化的目标是<strong>数据的边际似然</strong>：</p>
+
+$$p(x) = \int p(x|z) \, p(z) \, dz$$
+
+<p>直觉：把所有可能的潜变量 z 都"穷举"一遍，把它们生成 x 的概率加权求和（权重是 z 自己出现的概率）。</p>
+
+<h3>7.2 优化目标</h3>
+
+<p>整个数据集 $D = \{x_1, \dots, x_N\}$，我们想：</p>
+
+$$\max_\theta \prod_{i=1}^N p_\theta(x_i) \;\Leftrightarrow\; \max_\theta \sum_{i=1}^N \log p_\theta(x_i)$$
+
+<p>这就是<strong>最大似然估计</strong>。讲师用一个反例锚定直觉：</p>
+
+<div class="callout-quote">
+如果你把训练集里某张真实图像送进 decoder，它告诉你 "p = 0.001"，那 decoder 显然没训好——这张图明明是真实分布的样本，模型却觉得它不可能出现。
+</div>
+
+<p>所以我们要 <strong>maximize $\log p(x)$</strong>。</p>
+
+<h2>八、为什么 log p(x) 难算？</h2>
+
+$$\log p(x) = \log \int p(x|z) \, p(z) \, dz$$
+
+<p>这个积分<strong>在高维 z 上不可解</strong>。具体困难：</p>
+
+<ol>
+  <li><strong>维度诅咒</strong>：如果 z 是 100 维，这是一个 100 维积分。即使数值积分，每个维度切 10 段就要 $10^{100}$ 个样本。</li>
+  <li><strong>没有解析解</strong>：$p(x|z)$ 是个神经网络，没有 closed-form。</li>
+  <li><strong>Monte Carlo 采样方差爆炸</strong>：如果你想用 $z \sim p(z)$ 蒙特卡洛估计：
+  $$p(x) \approx \frac{1}{K} \sum_{k=1}^K p(x|z_k), \quad z_k \sim p(z)$$
+  会发现<em>绝大多数从 $\mathcal{N}(0, I)$ 采的 z 完全不能解码出 x</em>（它们对应的 $p(x|z) \approx 0$），有效样本极少，方差爆炸。</li>
+</ol>
+
+<div class="callout-quote">讲师原话：「we can't integrate over the entire universe.」</div>
+
+<h3>8.1 Bayes 公式能绕过吗？</h3>
+
+<p>理论上：</p>
+
+$$p(z|x) = \frac{p(x|z) \, p(z)}{p(x)}$$
+
+<p>但 $p(x)$ 在分母里！<strong>算 $p(z|x)$ 和算 $p(x)$ 一样难</strong>。所以"真后验" $p(z|x)$ 也算不出来。</p>
+
+<p><strong>这就是变分推断（Variational Inference）登场的原因。</strong></p>
+
+<h2>九、变分推断：用近似分布替代真后验</h2>
+
+<h3>9.1 核心思想</h3>
+
+<p>既然真后验 $p(z|x)$ 算不出，就用一个<strong>可参数化、容易采样</strong>的分布 $q_\phi(z|x)$ 去<em>近似</em>它。通常令：</p>
+
+$$q_\phi(z|x) = \mathcal{N}\!\big(z; \mu_\phi(x), \sigma^2_\phi(x)\big)$$
+
+<p>其中 $\mu_\phi(x), \sigma_\phi(x)$ 是 encoder 神经网络的输出。<strong>Encoder 的本质就是变分近似！</strong></p>
+
+<h3>9.2 神奇的代数变换</h3>
+
+<p>下面这一步是变分推断<strong>整个理论的命门</strong>，请反复读三遍：</p>
+
+$$\log p(x) = \underbrace{\mathrm{ELBO}(x)}_{\text{可计算}} + \underbrace{D_{\mathrm{KL}}\!\big(q_\phi(z|x) \,\|\, p(z|x)\big)}_{\geq 0\text{ 但不可计算}}$$
+
+<p>意思：$\log p(x)$ 等于 <strong>ELBO + 一个非负的 KL 项</strong>。所以：</p>
+
+$$\log p(x) \geq \mathrm{ELBO}(x)$$
+
+<p>ELBO 就是 $\log p(x)$ 的<strong>下界</strong>——这就是 <em>Evidence Lower BOund</em> 的由来（$\log p(x)$ 被称为 "evidence"）。</p>
+
+<p><strong>关键洞察</strong>：</p>
+
+<ul>
+  <li>我们不能直接最大化 $\log p(x)$（不可算）；</li>
+  <li>但可以<strong>最大化 ELBO</strong>（可算）；</li>
+  <li>最大化 ELBO 同时做了两件好事：
+    <ol>
+      <li>把 $\log p(x)$ 的下界顶高 → 间接最大化 $\log p(x)$；</li>
+      <li>让 $D_{\mathrm{KL}}(q \,\|\, p_\text{true})$ 变小 → encoder 越来越接近真后验。</li>
+    </ol>
+  </li>
+</ul>
+
+<div class="callout-quote">
+讲师用了一个红绿线的图示：「想象绿色曲线是 $\log p(x)$（不可达）。红色曲线是 ELBO，永远在绿色下面。只要把红色顶高，绿色至少不会比它低。」
+</div>
+
+<h2>十、ELBO 完整推导（一步一行讲清楚）</h2>
+
+<p>下面是本讲<strong>最重要的数学</strong>。每一步都给"为什么"。</p>
+
+<div class="deriv-step">
+<strong>步骤 1：写出 log p(x)</strong>
+$$\log p(x) = \log \int p(x|z) \, p(z) \, dz$$
+<em>Why</em>：直接用 $p(x)$ 的定义（边际化）。
+</div>
+
+<div class="deriv-step">
+<strong>步骤 2：乘 1（importance sampling 技巧）</strong>
+$$= \log \int p(x|z) \, p(z) \cdot \frac{q_\phi(z|x)}{q_\phi(z|x)} \, dz \;=\; \log \int q_\phi(z|x) \cdot \frac{p(x|z) \, p(z)}{q_\phi(z|x)} \, dz$$
+<em>Why</em>：积分里乘 $q/q = 1$ 不改变值，但可以把整个积分写成"q 上的期望"形式。
+$$= \log \mathbb{E}_{q_\phi(z|x)}\!\left[\frac{p(x|z) \, p(z)}{q_\phi(z|x)}\right]$$
+这就把"在 z 上的积分"变成"从 q 中采样的期望"——而 q 是我们能采样的（高斯）。
+</div>
+
+<div class="deriv-step">
+<strong>步骤 3：用 Jensen 不等式</strong>
+对凹函数 $\log$，有 $\log \mathbb{E}[Y] \geq \mathbb{E}[\log Y]$：
+$$\geq \mathbb{E}_{q_\phi(z|x)}\!\left[\log \frac{p(x|z) \, p(z)}{q_\phi(z|x)}\right]$$
+<em>Why</em>：log 凹，所以"先期望再 log" ≥ "先 log 再期望"。<strong>这一步就把 log 移进了积分里</strong>，让后面可以拆开。<br>
+<em>代价</em>：从等号变成了不等号——我们丢失了一些信息。这个"丢失"的部分就是后面的 $D_{\mathrm{KL}}(q \| p_\text{true})$。
+</div>
+
+<div class="deriv-step">
+<strong>步骤 4：把 log 拆开</strong>
+$$= \mathbb{E}_{q_\phi(z|x)}\!\left[\log p(x|z) + \log p(z) - \log q_\phi(z|x)\right]$$
+<em>Why</em>：$\log(abc) = \log a + \log b + \log c$。常规对数运算。
+</div>
+
+<div class="deriv-step">
+<strong>步骤 5：重新组合</strong>
+$$= \mathbb{E}_{q_\phi(z|x)}[\log p(x|z)] + \mathbb{E}_{q_\phi(z|x)}\!\left[\log \frac{p(z)}{q_\phi(z|x)}\right]$$
+$$= \mathbb{E}_{q_\phi(z|x)}[\log p(x|z)] - \mathbb{E}_{q_\phi(z|x)}\!\left[\log \frac{q_\phi(z|x)}{p(z)}\right]$$
+<em>Why</em>：把和先验有关的两项合并成一个 log 比值。
+</div>
+
+<div class="deriv-step">
+<strong>步骤 6：识别 KL 散度</strong>
+$$\boxed{\log p(x) \geq \mathbb{E}_{q_\phi(z|x)}[\log p(x|z)] \;-\; D_{\mathrm{KL}}\!\big(q_\phi(z|x) \,\|\, p(z)\big)}$$
+<em>Why</em>：第二项正好是 KL 散度的定义：$D_{\mathrm{KL}}(q \| p) = \mathbb{E}_q[\log(q/p)]$。注意<strong>这里的 KL 是 q 对 prior p(z) 的，不是对真后验 p(z|x) 的</strong>——所以它<em>可以算</em>！
+</div>
+
+<p>这就是 <strong>ELBO</strong>：</p>
+
+$$\mathrm{ELBO} = \underbrace{\mathbb{E}_{q_\phi(z|x)}[\log p(x|z)]}_{\text{重构项}} \;-\; \underbrace{D_{\mathrm{KL}}\!\big(q_\phi(z|x) \,\|\, p(z)\big)}_{\text{正则项}}$$
+
+<h2>十一、ELBO 两项的含义（要烂熟于心）</h2>
+
+<h3>11.1 ① 重构项（Reconstruction）</h3>
+
+<blockquote>"把 x 经过 encoder 得到 z，再把 z 经过 decoder 还原回 x'，要求 $x' \approx x$。"</blockquote>
+
+<ul>
+  <li>从 $q_\phi(z|x)$ 采样一个 z（encoder 给出的 latent）；</li>
+  <li>算 $\log p_\theta(x|z)$（decoder 觉得"原图 x 在这个 z 下出现的可能性"）；</li>
+  <li>我们希望这个值越大越好——也就是 <strong>decoder 能高质量地重建原图</strong>。</li>
+</ul>
+
+<p>实践中，对图像，这通常实现为<strong>像素级损失</strong>：</p>
+<ul>
+  <li>图像像素是连续值 → 用高斯似然 → 等价于 <strong>MSE 损失</strong>；</li>
+  <li>图像像素是 0/1 二值 → 用 Bernoulli 似然 → 等价于 <strong>二值交叉熵 BCE</strong>（讲师在 MNIST 实例中使用的就是 BCE）。</li>
+</ul>
+
+<h3>11.2 ② 正则项（Regularization）</h3>
+
+<blockquote>"encoder 给出的潜变量分布 $q_\phi(z|x)$，要尽量靠近先验 $p(z) = \mathcal{N}(0, I)$。"</blockquote>
+
+<ul>
+  <li>这一项衡量 encoder 的输出分布和球形高斯的"距离"；</li>
+  <li>如果只有重构项，encoder 会作弊：把每张图映到一个非常窄的 delta 分布（$\sigma \to 0$），然后 decoder 死记硬背。Latent space 又变成离散点，回到普通 autoencoder；</li>
+  <li>KL 项<strong>强迫</strong> encoder 输出宽厚一些的分布、且分布的中心要靠近原点 → 不同图像的分布会重叠 → latent space 变成连续的；</li>
+  <li>同时，<strong>因为整个 latent space 都接近 $\mathcal{N}(0, I)$，生成新样本时直接从 $\mathcal{N}(0, I)$ 采 z 再 decode 就行</strong>——这是 VAE 能"无中生有"的原因。</li>
+</ul>
+
+<h3>11.3 视觉化的「地球-火星」类比</h3>
+
+<p>讲师在 L8 chunk #11 用了一个非常生动的比喻：</p>
+
+<div class="callout-quote">
+假设你想把一只猫从地球传送到火星。把每个原子打包发送是不可能的（数据量太大）。所以你把猫<strong>压缩成一份"秘方" z</strong>（潜变量），传到火星，然后在火星 decode 还原。<br><br>
+• <strong>重构目标</strong>：火星上 decode 出来的猫看起来要像地球上那只。<br>
+• <strong>正则目标</strong>：传送的秘方必须用"标准语言"——也就是 $\mathcal{N}(0, I)$——书写。否则火星上的人看不懂你的秘方。
+</div>
+
+<h2>十二、Reparameterization Trick（重参数化技巧）</h2>
+
+<p>到这里我们有了 loss（−ELBO），下一步是<strong>梯度反传</strong>。但卡在一个地方。</p>
+
+<h3>12.1 问题：采样阻断梯度</h3>
+
+<p>ELBO 里有一步是 "<strong>从 $q_\phi(z|x)$ 采样 z</strong>"，然后把 z 送进 decoder。</p>
+
+<ul>
+  <li>$q_\phi$ 的 $\mu, \sigma$ 由 encoder 网络（参数 $\phi$）产生；</li>
+  <li>我们想算 $\partial \mathrm{ELBO} / \partial \phi$；</li>
+  <li>但<strong>"采样"操作不可导</strong>——它是一个随机算子，没有梯度从 z 流回到 $\mu, \sigma$。</li>
+</ul>
+
+<h3>12.2 解决方案：把随机性「挤」出来</h3>
+
+<p>把 z 改写为：</p>
+
+$$z = \mu + \sigma \odot \epsilon, \quad \epsilon \sim \mathcal{N}(0, I)$$
+
+<p>（$\odot$ 是逐元素乘法）</p>
+
+<p><strong>精妙之处</strong>：</p>
+<ul>
+  <li>现在 z 是 $\mu, \sigma$ 的<strong>确定性函数</strong>（一旦 $\epsilon$ 给定）；</li>
+  <li>随机性全部被装进了<em>和参数无关</em>的 $\epsilon$；</li>
+  <li>$\partial z / \partial \mu = 1$，$\partial z / \partial \sigma = \epsilon$，<strong>梯度可以畅通无阻地流回 encoder</strong>。</li>
+</ul>
+
+<h3>12.3 直觉</h3>
+
+<blockquote>
+之前是"从 $\mathcal{N}(\mu, \sigma^2)$ 直接抽一个 z"——这里的"抽"切断了梯度。<br>
+现在是"先从标准高斯抽 $\epsilon$，再用 $\mu + \sigma \cdot \epsilon$ 拼出 z"——拼装是可微的，抽 $\epsilon$ 和参数无关。
+</blockquote>
+
+<h3>12.4 在代码里长什么样</h3>
+
+<pre><code>mu, log_var = encoder(x)        # encoder 输出 μ 和 log(σ²)
+std = torch.exp(0.5 * log_var)  # σ = exp(0.5 * log σ²)
+eps = torch.randn_like(std)     # ε ~ N(0, I)
+z = mu + std * eps              # 重参数化采样</code></pre>
+
+<div class="callout callout-note">
+🧰 <strong>为什么 encoder 输出 log(σ²) 而不是 σ？</strong><br>
+• $\sigma$ 必须 > 0，但神经网络输出可正可负；<br>
+• 让网络输出 $\log(\sigma^2) \in \mathbb{R}$（无约束），再 exp 出 $\sigma$，<strong>保证正值且数值稳定</strong>；<br>
+• 这是讲师在视频末尾埋的一个工程细节，看到代码里 <code>log_var</code> 就是这个原因。
+</div>
+
+<h3>12.5 这个 trick 在 DDPM 里也用</h3>
+
+<p>后续 DDPM 里<strong>每一步去噪</strong>的随机采样都依赖重参数化技巧。这个 trick 不是 VAE 独有的——它是<em>所有"含随机变量的可微生成模型"的通用工具</em>。详见 <a href="/video-to-notebook/concepts/reparameterization-trick/">概念页：重参数化技巧</a>。</p>
+
+<h2>十三、VAE 的损失函数（实战）</h2>
+
+<p>把 ELBO 取负号变成最小化目标：</p>
+
+$$\boxed{L_{\text{VAE}} = \underbrace{-\mathbb{E}_{q_\phi(z|x)}[\log p_\theta(x|z)]}_{\text{重构损失}} \;+\; \underbrace{D_{\mathrm{KL}}\!\big(q_\phi(z|x) \,\|\, p(z)\big)}_{\text{KL 正则}}}$$
+
+<h3>13.1 KL 项的解析解（Gaussian-Gaussian）</h3>
+
+<p>当 $q_\phi(z|x) = \mathcal{N}(\mu, \sigma^2)$ 且 $p(z) = \mathcal{N}(0, I)$，KL 有 <strong>closed-form</strong>：</p>
+
+$$D_{\mathrm{KL}}\!\big(\mathcal{N}(\mu, \sigma^2) \,\|\, \mathcal{N}(0, 1)\big) = \frac{1}{2}\sum_{i=1}^d \big(\mu_i^2 + \sigma_i^2 - \log \sigma_i^2 - 1\big)$$
+
+<p>其中 d 是 latent 维度。逐项理解：</p>
+
+<ul>
+  <li><strong>$\mu_i^2$</strong>：让均值靠近 0（偏离 0 就罚）；</li>
+  <li><strong>$\sigma_i^2$</strong>：$\sigma$ 太大就罚（防止分布过宽）；</li>
+  <li><strong>$-\log \sigma_i^2$</strong>：$\sigma$ 太小就罚（防止分布塌缩成点）；</li>
+  <li><strong>$-1$</strong>：常数项，保证 KL 在 $\mu=0, \sigma=1$ 时恰好为 0。</li>
+</ul>
+
+<h3>13.2 重构损失的两种实现</h3>
+
+<ul>
+  <li><strong>MNIST（二值像素）</strong>：BCE
+  <pre><code>recon_loss = F.binary_cross_entropy(x_recon, x, reduction='sum')</code></pre>
+  </li>
+  <li><strong>自然图像（连续像素）</strong>：MSE
+  <pre><code>recon_loss = F.mse_loss(x_recon, x, reduction='sum')</code></pre>
+  </li>
+</ul>
+
+<div class="callout callout-warning">
+⚠️ <strong>为什么是 sum 而不是 mean</strong>：KL 项是<em>对每个样本求一个标量</em>，重构项也要"按样本对所有像素求和"才能保持两项量纲匹配。否则会出现 KL 比 reconstruction 小很多个量级、被忽略的现象。<br><br>
+这是 VAE 训练的常见坑——<strong>KL 项被淹没</strong> → 退化成普通 autoencoder。修法是要么 sum，要么对 KL 加权（β-VAE）。
+</div>
+
+<h2>十四、PyTorch 实现骨架</h2>
+
+<p>下面是一个<strong>最小可跑</strong>的 MNIST VAE，展示所有概念的实际实现：</p>
+
+<pre><code>import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+class VAE(nn.Module):
+    def __init__(self, x_dim=784, h_dim=400, z_dim=2):
+        super().__init__()
+        # ===== Encoder: 784 -> 400 -> (2 mu, 2 log_var) =====
+        self.fc1 = nn.Linear(x_dim, h_dim)
+        self.fc_mu = nn.Linear(h_dim, z_dim)
+        self.fc_log_var = nn.Linear(h_dim, z_dim)
+        # ===== Decoder: 2 -> 400 -> 784 =====
+        self.fc2 = nn.Linear(z_dim, h_dim)
+        self.fc3 = nn.Linear(h_dim, x_dim)
+
+    def encode(self, x):
+        h = F.relu(self.fc1(x))
+        return self.fc_mu(h), self.fc_log_var(h)
+
+    def reparameterize(self, mu, log_var):
+        # 重参数化技巧：z = mu + sigma * epsilon
+        std = torch.exp(0.5 * log_var)
+        eps = torch.randn_like(std)
+        return mu + std * eps
+
+    def decode(self, z):
+        h = F.relu(self.fc2(z))
+        return torch.sigmoid(self.fc3(h))  # sigmoid 把输出压到 [0, 1]
+
+    def forward(self, x):
+        mu, log_var = self.encode(x.view(-1, 784))
+        z = self.reparameterize(mu, log_var)
+        return self.decode(z), mu, log_var
+
+
+def vae_loss(x_recon, x, mu, log_var):
+    recon = F.binary_cross_entropy(x_recon, x.view(-1, 784), reduction='sum')
+    # KL = -0.5 * sum(1 + log_var - mu^2 - exp(log_var))
+    kl = -0.5 * torch.sum(1 + log_var - mu.pow(2) - log_var.exp())
+    return recon + kl</code></pre>
 
 <div class="my-addition">
-🟡 <strong>教材外补充（讲师本节没讲，后续章节展开）：</strong>
+🟡 <strong>教材外补充（讲师本讲没展开）：</strong>
 <ul>
-  <li>图像生成早在 2020 后基本投降给 diffusion——Stable Diffusion、DALL·E 2/3、Imagen、SORA 全是 diffusion 系；PixelCNN 那种纯 AR 图像模型已经被淘汰。</li>
-  <li>语言扩散的真正突破要到 2024 年 MDLM / SEDD / LLaDA，到 2026 年 8B 规模才接近同尺寸 LLaMA。详见 <a href="/video-to-notebook/textbook/21/">第 21 章</a>。</li>
-  <li>本教材后续路线：Module 1 基础（VAE / ELBO）→ Module 2 DDPM → Module 3 Score → Module 4 Flow Matching → Module 5 采样 + Latent → Module 6 离散与语言扩散，回到 Karpathy 的那个问题。</li>
+  <li><strong>β-VAE</strong>：把 loss 改成 $\text{recon} + \beta \cdot \text{KL}$，$\beta > 1$ 强迫 disentangled latent。Higgins et al. 2017 的工作。</li>
+  <li><strong>Latent Diffusion</strong>（Stable Diffusion）= 冻结 VAE 作为 latent space 提供者 + 在 latent 上做 diffusion。</li>
+  <li><strong>VAE → DDPM 的桥梁</strong>：DDPM 把 VAE 的"1 步 latent"扩成"T 步 latent"，每步都是 Gaussian。</li>
 </ul>
 </div>
 
 <figure class="clip-frame">
-  <iframe src="https://www.youtube.com/embed/HLet8XCXoKY?start=287" title="Vizuara L7: 14 vs 75 iterations 对比" allowfullscreen></iframe>
-  <figcaption>📺 Vizuara《Diffusion LM from Scratch》Lecture 6（4:47 处）—— 讲师并排展示 AR 75 步 vs Diffusion 14 步</figcaption>
+  <iframe src="https://www.youtube.com/embed/LqQNvuLqyfk?start=1304" title="Vizuara L9: 黄点在 latent space 移动" allowfullscreen></iframe>
+  <figcaption>📺 Vizuara《Principles of Diffusion Models》Lecture 2（21:44 处）—— 二维 latent 动画</figcaption>
 </figure>
 
-<div class="takeaways">
-  <strong>本章要记住的三件事（讲师亲口给的）</strong>
-  <ul>
-    <li>核心追问（Karpathy 也在问）：<strong>为什么只有文本必须 AR？</strong> 这是个"counterintuitive"问题，钻下去是一个 rabbit hole。</li>
-    <li>具体的 AR 短板：reversal curse（"Mary Lee 的儿子是谁？"）+ 推理慢（75 vs 14 步）。</li>
-    <li>Diffusion 视角：把文本视作 high-dim token space 里的概率分布；"有意义的文本"（grammar + logic 都对）只占一小块，diffusion 学的就是这块的分布。</li>
-  </ul>
+<div class="takeaways" style="background:#0b5; color:#fff; padding:1.4rem; border-radius:8px; margin-top:2rem;">
+  <h3 style="margin-top:0; color:#fff;">本章要记住的（讲师亲口给的核心）</h3>
+  <ol>
+    <li><strong>VAE = "造一台能采样的机器"</strong>（hello 机器），按一下按钮吐出一个新样本，分布要像训练数据。</li>
+    <li><strong>"Secret recipe" = latent variable $z$</strong>。找隐藏因素 → 建立 z → x 映射 → 采样问题解决一半。</li>
+    <li><strong>普通 AE 给"点"，VAE 给"分布"</strong>——这一改动让 latent space 连续，能从中自由采样。</li>
+    <li><strong>$\log p(x)$ 不可算 → ELBO 是下界</strong>（讲师"地球-火星传送猫"）。Jensen 不等式 + KL 拆分给出 6 步推导。</li>
+    <li><strong>ELBO = 重构 − KL</strong>。重构让 decoder 像原图；KL 让 encoder 输出近 $\mathcal{N}(0, I)$。</li>
+    <li><strong>重参数化技巧</strong> $z = \mu + \sigma \epsilon$ 让随机采样可导——VAE 训练的命门，DDPM 沿用。</li>
+    <li>工程细节：网络输出 $\log \sigma^2$（数值稳定）；loss 用 sum 不用 mean（KL 量纲匹配）；MNIST 用 BCE、自然图用 MSE。</li>
+  </ol>
 </div>
 
 </article>
