@@ -5,7 +5,7 @@
   <img alt="video-to-notebook" src="assets/logo/lockup-light.svg" width="460" />
 </picture>
 
-**Built for Claude Code & OpenAI Codex.** Read open-courseware as one merged notebook — textbook + concept encyclopedia in a single static site.
+**Built for Claude Code & OpenAI Codex.** Read open-course videos as one merged notebook — textbook + concept encyclopedia in a single static site.
 
 Point it at a few YouTube playlists on the same topic. Your coding agent does the heavy lifting — crawls the videos, tags every transcript chunk against your ontology, clusters them into a clean concept graph, designs a pedagogical chapter order, and writes each chapter + concept page. **No separate Anthropic API key required**: every LLM stage runs in-session through your agent's existing Claude Code or Codex subscription. Pagefind search and bilingual (中文 / English) output ship at the flip of a flag.
 
