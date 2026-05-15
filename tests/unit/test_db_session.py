@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from course_merger.db.session import connect, init_db
+from video_to_notebook.db.session import connect, init_db
 
 
 def test_init_db_creates_tables(tmp_path: Path):

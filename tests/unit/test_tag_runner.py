@@ -5,10 +5,10 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from course_merger.db.session import connect, init_db
-from course_merger.tag.claude_tagger import Tag, TagResult
-from course_merger.tag.ontology import load_ontology
-from course_merger.tag.runner import TagReport, run_tag
+from video_to_notebook.db.session import connect, init_db
+from video_to_notebook.tag.claude_tagger import Tag, TagResult
+from video_to_notebook.tag.ontology import load_ontology
+from video_to_notebook.tag.runner import TagReport, run_tag
 
 
 def _seed_one_course_with_chunks(db_path: Path, n_chunks: int = 3) -> int | None:

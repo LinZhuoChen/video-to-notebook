@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>video-to-notebook — logo directions</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Source+Serif+4:ital,wght@0,400;0,600;0,700;1,400;1,500&family=JetBrains+Mono:wght@400;500&display=swap" />
+<style>
+  :root {
+    --ink: #111418;
+    --ink-soft: #4a5160;
+    --paper: #fafaf7;
+    --paper-soft: #f1efe9;
+    --line: #d8d4cb;
+    --accent: #b65f3a;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: 'Inter', system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  header {
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 4.5rem 1.5rem 2.5rem;
+  }
+  .eyebrow {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 0.74rem;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+  h1 {
+    font-family: 'Source Serif 4', 'Source Serif Pro', Georgia, serif;
+    font-weight: 600;
+    font-size: clamp(2.2rem, 5vw, 3.4rem);
+    letter-spacing: -0.02em;
+    margin: 0.3rem 0 0.7rem;
+  }
+  header p {
+    color: var(--ink-soft);
+    max-width: 56ch;
+    line-height: 1.55;
+    margin: 0;
+  }
+
+  main {
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 0 1.5rem 6rem;
+    display: grid;
+    gap: 2.5rem;
+  }
+
+  .card {
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: #fff;
+    overflow: hidden;
+  }
+  .card-head {
+    padding: 1.4rem 1.6rem 1.1rem;
+    display: flex;
+    align-items: baseline;
+    gap: 0.8rem;
+    flex-wrap: wrap;
+    border-bottom: 1px solid var(--line);
+  }
+  .badge {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 0.7rem;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    background: var(--paper-soft);
+    color: var(--ink-soft);
+    padding: 0.25rem 0.55rem;
+    border-radius: 4px;
+  }
+  .card-head h2 {
+    font-family: 'Source Serif 4', serif;
+    font-weight: 600;
+    font-size: 1.45rem;
+    letter-spacing: -0.01em;
+    margin: 0;
+  }
+  .card-head p {
+    flex-basis: 100%;
+    margin: 0.5rem 0 0;
+    color: var(--ink-soft);
+    font-size: 0.92rem;
+    line-height: 1.55;
+  }
+
+  .stage {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    min-height: 240px;
+  }
+  .panel {
+    padding: 2.2rem 1.5rem;
+    display: grid;
+    grid-template-columns: repeat(3, auto);
+    align-items: center;
+    justify-content: space-around;
+    gap: 1.5rem;
+  }
+  .panel-light { background: #fff; color: var(--ink); }
+  .panel-dark  { background: #0f1115; color: #f3efe6; }
+
+  .specimen {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.55rem;
+  }
+  .specimen svg { display: block; }
+  .size {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 0.65rem;
+    letter-spacing: 0.18em;
+    opacity: 0.55;
+    text-transform: uppercase;
+  }
+
+  .meta {
+    padding: 1rem 1.6rem 1.4rem;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem 1.4rem;
+    border-top: 1px solid var(--line);
+    background: var(--paper);
+  }
+  .meta b {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.7rem;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+    font-weight: 500;
+  }
+  .meta span { font-size: 0.9rem; }
+
+  /* per-card accent for the badge dot */
+  .card[data-idx="1"] { --c: #2f8a52; }
+  .card[data-idx="2"] { --c: #2c6dd6; }
+  .card[data-idx="3"] { --c: #8454c8; }
+  .card[data-idx="4"] { --c: #b65f3a; }
+  .badge::before {
+    content: '';
+    display: inline-block;
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--c, var(--accent));
+    margin-right: 0.5rem;
+    vertical-align: middle;
+  }
+
+  @media (max-width: 760px) {
+    .stage { grid-template-columns: 1fr; }
+    .panel { padding: 1.4rem 1rem; gap: 1rem; }
+  }
+
+  footer {
+    max-width: 1100px;
+    margin: 0 auto 4rem;
+    padding: 0 1.5rem;
+    color: var(--ink-soft);
+    font-size: 0.88rem;
+    line-height: 1.6;
+  }
+  code {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.84em;
+    background: var(--paper-soft);
+    padding: 0.1em 0.35em;
+    border-radius: 4px;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="eyebrow">video-to-notebook · logo exploration</div>
+  <h1>Four directions, one identity.</h1>
+  <p>
+    Each mark is a single‑color SVG that inherits <code>currentColor</code> — so it picks up
+    whatever the surrounding context uses (light ink, dark ink, or the per‑module accent palette
+    already on the site). Pick one and I'll refine it: kerning, optical balance, favicon export,
+    and a horizontal "mark + wordmark" combo lockup.
+  </p>
+</header>
+
+<main>
+
+<!-- 1 -->
+<section class="card" data-idx="1">
+  <div class="card-head">
+    <span class="badge">01 · Transform glyph</span>
+    <h2>The video, the book, the notes.</h2>
+    <p>
+      An open notebook holds a filled play triangle on the left page and three written lines on
+      the right. Reads in one glance as <em>video studied → notes recorded</em>. Strongest as a
+      square favicon / avatar / GitHub social card.
+    </p>
+  </div>
+  <div class="stage">
+    <div class="panel panel-light">
+      <div class="specimen"><svg width="32"  height="32"  viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M 32 16 C 24 12 14 12 6 14 L 6 50 C 14 48 24 48 32 52 Z"/><path d="M 32 16 C 40 12 50 12 58 14 L 58 50 C 50 48 40 48 32 52 Z"/><line x1="32" y1="16" x2="32" y2="20" stroke-width="2.2"/><line x1="32" y1="48" x2="32" y2="52" stroke-width="2.2"/><path d="M 14 24 L 14 38 L 25 31 Z" fill="currentColor" stroke="none"/><line x1="38" y1="25" x2="54" y2="26"/><line x1="38" y1="31" x2="54" y2="32"/><line x1="38" y1="37" x2="50" y2="38"/></svg><span class="size">32 · favicon</span></div>
+      <div class="specimen"><svg width="64"  height="64"  viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M 32 16 C 24 12 14 12 6 14 L 6 50 C 14 48 24 48 32 52 Z"/><path d="M 32 16 C 40 12 50 12 58 14 L 58 50 C 50 48 40 48 32 52 Z"/><line x1="32" y1="16" x2="32" y2="20" stroke-width="2.2"/><line x1="32" y1="48" x2="32" y2="52" stroke-width="2.2"/><path d="M 14 24 L 14 38 L 25 31 Z" fill="currentColor" stroke="none"/><line x1="38" y1="25" x2="54" y2="26"/><line x1="38" y1="31" x2="54" y2="32"/><line x1="38" y1="37" x2="50" y2="38"/></svg><span class="size">64 · header</span></div>
+      <div class="specimen"><svg width="160" height="160" viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M 32 16 C 24 12 14 12 6 14 L 6 50 C 14 48 24 48 32 52 Z"/><path d="M 32 16 C 40 12 50 12 58 14 L 58 50 C 50 48 40 48 32 52 Z"/><line x1="32" y1="16" x2="32" y2="20" stroke-width="2.2"/><line x1="32" y1="48" x2="32" y2="52" stroke-width="2.2"/><path d="M 14 24 L 14 38 L 25 31 Z" fill="currentColor" stroke="none"/><line x1="38" y1="25" x2="54" y2="26"/><line x1="38" y1="31" x2="54" y2="32"/><line x1="38" y1="37" x2="50" y2="38"/></svg><span class="size">160 · hero</span></div>
+    </div>
+    <div class="panel panel-dark">
+      <div class="specimen"><svg width="32"  height="32"  viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M 32 16 C 24 12 14 12 6 14 L 6 50 C 14 48 24 48 32 52 Z"/><path d="M 32 16 C 40 12 50 12 58 14 L 58 50 C 50 48 40 48 32 52 Z"/><line x1="32" y1="16" x2="32" y2="20" stroke-width="2.2"/><line x1="32" y1="48" x2="32" y2="52" stroke-width="2.2"/><path d="M 14 24 L 14 38 L 25 31 Z" fill="currentColor" stroke="none"/><line x1="38" y1="25" x2="54" y2="26"/><line x1="38" y1="31" x2="54" y2="32"/><line x1="38" y1="37" x2="50" y2="38"/></svg><span class="size">dark · 32</span></div>
+      <div class="specimen"><svg width="64"  height="64"  viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M 32 16 C 24 12 14 12 6 14 L 6 50 C 14 48 24 48 32 52 Z"/><path d="M 32 16 C 40 12 50 12 58 14 L 58 50 C 50 48 40 48 32 52 Z"/><line x1="32" y1="16" x2="32" y2="20" stroke-width="2.2"/><line x1="32" y1="48" x2="32" y2="52" stroke-width="2.2"/><path d="M 14 24 L 14 38 L 25 31 Z" fill="currentColor" stroke="none"/><line x1="38" y1="25" x2="54" y2="26"/><line x1="38" y1="31" x2="54" y2="32"/><line x1="38" y1="37" x2="50" y2="38"/></svg><span class="size">dark · 64</span></div>
+      <div class="specimen" style="color:#7fb88c"><svg width="160" height="160" viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M 32 16 C 24 12 14 12 6 14 L 6 50 C 14 48 24 48 32 52 Z"/><path d="M 32 16 C 40 12 50 12 58 14 L 58 50 C 50 48 40 48 32 52 Z"/><line x1="32" y1="16" x2="32" y2="20" stroke-width="2.2"/><line x1="32" y1="48" x2="32" y2="52" stroke-width="2.2"/><path d="M 14 24 L 14 38 L 25 31 Z" fill="currentColor" stroke="none"/><line x1="38" y1="25" x2="54" y2="26"/><line x1="38" y1="31" x2="54" y2="32"/><line x1="38" y1="37" x2="50" y2="38"/></svg><span class="size">accent · m1</span></div>
+    </div>
+  </div>
+  <div class="meta">
+    <span><b>file</b> 01-transform.svg</span>
+    <span><b>strengths</b> highest semantic density · works at 16 px</span>
+    <span><b>watch</b> three motifs in 64 px — keep proportions strict</span>
+  </div>
+</section>
+
+<!-- 2 -->
+<section class="card" data-idx="2">
+  <div class="card-head">
+    <span class="badge">02 · Editorial monogram v2n</span>
+    <h2>The bookplate.</h2>
+    <p>
+      A serif <em>v2n</em> set in Source Serif 4, with the <em>2</em> italicised — the same kind
+      of typographic tell you'd find on a Faber title page. The thin frame is optional but lets
+      the mark behave like a stamp / colophon. Strongest as a textual lockup beside the wordmark.
+    </p>
+  </div>
+  <div class="stage">
+    <div class="panel panel-light">
+      <div class="specimen"><svg width="60"  height="32"  viewBox="0 0 120 64" fill="none"><rect x="2" y="2" width="116" height="60" rx="4" stroke="currentColor" stroke-width="1.4" opacity="0.55"/><g font-family="'Source Serif 4', serif" fill="currentColor" letter-spacing="-0.01em"><text x="22" y="46" font-size="44" font-weight="600">v</text><text x="52" y="46" font-size="44" font-style="italic" font-weight="500">2</text><text x="82" y="46" font-size="44" font-weight="600">n</text></g></svg><span class="size">60 · inline</span></div>
+      <div class="specimen"><svg width="120" height="64"  viewBox="0 0 120 64" fill="none"><rect x="2" y="2" width="116" height="60" rx="4" stroke="currentColor" stroke-width="1.4" opacity="0.55"/><g font-family="'Source Serif 4', serif" fill="currentColor" letter-spacing="-0.01em"><text x="22" y="46" font-size="44" font-weight="600">v</text><text x="52" y="46" font-size="44" font-style="italic" font-weight="500">2</text><text x="82" y="46" font-size="44" font-weight="600">n</text></g></svg><span class="size">120 · header</span></div>
+      <div class="specimen"><svg width="300" height="160" viewBox="0 0 120 64" fill="none"><rect x="2" y="2" width="116" height="60" rx="4" stroke="currentColor" stroke-width="1.4" opacity="0.55"/><g font-family="'Source Serif 4', serif" fill="currentColor" letter-spacing="-0.01em"><text x="22" y="46" font-size="44" font-weight="600">v</text><text x="52" y="46" font-size="44" font-style="italic" font-weight="500">2</text><text x="82" y="46" font-size="44" font-weight="600">n</text></g></svg><span class="size">300 · hero</span></div>
+    </div>
+    <div class="panel panel-dark">
+      <div class="specimen"><svg width="60"  height="32"  viewBox="0 0 120 64" fill="none"><rect x="2" y="2" width="116" height="60" rx="4" stroke="currentColor" stroke-width="1.4" opacity="0.55"/><g font-family="'Source Serif 4', serif" fill="currentColor" letter-spacing="-0.01em"><text x="22" y="46" font-size="44" font-weight="600">v</text><text x="52" y="46" font-size="44" font-style="italic" font-weight="500">2</text><text x="82" y="46" font-size="44" font-weight="600">n</text></g></svg><span class="size">dark · 60</span></div>
+      <div class="specimen"><svg width="120" height="64"  viewBox="0 0 120 64" fill="none"><rect x="2" y="2" width="116" height="60" rx="4" stroke="currentColor" stroke-width="1.4" opacity="0.55"/><g font-family="'Source Serif 4', serif" fill="currentColor" letter-spacing="-0.01em"><text x="22" y="46" font-size="44" font-weight="600">v</text><text x="52" y="46" font-size="44" font-style="italic" font-weight="500">2</text><text x="82" y="46" font-size="44" font-weight="600">n</text></g></svg><span class="size">dark · 120</span></div>
+      <div class="specimen" style="color:#7faaff"><svg width="300" height="160" viewBox="0 0 120 64" fill="none"><rect x="2" y="2" width="116" height="60" rx="4" stroke="currentColor" stroke-width="1.4" opacity="0.55"/><g font-family="'Source Serif 4', serif" fill="currentColor" letter-spacing="-0.01em"><text x="22" y="46" font-size="44" font-weight="600">v</text><text x="52" y="46" font-size="44" font-style="italic" font-weight="500">2</text><text x="82" y="46" font-size="44" font-weight="600">n</text></g></svg><span class="size">accent · m2</span></div>
+    </div>
+  </div>
+  <div class="meta">
+    <span><b>file</b> 02-monogram.svg</span>
+    <span><b>strengths</b> instantly typographic · sits well in serifed body copy</span>
+    <span><b>watch</b> depends on Source Serif 4 webfont — export to outlines for distribution</span>
+  </div>
+</section>
+
+<!-- 3 -->
+<section class="card" data-idx="3">
+  <div class="card-head">
+    <span class="badge">03 · Knowledge-graph notebook</span>
+    <h2>Concepts indexed inside a book.</h2>
+    <p>
+      A spiral-bound notebook with five concept nodes connected as a graph — the cleanest visual
+      shorthand for "many lectures, one cross-linked encyclopedia". Strongest on the concept
+      encyclopedia page and on dev-tool surfaces (npm, PyPI).
+    </p>
+  </div>
+  <div class="stage">
+    <div class="panel panel-light">
+      <div class="specimen"><svg width="32"  height="32"  viewBox="0 0 64 64" fill="none"><rect x="10" y="6" width="46" height="52" rx="2.5" stroke="currentColor" stroke-width="2.2"/><g stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><line x1="10" y1="14" x2="6" y2="14"/><line x1="10" y1="32" x2="6" y2="32"/><line x1="10" y1="50" x2="6" y2="50"/></g><g stroke="currentColor" stroke-width="1.6" stroke-linecap="round" opacity="0.65"><line x1="22" y1="20" x2="33" y2="32"/><line x1="44" y1="20" x2="33" y2="32"/><line x1="33" y1="32" x2="22" y2="46"/><line x1="33" y1="32" x2="44" y2="46"/><line x1="22" y1="20" x2="44" y2="20"/></g><g fill="currentColor"><circle cx="22" cy="20" r="3"/><circle cx="44" cy="20" r="3"/><circle cx="33" cy="32" r="3.4"/><circle cx="22" cy="46" r="3"/><circle cx="44" cy="46" r="3"/></g></svg><span class="size">32 · favicon</span></div>
+      <div class="specimen"><svg width="64"  height="64"  viewBox="0 0 64 64" fill="none"><rect x="10" y="6" width="46" height="52" rx="2.5" stroke="currentColor" stroke-width="2.2"/><g stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><line x1="10" y1="14" x2="6" y2="14"/><line x1="10" y1="32" x2="6" y2="32"/><line x1="10" y1="50" x2="6" y2="50"/></g><g stroke="currentColor" stroke-width="1.6" stroke-linecap="round" opacity="0.65"><line x1="22" y1="20" x2="33" y2="32"/><line x1="44" y1="20" x2="33" y2="32"/><line x1="33" y1="32" x2="22" y2="46"/><line x1="33" y1="32" x2="44" y2="46"/><line x1="22" y1="20" x2="44" y2="20"/></g><g fill="currentColor"><circle cx="22" cy="20" r="3"/><circle cx="44" cy="20" r="3"/><circle cx="33" cy="32" r="3.4"/><circle cx="22" cy="46" r="3"/><circle cx="44" cy="46" r="3"/></g></svg><span class="size">64 · header</span></div>
+      <div class="specimen"><svg width="160" height="160" viewBox="0 0 64 64" fill="none"><rect x="10" y="6" width="46" height="52" rx="2.5" stroke="currentColor" stroke-width="2.2"/><g stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><line x1="10" y1="14" x2="6" y2="14"/><line x1="10" y1="32" x2="6" y2="32"/><line x1="10" y1="50" x2="6" y2="50"/></g><g stroke="currentColor" stroke-width="1.6" stroke-linecap="round" opacity="0.65"><line x1="22" y1="20" x2="33" y2="32"/><line x1="44" y1="20" x2="33" y2="32"/><line x1="33" y1="32" x2="22" y2="46"/><line x1="33" y1="32" x2="44" y2="46"/><line x1="22" y1="20" x2="44" y2="20"/></g><g fill="currentColor"><circle cx="22" cy="20" r="3"/><circle cx="44" cy="20" r="3"/><circle cx="33" cy="32" r="3.4"/><circle cx="22" cy="46" r="3"/><circle cx="44" cy="46" r="3"/></g></svg><span class="size">160 · hero</span></div>
+    </div>
+    <div class="panel panel-dark">
+      <div class="specimen"><svg width="32"  height="32"  viewBox="0 0 64 64" fill="none"><rect x="10" y="6" width="46" height="52" rx="2.5" stroke="currentColor" stroke-width="2.2"/><g stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><line x1="10" y1="14" x2="6" y2="14"/><line x1="10" y1="32" x2="6" y2="32"/><line x1="10" y1="50" x2="6" y2="50"/></g><g stroke="currentColor" stroke-width="1.6" stroke-linecap="round" opacity="0.65"><line x1="22" y1="20" x2="33" y2="32"/><line x1="44" y1="20" x2="33" y2="32"/><line x1="33" y1="32" x2="22" y2="46"/><line x1="33" y1="32" x2="44" y2="46"/><line x1="22" y1="20" x2="44" y2="20"/></g><g fill="currentColor"><circle cx="22" cy="20" r="3"/><circle cx="44" cy="20" r="3"/><circle cx="33" cy="32" r="3.4"/><circle cx="22" cy="46" r="3"/><circle cx="44" cy="46" r="3"/></g></svg><span class="size">dark · 32</span></div>
+      <div class="specimen"><svg width="64"  height="64"  viewBox="0 0 64 64" fill="none"><rect x="10" y="6" width="46" height="52" rx="2.5" stroke="currentColor" stroke-width="2.2"/><g stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><line x1="10" y1="14" x2="6" y2="14"/><line x1="10" y1="32" x2="6" y2="32"/><line x1="10" y1="50" x2="6" y2="50"/></g><g stroke="currentColor" stroke-width="1.6" stroke-linecap="round" opacity="0.65"><line x1="22" y1="20" x2="33" y2="32"/><line x1="44" y1="20" x2="33" y2="32"/><line x1="33" y1="32" x2="22" y2="46"/><line x1="33" y1="32" x2="44" y2="46"/><line x1="22" y1="20" x2="44" y2="20"/></g><g fill="currentColor"><circle cx="22" cy="20" r="3"/><circle cx="44" cy="20" r="3"/><circle cx="33" cy="32" r="3.4"/><circle cx="22" cy="46" r="3"/><circle cx="44" cy="46" r="3"/></g></svg><span class="size">dark · 64</span></div>
+      <div class="specimen" style="color:#c69bff"><svg width="160" height="160" viewBox="0 0 64 64" fill="none"><rect x="10" y="6" width="46" height="52" rx="2.5" stroke="currentColor" stroke-width="2.2"/><g stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><line x1="10" y1="14" x2="6" y2="14"/><line x1="10" y1="32" x2="6" y2="32"/><line x1="10" y1="50" x2="6" y2="50"/></g><g stroke="currentColor" stroke-width="1.6" stroke-linecap="round" opacity="0.65"><line x1="22" y1="20" x2="33" y2="32"/><line x1="44" y1="20" x2="33" y2="32"/><line x1="33" y1="32" x2="22" y2="46"/><line x1="33" y1="32" x2="44" y2="46"/><line x1="22" y1="20" x2="44" y2="20"/></g><g fill="currentColor"><circle cx="22" cy="20" r="3"/><circle cx="44" cy="20" r="3"/><circle cx="33" cy="32" r="3.4"/><circle cx="22" cy="46" r="3"/><circle cx="44" cy="46" r="3"/></g></svg><span class="size">accent · m3</span></div>
+    </div>
+  </div>
+  <div class="meta">
+    <span><b>file</b> 03-graph.svg</span>
+    <span><b>strengths</b> conceptual — speaks the encyclopedia language directly</span>
+    <span><b>watch</b> at 16 px the edges blur; favicon export should drop them</span>
+  </div>
+</section>
+
+<!-- 4 -->
+<section class="card" data-idx="4">
+  <div class="card-head">
+    <span class="badge">04 · Stacked wordmark</span>
+    <h2>video → to notebook.</h2>
+    <p>
+      Italic <em>video</em> on top, an editorial rule with an arrow as the transformation, then a
+      bold <em>to notebook</em> as the destination. Pure typography — no glyph. Strongest as a
+      site header, a printed colophon, or a paper-style title block.
+    </p>
+  </div>
+  <div class="stage">
+    <div class="panel panel-light">
+      <div class="specimen"><svg width="120" height="50"  viewBox="0 0 240 100" fill="none"><g font-family="'Source Serif 4', serif" fill="currentColor"><text x="120" y="36" text-anchor="middle" font-size="30" font-style="italic" font-weight="400" letter-spacing="0.02em" opacity="0.85">video</text><text x="120" y="82" text-anchor="middle" font-size="30" font-weight="700" letter-spacing="-0.005em">to notebook</text></g><g stroke="currentColor" stroke-width="1.6" stroke-linecap="round" fill="none"><line x1="80" y1="52" x2="156" y2="52"/><polyline points="150,47 160,52 150,57" stroke-linejoin="round"/></g></svg><span class="size">120 · inline</span></div>
+      <div class="specimen"><svg width="240" height="100" viewBox="0 0 240 100" fill="none"><g font-family="'Source Serif 4', serif" fill="currentColor"><text x="120" y="36" text-anchor="middle" font-size="30" font-style="italic" font-weight="400" letter-spacing="0.02em" opacity="0.85">video</text><text x="120" y="82" text-anchor="middle" font-size="30" font-weight="700" letter-spacing="-0.005em">to notebook</text></g><g stroke="currentColor" stroke-width="1.6" stroke-linecap="round" fill="none"><line x1="80" y1="52" x2="156" y2="52"/><polyline points="150,47 160,52 150,57" stroke-linejoin="round"/></g></svg><span class="size">240 · header</span></div>
+      <div class="specimen"><svg width="360" height="150" viewBox="0 0 240 100" fill="none"><g font-family="'Source Serif 4', serif" fill="currentColor"><text x="120" y="36" text-anchor="middle" font-size="30" font-style="italic" font-weight="400" letter-spacing="0.02em" opacity="0.85">video</text><text x="120" y="82" text-anchor="middle" font-size="30" font-weight="700" letter-spacing="-0.005em">to notebook</text></g><g stroke="currentColor" stroke-width="1.6" stroke-linecap="round" fill="none"><line x1="80" y1="52" x2="156" y2="52"/><polyline points="150,47 160,52 150,57" stroke-linejoin="round"/></g></svg><span class="size">360 · hero</span></div>
+    </div>
+    <div class="panel panel-dark">
+      <div class="specimen"><svg width="120" height="50"  viewBox="0 0 240 100" fill="none"><g font-family="'Source Serif 4', serif" fill="currentColor"><text x="120" y="36" text-anchor="middle" font-size="30" font-style="italic" font-weight="400" letter-spacing="0.02em" opacity="0.85">video</text><text x="120" y="82" text-anchor="middle" font-size="30" font-weight="700" letter-spacing="-0.005em">to notebook</text></g><g stroke="currentColor" stroke-width="1.6" stroke-linecap="round" fill="none"><line x1="80" y1="52" x2="156" y2="52"/><polyline points="150,47 160,52 150,57" stroke-linejoin="round"/></g></svg><span class="size">dark · 120</span></div>
+      <div class="specimen"><svg width="240" height="100" viewBox="0 0 240 100" fill="none"><g font-family="'Source Serif 4', serif" fill="currentColor"><text x="120" y="36" text-anchor="middle" font-size="30" font-style="italic" font-weight="400" letter-spacing="0.02em" opacity="0.85">video</text><text x="120" y="82" text-anchor="middle" font-size="30" font-weight="700" letter-spacing="-0.005em">to notebook</text></g><g stroke="currentColor" stroke-width="1.6" stroke-linecap="round" fill="none"><line x1="80" y1="52" x2="156" y2="52"/><polyline points="150,47 160,52 150,57" stroke-linejoin="round"/></g></svg><span class="size">dark · 240</span></div>
+      <div class="specimen" style="color:#d8a06b"><svg width="360" height="150" viewBox="0 0 240 100" fill="none"><g font-family="'Source Serif 4', serif" fill="currentColor"><text x="120" y="36" text-anchor="middle" font-size="30" font-style="italic" font-weight="400" letter-spacing="0.02em" opacity="0.85">video</text><text x="120" y="82" text-anchor="middle" font-size="30" font-weight="700" letter-spacing="-0.005em">to notebook</text></g><g stroke="currentColor" stroke-width="1.6" stroke-linecap="round" fill="none"><line x1="80" y1="52" x2="156" y2="52"/><polyline points="150,47 160,52 150,57" stroke-linejoin="round"/></g></svg><span class="size">accent · m4</span></div>
+    </div>
+  </div>
+  <div class="meta">
+    <span><b>file</b> 04-wordmark.svg</span>
+    <span><b>strengths</b> readable at any size · no glyph to maintain</span>
+    <span><b>watch</b> needs the symbol mark beside it (01 or 03) for square placements</span>
+  </div>
+</section>
+
+</main>
+
+<footer>
+  <p>
+    All four files live in <code>assets/logo/</code>. Pick a favourite and I'll deliver a refined
+    set: outlined-text exports (no webfont dependency), <code>favicon.svg</code>, README header
+    art, dark-mode variant, and a horizontal <em>mark + wordmark</em> lockup. Hybrids welcome —
+    e.g. 03's notebook glyph beside 04's stacked type.
+  </p>
+</footer>
+
+</body>
+</html>

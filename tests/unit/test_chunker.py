@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from course_merger.crawl.base import Chunk, Chunker
-from course_merger.crawl.subtitles import Cue
+from video_to_notebook.crawl.base import Chunk, Chunker
+from video_to_notebook.crawl.subtitles import Cue
 
 
 def _mk_cues(count: int, words_per_cue: int = 5, dur: float = 3.0) -> list[Cue]:

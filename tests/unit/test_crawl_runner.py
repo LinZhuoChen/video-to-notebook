@@ -5,8 +5,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from course_merger.crawl.runner import CrawlReport, run_crawl
-from course_merger.db.session import connect, init_db
+from video_to_notebook.crawl.runner import CrawlReport, run_crawl
+from video_to_notebook.db.session import connect, init_db
 
 
 @pytest.fixture

@@ -1,6 +1,7 @@
 ---
 import Base from '../layouts/Base.astro';
 import { getCollection } from 'astro:content';
+import { t, currentLanguage } from '../i18n';
 
 const courses = await getCollection('course');
 const concepts = await getCollection('concept');
@@ -13,25 +14,30 @@ try {
   chapters = [];
 }
 const synthesizedCount = chapters.filter((c: any) => c.status === 'synthesized').length;
+const ctaHeading = currentLanguage === 'en' ? '📖 Start reading' : '📖 开始阅读';
+const ctaProgressLabel = currentLanguage === 'en' ? 'generated' : '已生成';
+const ctaChapterLabel = currentLanguage === 'en' ? 'chapters' : '章';
+const resourcesHeading = currentLanguage === 'en' ? 'Source resources (lookup)' : '原始资源（lookup）';
 ---
 <Base title="Home">
-  <h1>course-merger</h1>
-  <p class="lead">把多门公开课合并成一本可读的教材。</p>
+  <h1>video-to-notebook</h1>
+  <p class="lead">{t.index_lead}</p>
 
   {synthesizedCount > 0 && (
     <section class="cta">
-      <h2>📖 开始阅读</h2>
-      <p>已生成 <strong>{synthesizedCount}/{chapters.length}</strong> 章。</p>
-      <p><a class="primary-cta" href="/textbook/">进入教材目录 →</a></p>
+      <h2>{ctaHeading}</h2>
+      <p>{currentLanguage === 'en'
+          ? <>Generated <strong>{synthesizedCount}/{chapters.length}</strong> chapters.</>
+          : <>已生成 <strong>{synthesizedCount}/{chapters.length}</strong> 章。</>
+      }</p>
+      <p><a class="primary-cta" href="/textbook/">{t.index_cta_open_textbook}</a></p>
     </section>
   )}
 
-  <h2>原始资源（lookup）</h2>
+  <h2>{resourcesHeading}</h2>
+  <p>{t.index_stats(courses.length, concepts.length)}</p>
   <p>
-    {courses.length} 门课程 · {concepts.length} 个概念已索引。
-  </p>
-  <p>
-    <a href="/courses/">按课程浏览</a> · <a href="/concepts/">按概念浏览</a>
+    <a href="/courses/">{t.index_browse_by_course}</a> · <a href="/concepts/">{t.index_browse_by_concept}</a>
   </p>
 </Base>
 

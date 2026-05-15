@@ -6,8 +6,8 @@ from unittest.mock import patch
 
 import pytest
 
-from course_merger.crawl.exceptions import PlaylistFetchError
-from course_merger.crawl.youtube import YouTubeCrawler
+from video_to_notebook.crawl.exceptions import PlaylistFetchError
+from video_to_notebook.crawl.youtube import YouTubeCrawler
 
 
 def _fake_completed(stdout: str = "", stderr: str = "", returncode: int = 0):

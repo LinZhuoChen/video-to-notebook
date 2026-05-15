@@ -6,13 +6,13 @@ from unittest.mock import MagicMock
 import numpy as np
 import pytest
 
-from course_merger.cluster.prompt_io import (
+from video_to_notebook.cluster.prompt_io import (
     apply_cluster_results,
     collect_cluster_prompts,
 )
-from course_merger.cluster.runner import ClusterReport
-from course_merger.db.session import connect, init_db
-from course_merger.tag.ontology import load_ontology
+from video_to_notebook.cluster.runner import ClusterReport
+from video_to_notebook.db.session import connect, init_db
+from video_to_notebook.tag.ontology import load_ontology
 
 
 def _seed(db_path: Path) -> None:

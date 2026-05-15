@@ -4,14 +4,14 @@ from pathlib import Path
 
 import pytest
 
-from course_merger.build.queries import (
+from video_to_notebook.build.queries import (
     all_concepts_with_counts,
     all_courses_with_lecture_counts,
     chunks_for_lecture,
     concept_occurrences,
     lectures_for_course,
 )
-from course_merger.db.session import connect, init_db
+from video_to_notebook.db.session import connect, init_db
 
 
 @pytest.fixture

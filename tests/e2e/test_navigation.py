@@ -7,7 +7,7 @@ from playwright.sync_api import Page, expect
 @pytest.mark.e2e
 def test_home_lists_courses_and_concepts(astro_server: str, page: Page):
     page.goto(astro_server)
-    expect(page.locator("h1")).to_have_text("course-merger")
+    expect(page.locator("h1")).to_have_text("video-to-notebook")
     body = page.content()
     assert "2 course" in body
     assert "1 concept" in body

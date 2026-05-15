@@ -7,7 +7,7 @@ ignore = ["E501"]
 
 [lint.per-file-ignores]
 # typer idiomatically calls Option/Argument as default values; not a bug.
-"src/course_merger/cli.py" = ["B008"]
+"src/video_to_notebook/cli.py" = ["B008"]
 
 [format]
 quote-style = "double"

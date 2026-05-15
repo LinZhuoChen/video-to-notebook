@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 460 96" role="img" aria-label="video-to-notebook">
+  <title>video-to-notebook</title>
+  <g transform="translate(8 8) scale(1.25)" fill="none" stroke="#f3efe6"
+     stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M 32 17 C 24 13 14 13 6 15 L 6 49 C 14 47 24 47 32 51 Z" />
+    <path d="M 32 17 C 40 13 50 13 58 15 L 58 49 C 50 47 40 47 32 51 Z" />
+    <line x1="32" y1="14" x2="32" y2="19" />
+    <line x1="32" y1="49" x2="32" y2="54" />
+    <path d="M 15 25 L 15 39 L 26 32 Z" fill="#f3efe6" stroke="none" />
+    <line x1="38" y1="26" x2="53" y2="27" stroke-width="2.2" />
+    <line x1="38" y1="32" x2="53" y2="33" stroke-width="2.2" />
+    <line x1="38" y1="38" x2="48" y2="39" stroke-width="2.2" />
+  </g>
+  <g font-family="'Source Serif 4', 'Source Serif Pro', 'Iowan Old Style', 'Palatino', 'Georgia', serif"
+     fill="#f3efe6">
+    <text x="110" y="60" font-size="38" font-weight="600" letter-spacing="-0.01em">video-to-notebook</text>
+  </g>
+  <text x="110" y="80"
+        font-family="ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace"
+        font-size="9" letter-spacing="0.22em" fill="#a8a59c">
+    CRAWL · TAG · MERGE · READ
+  </text>
+</svg>

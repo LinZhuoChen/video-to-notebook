@@ -1,8 +1,51 @@
 # Changelog
 
-All notable changes to course-merger. Follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/).
+All notable changes to video-to-notebook (formerly `course-merger`). Follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [2.0.0] — 2026-05-15
+
+### Changed — project renamed to `video-to-notebook` (BREAKING)
+
+- The project formerly known as **course-merger** is now **video-to-notebook**. The name surfaces what the tool actually does: turn a stack of video courses into a single navigable notebook (textbook + concept encyclopedia). Pip package, CLI entry point, Python module, project marker, skill name, and Astro template branding all renamed in lockstep.
+- **CLI**: `video-to-notebook ...` is the canonical entry point. A back-compat shim `course-merger` is still installed and forwards to the same Typer app, so existing scripts keep working — but it now prints a one-line deprecation notice on startup and will be removed in 3.0.0.
+- **Python module**: `import video_to_notebook` (was `import course_merger`). No re-export shim; if you were importing internals, update your import paths.
+- **Project marker directory**: new projects use `.video-to-notebook/` (was `.course-merger/`). On `init`, `tag`, `cluster`, etc., the CLI prefers `.video-to-notebook/`; if it finds only a legacy `.course-merger/`, it errors out with a one-line migration command rather than silently writing into the old marker.
+
+#### Migrating a v1.x project to v2.0.0
+
+```bash
+# 1. inside the project dir
+mv .course-merger .video-to-notebook
+
+# 2. update the package
+uv tool upgrade video-to-notebook    # or: pip install -U video-to-notebook
+
+# 3. re-run any command — same DB, same chunks, no re-crawl, no re-tag
+video-to-notebook build
+```
+
+The SQLite schema, chunk text, tag tables, curriculum, and synthesized HTML fragments are 100% forwards-compatible — the rename only touches the directory name and the binary name.
+
+#### Files no longer present in v2.0.0
+
+- `src/course_merger/` → `src/video_to_notebook/` (Python package renamed)
+- `skills/course-merger/` → `skills/video-to-notebook/` (Claude Code skill renamed)
+- All README badges, GitHub URLs, install instructions point at `video-to-notebook`.
+
+### Added — quality discipline for synthesis (shipped with the rename)
+
+- **Source-fidelity rule** (synthesize v3, explain v4) — both style guides now open with a "Source Fidelity First" principle: the agent must extract the lecturer's metaphors, worked examples, named citations, and verbatim phrasings from the chunks BEFORE drafting; layer its own framing on top with an explicit `🟡 教材外补充` flag wrapped in `<div class="my-addition">`. If two courses give different metaphors for the same concept, both get preserved and labelled.
+- **No-fabrication rule** — when source chunks come up thin (e.g. all 20 chunks are course-logistics chatter, or one alphabetically-early course dominates the LIMIT), the agent is required to **stop and diagnose the pipeline** rather than paper over the gap with training-data knowledge. Includes a `sqlite3` diagnostic recipe in `SKILL.md`.
+- **Textbook-note depth target** (synthesize v3) — new `PRINCIPLE 1` block sets the per-chapter target at 5,000–8,000 中文字 of body prose with: TL;DR callout at the top, 8–14 top-level sections (一二三四 …), step-by-step derivations where every line has `**Why**:` annotation, 3–5 colour-coded callouts (`callout-info / callout-note / callout-warning / callout-tip / callout-quote`), engineering details embedded as inline callouts not deferred, complete runnable PyTorch skeleton when a model is introduced, 5–7 takeaways anchored to specific lecturer-given examples. Under 4,000 字 flagged as under-developed; over 10,000 字 flagged as bloated.
+- **Batch-vs-chapter-by-chapter mode** (`SKILL.md` Step T1.5) — every agent-driven textbook generation must first ask the user (via `AskUserQuestion`) which workflow to use: 整本批量做 (continuous run, build once at the end) or 一章一章来 (synthesize chapter 1, build, hand control back for feedback, then repeat). Same choice applied to `course-merger explain` for concept-page generation. Typical pattern recommended in skill: chapter-by-chapter for first 2–3 chapters until style is signed off, then flip to batch.
+
+### Fixed — chunk selection regression
+
+- **`synthesize/prompt_io.py` chunk selection rewritten in Python** — old SQL `LIMIT 20 ORDER BY course_slug, lecture_idx, chunks.idx` caused the alphabetically-first course to monopolise the 20-chunk budget even when another course had much deeper coverage of the chapter's primary concept (e.g. a CMU course-intro lecture won over Vizuara's 91-chunk dedicated VAE lecture for the `vae-encoder` chapter). New `_select_chunks` does (1) one breadth pass — 1 chunk per lecture in primary-coverage-count order; then (2) depth pass — pour the remaining budget into lectures by coverage, fully exhausting the dominant lecture before moving on. Same fix applied to `explain/prompt_io.py` via `_allocate_occurrences`.
+
+### Added — README design-principles section
+
+- New `## 🧭 Design principles` block near the top of README explains the three core differentiators (source fidelity, no fabrication, textbook-note depth) and links them to the style-guide source files.
 
 ## [1.4.0] — 2026-05-14
 

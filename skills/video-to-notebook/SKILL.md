@@ -1,0 +1,322 @@
+---
+name: video-to-notebook
+description: Use when the user wants to crawl open-courseware (YouTube/Bilibili playlists), tag content with concept labels via Claude, cluster them into a unified ontology across courses, and build an interactive static HTML site / textbook for self-study. Trigger on ANY phrasing that combines a "multiple courses / playlists / lectures" input with a "build / make / generate a site / website / web / textbook / study site / knowledge map / encyclopedia" output verb. Examples: "combine 2 (or N) courses and build a web/website/site", "merge these courses into one knowledge map", "build a study site from these courses", "crawl these playlists and make pages for each concept", "ingest these lectures and let me browse by concept", "turn these YouTube playlists into a textbook", "做一个跨课程的学习站", "把这些课合并成一个网站", "把这几门课整理成教材 / 知识图谱 / 一个网页", "爬这门课做知识地图". The skill applies whether the user calls the output a "web", "website", "site", "textbook", "study site", "encyclopedia", or "知识库 / 学习站 / 教材". NOT for: tagging a single transcript (use the user's own scripts), summarizing one video (use video-course-notes), or general note-taking (use obsidian-brain).
+---
+
+# video-to-notebook
+
+A Python CLI that crawls open-courseware, tags it with Claude, and renders a cross-course concept-anchored static site. The skill walks the user through the 5-step pipeline.
+
+## When to invoke this skill
+
+The user wants to **merge multiple courses into one navigable site organized by concept**, NOT just transcribe or summarize one video.
+
+Concrete triggers (fuzzy-match — invoke if the user says anything in this neighbourhood):
+
+English:
+- "Crawl these 3 YouTube playlists and let me browse by concept"
+- "Build a study site from CS336 + GPU-MODE + Vizuara"
+- **"Combine 2 (or N) courses and build a web / website / site / textbook"**
+- "Merge these YouTube / Bilibili playlists into one textbook"
+- "Turn these lectures into a knowledge map / encyclopedia"
+- "Ingest these lectures and let me browse by concept"
+- "Make pages for each concept across these courses"
+
+Chinese:
+- "我想把 X、Y、Z 三门课合并成一个网站，按概念组织"
+- "把这几门课整理成教材 / 知识库 / 一个学习站"
+- "爬这门课做知识地图"
+- "做一个跨课程的学习站"
+
+Heuristic: the user mentions **(a) multiple sources** (courses / playlists / lectures / 课程 / 讲座) **+ (b) an output verb** (build / make / generate / 合并 / 整理 / 做 / 爬 ... 站 / 教材 / 网页) **in the same request**. Output language ("web", "website", "textbook", "study site", "knowledge map", "encyclopedia", "学习站", "教材", "知识库", "网页") is interchangeable — all mean the same thing in this context.
+
+NOT this skill if the request is:
+- "Take notes on this one lecture" → use `video-course-notes`
+- "Summarize this video" → user's own tools
+- "Add this concept to my vault" → `obsidian-wiki`
+
+## Prerequisites — check before starting
+
+```bash
+which video-to-notebook 2>/dev/null || echo "MISSING"
+node --version 2>/dev/null || echo "MISSING-NODE"
+echo "ANTHROPIC_API_KEY: $([ -n "$ANTHROPIC_API_KEY" ] && echo SET || echo MISSING)"
+```
+
+If `video-to-notebook` is MISSING: install with `pip install video-to-notebook` or `uv tool install video-to-notebook`.
+If Node is MISSING: install Node 20+ (brew install node).
+If ANTHROPIC_API_KEY is MISSING: stop and ask the user to set it — without it, tag/cluster fail.
+
+## The 5-step pipeline
+
+After confirming prerequisites, work through this with the user. Confirm each step before running the next; tag and cluster cost real money.
+
+### Step 1: Initialize a project
+
+```bash
+cd <project-dir>     # ask the user where to set up the project
+video-to-notebook init
+```
+
+If the directory already has `.video-to-notebook/`, ask whether to use it or `--force` re-init.
+
+### Step 2: Crawl each course
+
+For each course URL the user provides:
+
+```bash
+# YouTube
+video-to-notebook crawl "<url>" --name "<slug>"
+
+# Bilibili (requires logged-in browser)
+video-to-notebook crawl "<url>" --name "<slug>" --cookies-from edge
+```
+
+Use `--name` to give a human-readable slug (e.g. `cs336`, `gpu-mode`). Without it the slug is derived from the URL's playlist/video ID, which is ugly.
+
+Report counts after each crawl: `done: N ok, M no-subs, K errors`.
+
+### Step 3: Tag with concept labels (costs ~$0.10/course)
+
+The user MUST provide an ontology YAML. If they don't have one:
+- For LLM/Transformer/GPU courses, point them at `examples/ontology-llm.yaml` in the repo.
+- For other domains, ask them to draft 10-30 seed concepts in the YAML format (see `examples/ontology-llm.yaml` for shape).
+
+```bash
+video-to-notebook tag --ontology <path-to-ontology.yaml> --limit 100
+```
+
+Use `--limit 100` for the first run to cost-cap the API spend. After they're happy with the tags, run without `--limit` to tag the rest.
+
+### Step 4: Cluster proposed tags (costs ~$0.30/run)
+
+```bash
+video-to-notebook cluster --ontology <path-to-ontology.yaml>
+```
+
+Reports merged/created/rejected/ambiguous counts. If many are ambiguous, the user may want to enlarge their seed ontology and re-run.
+
+### Step 5: Build the static site
+
+```bash
+video-to-notebook build           # produces site/dist/
+video-to-notebook serve           # local preview at http://localhost:4321
+```
+
+The user can browse and tell you what to tweak. Common follow-ups:
+- "Tag more chunks": re-run step 3 with a higher `--limit`.
+- "Re-render after editing ontology": `video-to-notebook build --incremental` only re-renders concepts marked dirty by the last `cluster` run.
+- "Deploy": see `examples/frontier-notebook/` for the GitHub Pages pattern.
+
+## In-session mode (Claude Max users — no API key)
+
+If the user has Claude Max (or any Claude Code subscription), they should NOT need a separate Anthropic API key. The tag and cluster commands each support a two-step pattern: emit work to JSON, decide in this conversation, apply back.
+
+### When to recommend this mode
+
+After Step 2 (crawl), check chunk count:
+
+```bash
+sqlite3 .video-to-notebook/db.sqlite "SELECT COUNT(*) FROM chunks"
+```
+
+| Chunk count | Mode |
+|-------------|------|
+| **< 200** | **In-session** (no API key, free via subscription) |
+| 200–1000 | Either; in-session is slower but free |
+| > 1000 | **API mode** — too slow to batch through conversation |
+
+If the user explicitly says "I have Max" or "no API key", default to in-session regardless of size.
+
+### In-session tag loop
+
+```bash
+video-to-notebook tag --ontology <ont.yaml> --print-prompts --limit 20 > /tmp/cm-prompts.json
+```
+
+Read `/tmp/cm-prompts.json`:
+
+```json
+{
+  "schema_version": "1",
+  "kind": "tag_prompts",
+  "ontology_slugs": ["self-attention", "..."],
+  "chunks": [{"chunk_id": 1, "text": "..."}]
+}
+```
+
+For each chunk, decide tags (your own reasoning) and write `/tmp/cm-results.json`:
+
+```json
+{
+  "schema_version": "1",
+  "kind": "tag_results",
+  "tagger_model_id": "claude-code-max:v1",
+  "results": [
+    {"chunk_id": 1, "tags": [{"slug": "self-attention", "confidence": 0.9}]}
+  ]
+}
+```
+
+Apply:
+
+```bash
+video-to-notebook tag --ontology <ont.yaml> --apply-results /tmp/cm-results.json
+```
+
+Repeat until `--print-prompts` returns empty `chunks` array.
+
+### In-session cluster
+
+```bash
+video-to-notebook cluster --ontology <ont.yaml> --print-prompts > /tmp/cm-cluster-prompts.json
+```
+
+Read the envelope. For each cluster, decide merge / create / reject / ambiguous.
+
+Construct apply bundle (single file with BOTH envelopes):
+
+```json
+{
+  "_prompts_envelope": { ... full /tmp/cm-cluster-prompts.json content ... },
+  "decisions_envelope": {
+    "schema_version": "1",
+    "kind": "cluster_results",
+    "reviewer_model_id": "claude-code-max:v1",
+    "decisions": [
+      {"cluster_id": 0, "decision": "merge", "target_slug": "rotary-positional-encoding"}
+    ]
+  }
+}
+```
+
+Apply:
+
+```bash
+video-to-notebook cluster --ontology <ont.yaml> --apply-results /tmp/cm-cluster-apply.json
+```
+
+## Textbook generation (v1.2+, Plan 6)
+
+After tag + cluster complete, you can synthesize the corpus into a beginner-friendly textbook. This is the "pivot mode" — instead of indexing concepts, you produce a multi-chapter HTML reader for someone learning the topic from scratch.
+
+### Step T1: Design the curriculum
+
+```bash
+video-to-notebook curriculum --print-prompts > /tmp/cm-curr.json
+```
+
+Read `/tmp/cm-curr.json`. It contains every concept that has chunks + sample chunks per concept. Decide a beginner-pedagogical chapter order. Write `/tmp/cm-curr-results.json`:
+
+```json
+{
+  "schema_version": "1",
+  "kind": "curriculum_results",
+  "designer": "claude-code-max:v1",
+  "chapters": [
+    {
+      "order_idx": 1,
+      "module": "Module 1: 数学直觉",
+      "title": "什么是向量",
+      "blurb": "数 ≠ 向量。向量是带方向的位移。",
+      "primary_concept_slug": "linear-algebra",
+      "related_concept_slugs": []
+    }
+  ]
+}
+```
+
+Apply:
+
+```bash
+video-to-notebook curriculum --apply-results /tmp/cm-curr-results.json
+```
+
+### Step T1.5: Ask the user which synthesis mode (DEFAULT — do this every time)
+
+After the curriculum is applied and BEFORE you call `synthesize` on any chapter, you MUST ask the user which workflow they want. Each chapter is ~5,000–8,000 字 of careful, source-grounded writing, so batch mode commits the user to a long unattended run; chapter-by-chapter lets them course-correct after seeing the first one. Both are valid — let them choose.
+
+Use `AskUserQuestion` with a 2-option single-select. Suggested phrasing:
+
+```
+Question: 这门课怎么生成？
+- 整本批量做 (推荐用于已经熟悉风格的复跑) — 我会按章节顺序连续 synthesize 所有 N 章，每章 5–8K 字 + PyTorch 骨架 + 多比喻。中间不停。预计 X 小时。
+- 一章一章来 (推荐第一次跑或换了课程主题) — 我先做第 1 章给你看，确认深度 / 排版 / 比喻取舍后再继续下一章。每章之间你可以反馈。
+```
+
+When the user picks **batch mode**: loop through chapters 1..N, do `--print-prompts` → write HTML → `--apply-results` for each, then `build` once at the end. Don't pause between chapters unless an error blocks you.
+
+When the user picks **chapter-by-chapter**: do chapter 1 only, then `build` immediately so they can open the page in browser, then explicitly hand control back ("第 1 章已上线 http://localhost:4321/textbook/1/ — 看完告诉我继续还是改方向"). Wait for their go-ahead before chapter 2.
+
+Either mode follows the same per-chapter style guide (Principle 1 — textbook-note depth, etc.) — the choice is only about pacing, not quality bar.
+
+The same choice applies to `video-to-notebook explain` (concept pages) — ask the same batch-vs-one-at-a-time question before kicking off concept synthesis. Typical pattern: do the textbook in chapter-by-chapter mode for the first 2–3 chapters until the user signs off on the style, then offer to flip to batch mode for the rest.
+
+### Step T2: Synthesize each chapter (one at a time)
+
+For each chapter N:
+
+```bash
+video-to-notebook synthesize --chapter N --print-prompts > /tmp/cm-chN.json
+```
+
+Read the envelope: chapter spec + all source chunks for the chapter's primary + related concepts + style guide. Following the style guide:
+- **Textbook-note depth (target 5,000–8,000 中文字 per chapter)** — the chapter should read like a graduate student's Obsidian study notes after watching the lecture, NOT a magazine summary. Concrete checklist: (1) TL;DR callout block at the top with the central formula + a hook; (2) 8–14 top-level sections using 一二三四 …; (3) step-by-step derivations with `<div class="deriv-step">` blocks containing `**Why**:` annotations for every non-trivial algebra move (reader follows with a pencil); (4) preserve ALL distinctive lecturer analogies — if the lecturer gave 4 metaphors for the same concept, keep all 4; (5) 3–5 callout boxes inline (`callout-info / callout-note / callout-warning / callout-tip / callout-quote`) for tone differentiation; (6) engineering details (numerical stability, training gotchas) embedded as callouts at the point they become relevant, not as appendices; (7) complete, runnable PyTorch skeleton (not pseudo-code) when the chapter introduces a model; (8) 5–7 takeaways at the end, each anchored to a specific lecturer-given example. Under 4,000 字 = under-developed. Over 10,000 字 = bloated.
+- **Source fidelity first** — extract the lecturer's metaphors, worked examples, named citations, and verbatim phrasings from the chunks BEFORE drafting. The chapter's job is to faithfully transmit how the lecturer actually taught it; your own framing is layered on top with explicit flags (e.g. "教材外补充：…"). If two courses give different metaphors, present both labelled. Failure mode: writing a generic textbook paraphrase a reader of the lectures wouldn't recognise.
+- **🛑 No fabrication — debug the pipeline instead** — if the source_chunks don't actually contain pedagogy on the chapter's primary concept (e.g. all 20 chunks are course logistics, or one alphabetically-early course dominates while another course has the real coverage), **STOP and fix the pipeline**, do NOT paper over the gap with LLM-generated content. Common bugs to check: synthesize SQL `LIMIT 20 ORDER BY course_slug` causes the alphabetically-first course to monopolise; tagging may have matched by lecture-title keyword without the concept actually being discussed; `--max-source-chunks` may be too low. Diagnose first: `sqlite3 .video-to-notebook/db.sqlite "SELECT courses.slug, COUNT(*) FROM chunk_concepts cc JOIN chunks ON chunks.id=cc.chunk_id JOIN lectures ON lectures.id=chunks.lecture_id JOIN courses ON courses.id=lectures.course_id JOIN concepts ON concepts.id=cc.concept_id WHERE concepts.slug='<primary>' GROUP BY courses.slug"`. If the DB has chunks but envelope is thin, the bug is in synthesize SQL; if the DB is empty, the bug is in tag.
+- Anti-bias opening (prefer misconceptions the lecturer themselves called out)
+- Inline SVG diagrams + CSS animations
+- One embedded source clip with `?start=N` timestamp — pick the clip that best shows the lecturer's signature framing of this concept
+- LaTeX math via `$...$` / `$$...$$` — reproduce the lecturer's derivation, not the cleaned-up textbook version
+- End with `<div class="takeaways">` (3 bullets)
+
+The same source-fidelity principle applies to `video-to-notebook explain` (concept pages): extract the lecturer's analogies from `occurrences` first, layer your additions on top.
+
+Write the HTML fragment to `/tmp/cm-chN.html` (just `<article>...</article>` body content; no `<html><head><body>` wrapper).
+
+Apply:
+
+```bash
+cat > /tmp/cm-apply.json <<EOF
+{
+  "schema_version": "1",
+  "kind": "synthesize_results",
+  "synthesizer": "claude-code-max:v1",
+  "chapter_order_idx": N,
+  "html_fragment_path": "/tmp/cm-chN.html"
+}
+EOF
+video-to-notebook synthesize --chapter N --apply-results /tmp/cm-apply.json
+```
+
+### Step T3: Build & view
+
+```bash
+video-to-notebook build
+video-to-notebook serve     # http://localhost:4321/textbook/
+```
+
+The textbook lives at `/textbook/<order>/` with sidebar nav + prev/next. Re-run `synthesize` on any chapter to overwrite. Re-run `build` after each `synthesize` to refresh the site.
+
+## Quick recipes
+
+### Run the whole pipeline at once (small corpus, you trust the defaults)
+
+```bash
+bash <skill-dir>/scripts/run-pipeline.sh <project-dir> <ontology.yaml> <url1> [<url2> ...]
+```
+
+### Cost estimation before running tag
+
+```bash
+# How many chunks need tagging?
+sqlite3 .video-to-notebook/db.sqlite "SELECT COUNT(*) FROM chunks WHERE NOT EXISTS (SELECT 1 FROM chunk_concepts WHERE chunk_concepts.chunk_id = chunks.id)"
+```
+
+At ~$0.0008/chunk (Claude Haiku with prompt caching), 1000 untagged chunks ≈ $0.80.
+
+## Anti-patterns
+
+- **Don't tag the same project twice without `--limit`** — the second run will skip tagged chunks but still iterate the whole DB. Use `--course <slug>` to scope.
+- **Don't rebuild ontology mid-pipeline without thought** — if you change the seed YAML between `tag` and `cluster`, proposed tags may not cluster well.
+- **Don't deploy a demo without a `.gitignore` that excludes `.video-to-notebook/db.sqlite`** — the DB has raw transcripts which may be large or include problematic content.

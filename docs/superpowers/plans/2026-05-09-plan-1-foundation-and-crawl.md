@@ -2,26 +2,26 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Ship a working `course-merger init && course-merger crawl <url>` for both YouTube and Bilibili, persisting transcripts and chunks in SQLite. End-to-end smoke test passes on a fixture course without network.
+**Goal:** Ship a working `video-to-notebook init && video-to-notebook crawl <url>` for both YouTube and Bilibili, persisting transcripts and chunks in SQLite. End-to-end smoke test passes on a fixture course without network.
 
 **Architecture:** Typer CLI dispatch → `db/` (SQLite + raw SQL) ← `crawl/` (yt-dlp wrapper per platform + subtitle parser + chunker). No tagging, no clustering, no HTML in this plan — those land in Plans 2 / 3.
 
 **Tech Stack:** Python 3.12 + uv + Typer + SQLite (stdlib) + yt-dlp + pytest + ruff + pyright + GitHub Actions
 
-**Repo:** `/Users/chenlinzhuo/code/course-merger/` (already `git init`, has README + .gitignore + spec)
+**Repo:** `/Users/chenlinzhuo/code/video-to-notebook/` (already `git init`, has README + .gitignore + spec)
 
 ---
 
 ## File Structure
 
 ```
-course-merger/
+video-to-notebook/
 ├── pyproject.toml                  # NEW: uv-managed Python package
 ├── .python-version                 # NEW: 3.12
 ├── ruff.toml                       # NEW: lint config
 ├── pyrightconfig.json              # NEW: type-check config
 ├── .github/workflows/ci.yml        # NEW: lint + typecheck + test on push/PR
-├── src/course_merger/
+├── src/video_to_notebook/
 │   ├── __init__.py                 # NEW: __version__
 │   ├── cli.py                      # NEW: Typer app entrypoint
 │   ├── config.py                   # NEW: TOML project config
@@ -71,7 +71,7 @@ Each Python module has one responsibility:
 - Create: `.python-version`
 - Create: `ruff.toml`
 - Create: `pyrightconfig.json`
-- Create: `src/course_merger/__init__.py`
+- Create: `src/video_to_notebook/__init__.py`
 
 - [ ] **Step 1: Write `.python-version`**
 
@@ -83,7 +83,7 @@ Each Python module has one responsibility:
 
 ```toml
 [project]
-name = "course-merger"
+name = "video-to-notebook"
 version = "0.1.0"
 description = "Crawl, merge, and visualize open-courseware by concept"
 readme = "README.md"
@@ -105,14 +105,14 @@ dev = [
 ]
 
 [project.scripts]
-course-merger = "course_merger.cli:app"
+video-to-notebook = "video_to_notebook.cli:app"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/course_merger"]
+packages = ["src/video_to_notebook"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -149,7 +149,7 @@ quote-style = "double"
 }
 ```
 
-- [ ] **Step 5: Write `src/course_merger/__init__.py`**
+- [ ] **Step 5: Write `src/video_to_notebook/__init__.py`**
 
 ```python
 __version__ = "0.1.0"
@@ -158,17 +158,17 @@ __version__ = "0.1.0"
 - [ ] **Step 6: Install deps with uv**
 
 ```bash
-cd /Users/chenlinzhuo/code/course-merger
+cd /Users/chenlinzhuo/code/video-to-notebook
 uv venv
 uv pip install -e ".[dev]"
 ```
 
-Expected: `course-merger 0.1.0` installed in `.venv/`. No errors.
+Expected: `video-to-notebook 0.1.0` installed in `.venv/`. No errors.
 
 - [ ] **Step 7: Verify CLI shim exists**
 
 ```bash
-uv run course-merger --help 2>&1 | head -5
+uv run video-to-notebook --help 2>&1 | head -5
 ```
 
 Expected: error about no `app` attribute yet (cli.py not written) — that's fine; the entry point is wired.
@@ -176,7 +176,7 @@ Expected: error about no `app` attribute yet (cli.py not written) — that's fin
 - [ ] **Step 8: Commit**
 
 ```bash
-git add pyproject.toml .python-version ruff.toml pyrightconfig.json src/course_merger/__init__.py
+git add pyproject.toml .python-version ruff.toml pyrightconfig.json src/video_to_notebook/__init__.py
 git commit -m "chore: project scaffold (pyproject, ruff, pyright, uv)"
 ```
 
@@ -218,9 +218,9 @@ def tmp_project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 ```python
 def test_imports():
-    import course_merger
+    import video_to_notebook
 
-    assert course_merger.__version__ == "0.1.0"
+    assert video_to_notebook.__version__ == "0.1.0"
 ```
 
 - [ ] **Step 3: Run test**
@@ -305,9 +305,9 @@ git commit -m "ci: lint + typecheck + test on push/PR"
 ### Task 4: SQLite schema + session module
 
 **Files:**
-- Create: `src/course_merger/db/__init__.py` (empty)
-- Create: `src/course_merger/db/schema.sql`
-- Create: `src/course_merger/db/session.py`
+- Create: `src/video_to_notebook/db/__init__.py` (empty)
+- Create: `src/video_to_notebook/db/schema.sql`
+- Create: `src/video_to_notebook/db/session.py`
 - Create: `tests/unit/test_db_session.py`
 
 This task implements the Plan-1 subset of the schema (courses + lectures + chunks). Tables for concepts / aliases / chunk_concepts / build_meta arrive in Plans 2-3.
@@ -323,7 +323,7 @@ from pathlib import Path
 
 import pytest
 
-from course_merger.db.session import init_db, connect
+from video_to_notebook.db.session import init_db, connect
 
 
 def test_init_db_creates_tables(tmp_path: Path):
@@ -386,7 +386,7 @@ uv run pytest tests/unit/test_db_session.py -v
 
 Expected: `ImportError: cannot import name 'init_db'`.
 
-- [ ] **Step 3: Write `src/course_merger/db/schema.sql`**
+- [ ] **Step 3: Write `src/video_to_notebook/db/schema.sql`**
 
 ```sql
 -- Plan 1 subset. concepts/aliases/chunk_concepts/build_meta tables land in Plan 2.
@@ -425,7 +425,7 @@ CREATE TABLE IF NOT EXISTS chunks (
 CREATE INDEX IF NOT EXISTS idx_chunk_lecture ON chunks(lecture_id);
 ```
 
-- [ ] **Step 4: Write `src/course_merger/db/session.py`**
+- [ ] **Step 4: Write `src/video_to_notebook/db/session.py`**
 
 ```python
 """SQLite connection lifecycle and transaction helpers."""
@@ -481,7 +481,7 @@ Expected: `4 passed`.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add src/course_merger/db/ tests/unit/test_db_session.py
+git add src/video_to_notebook/db/ tests/unit/test_db_session.py
 git commit -m "feat(db): schema.sql + session.connect/init_db with transaction safety"
 ```
 
@@ -492,10 +492,10 @@ git commit -m "feat(db): schema.sql + session.connect/init_db with transaction s
 ### Task 5: Project config (TOML)
 
 **Files:**
-- Create: `src/course_merger/config.py`
+- Create: `src/video_to_notebook/config.py`
 - Create: `tests/unit/test_config.py`
 
-The project root sits at `.course-merger/` once `init` has been run. Config lives at `.course-merger/config.toml`. This task is the read side; `init` (Task 7) writes the default.
+The project root sits at `.video-to-notebook/` once `init` has been run. Config lives at `.video-to-notebook/config.toml`. This task is the read side; `init` (Task 7) writes the default.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -507,7 +507,7 @@ from pathlib import Path
 
 import pytest
 
-from course_merger.config import (
+from video_to_notebook.config import (
     Config,
     ProjectNotInitializedError,
     find_project_root,
@@ -516,7 +516,7 @@ from course_merger.config import (
 
 
 def test_find_project_root_finds_marker(tmp_path: Path):
-    (tmp_path / ".course-merger").mkdir()
+    (tmp_path / ".video-to-notebook").mkdir()
     nested = tmp_path / "a" / "b"
     nested.mkdir(parents=True)
     assert find_project_root(nested) == tmp_path
@@ -529,15 +529,15 @@ def test_find_project_root_raises_when_missing(tmp_path: Path):
 
 def test_load_config_reads_toml(tmp_path: Path):
     root = tmp_path
-    (root / ".course-merger").mkdir()
-    (root / ".course-merger" / "config.toml").write_text(
+    (root / ".video-to-notebook").mkdir()
+    (root / ".video-to-notebook" / "config.toml").write_text(
         'tagger_model = "claude-haiku-4-5"\n'
         'cluster_review_model = "claude-sonnet-4-6"\n'
     )
     cfg = load_config(root)
     assert isinstance(cfg, Config)
     assert cfg.tagger_model == "claude-haiku-4-5"
-    assert cfg.db_path == root / ".course-merger" / "db.sqlite"
+    assert cfg.db_path == root / ".video-to-notebook" / "db.sqlite"
 ```
 
 - [ ] **Step 2: Run test to verify failure**
@@ -548,7 +548,7 @@ uv run pytest tests/unit/test_config.py -v
 
 Expected: `ImportError`.
 
-- [ ] **Step 3: Write `src/course_merger/config.py`**
+- [ ] **Step 3: Write `src/video_to_notebook/config.py`**
 
 ```python
 """Project config + project-root discovery."""
@@ -559,13 +559,13 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
-PROJECT_MARKER = ".course-merger"
+PROJECT_MARKER = ".video-to-notebook"
 CONFIG_FILENAME = "config.toml"
 DB_FILENAME = "db.sqlite"
 
 
 class ProjectNotInitializedError(RuntimeError):
-    """Raised when no `.course-merger/` ancestor is found."""
+    """Raised when no `.video-to-notebook/` ancestor is found."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -586,19 +586,19 @@ class Config:
 
 
 def find_project_root(start: Path) -> Path:
-    """Walk up from `start` looking for a directory containing `.course-merger/`."""
+    """Walk up from `start` looking for a directory containing `.video-to-notebook/`."""
     start = start.resolve()
     for candidate in (start, *start.parents):
         if (candidate / PROJECT_MARKER).is_dir():
             return candidate
     raise ProjectNotInitializedError(
-        f"No course-merger project found at or above {start}. "
-        "Run `course-merger init` first."
+        f"No video-to-notebook project found at or above {start}. "
+        "Run `video-to-notebook init` first."
     )
 
 
 def load_config(project_root: Path) -> Config:
-    """Read .course-merger/config.toml; missing keys fall back to dataclass defaults."""
+    """Read .video-to-notebook/config.toml; missing keys fall back to dataclass defaults."""
     config_file = project_root / PROJECT_MARKER / CONFIG_FILENAME
     if not config_file.is_file():
         return Config(project_root=project_root)
@@ -621,7 +621,7 @@ Expected: `3 passed`.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/course_merger/config.py tests/unit/test_config.py
+git add src/video_to_notebook/config.py tests/unit/test_config.py
 git commit -m "feat(config): project root discovery + TOML config loader"
 ```
 
@@ -632,7 +632,7 @@ git commit -m "feat(config): project root discovery + TOML config loader"
 ### Task 6: Typer app with `init`
 
 **Files:**
-- Create: `src/course_merger/cli.py`
+- Create: `src/video_to_notebook/cli.py`
 - Create: `tests/integration/__init__.py` (empty)
 - Create: `tests/integration/test_init.py`
 
@@ -647,7 +647,7 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
-from course_merger.cli import app
+from video_to_notebook.cli import app
 
 runner = CliRunner()
 
@@ -657,9 +657,9 @@ def test_init_creates_state_dir(tmp_project: Path):
     result = runner.invoke(app, ["init"])
     assert result.exit_code == 0, result.stdout
 
-    assert (tmp_project / ".course-merger").is_dir()
-    assert (tmp_project / ".course-merger" / "db.sqlite").is_file()
-    assert (tmp_project / ".course-merger" / "config.toml").is_file()
+    assert (tmp_project / ".video-to-notebook").is_dir()
+    assert (tmp_project / ".video-to-notebook" / "db.sqlite").is_file()
+    assert (tmp_project / ".video-to-notebook" / "config.toml").is_file()
 
 
 @pytest.mark.integration
@@ -674,7 +674,7 @@ def test_init_refuses_to_overwrite(tmp_project: Path):
 def test_init_force_reinitializes(tmp_project: Path):
     runner.invoke(app, ["init"])
     # Drop a sentinel file to prove --force regenerates state
-    sentinel = tmp_project / ".course-merger" / "leftover.txt"
+    sentinel = tmp_project / ".video-to-notebook" / "leftover.txt"
     sentinel.write_text("stale")
 
     result = runner.invoke(app, ["init", "--force"])
@@ -688,9 +688,9 @@ def test_init_force_reinitializes(tmp_project: Path):
 uv run pytest tests/integration/test_init.py -v
 ```
 
-Expected: `ImportError: cannot import name 'app' from 'course_merger.cli'`.
+Expected: `ImportError: cannot import name 'app' from 'video_to_notebook.cli'`.
 
-- [ ] **Step 3: Write `src/course_merger/cli.py`**
+- [ ] **Step 3: Write `src/video_to_notebook/cli.py`**
 
 ```python
 """Typer-based CLI entrypoint."""
@@ -702,8 +702,8 @@ from pathlib import Path
 import typer
 from rich.console import Console
 
-from course_merger.config import CONFIG_FILENAME, PROJECT_MARKER
-from course_merger.db.session import init_db
+from video_to_notebook.config import CONFIG_FILENAME, PROJECT_MARKER
+from video_to_notebook.db.session import init_db
 
 app = typer.Typer(
     help="Crawl and merge open-courseware into an interactive concept-anchored site.",
@@ -715,7 +715,7 @@ console = Console()
 
 
 DEFAULT_CONFIG_TOML = """\
-# course-merger project config
+# video-to-notebook project config
 
 # tagger_model = "claude-haiku-4-5"
 # cluster_review_model = "claude-sonnet-4-6"
@@ -728,7 +728,7 @@ def init_cmd(
         False, "--force", help="Wipe existing state and reinitialize."
     ),
 ) -> None:
-    """Initialize a course-merger project in the current directory."""
+    """Initialize a video-to-notebook project in the current directory."""
     cwd = Path.cwd()
     state_dir = cwd / PROJECT_MARKER
 
@@ -745,7 +745,7 @@ def init_cmd(
     init_db(state_dir / "db.sqlite")
     (state_dir / CONFIG_FILENAME).write_text(DEFAULT_CONFIG_TOML, encoding="utf-8")
 
-    console.print(f"[green]initialized[/green] course-merger project at {cwd}")
+    console.print(f"[green]initialized[/green] video-to-notebook project at {cwd}")
 ```
 
 - [ ] **Step 4: Run tests**
@@ -760,8 +760,8 @@ Expected: `3 passed`.
 
 ```bash
 cd /tmp && rm -rf cm-smoke && mkdir cm-smoke && cd cm-smoke
-uv run --project /Users/chenlinzhuo/code/course-merger course-merger init
-ls -la .course-merger/
+uv run --project /Users/chenlinzhuo/code/video-to-notebook video-to-notebook init
+ls -la .video-to-notebook/
 ```
 
 Expected: `db.sqlite` and `config.toml` exist.
@@ -769,9 +769,9 @@ Expected: `db.sqlite` and `config.toml` exist.
 - [ ] **Step 6: Commit**
 
 ```bash
-cd /Users/chenlinzhuo/code/course-merger
-git add src/course_merger/cli.py tests/integration/
-git commit -m "feat(cli): \`init\` command scaffolds .course-merger/ state dir"
+cd /Users/chenlinzhuo/code/video-to-notebook
+git add src/video_to_notebook/cli.py tests/integration/
+git commit -m "feat(cli): \`init\` command scaffolds .video-to-notebook/ state dir"
 ```
 
 ---
@@ -781,8 +781,8 @@ git commit -m "feat(cli): \`init\` command scaffolds .course-merger/ state dir"
 ### Task 7: VTT parser
 
 **Files:**
-- Create: `src/course_merger/crawl/__init__.py` (empty)
-- Create: `src/course_merger/crawl/subtitles.py`
+- Create: `src/video_to_notebook/crawl/__init__.py` (empty)
+- Create: `src/video_to_notebook/crawl/subtitles.py`
 - Create: `tests/fixtures/mini_course/youtube_lecture1.vtt`
 - Create: `tests/unit/test_subtitles.py`
 
@@ -821,7 +821,7 @@ from pathlib import Path
 
 import pytest
 
-from course_merger.crawl.subtitles import Cue, parse_vtt
+from video_to_notebook.crawl.subtitles import Cue, parse_vtt
 
 
 def test_parse_vtt_basic(fixtures_dir: Path):
@@ -861,7 +861,7 @@ uv run pytest tests/unit/test_subtitles.py -v
 
 Expected: `ImportError`.
 
-- [ ] **Step 4: Write `src/course_merger/crawl/subtitles.py`**
+- [ ] **Step 4: Write `src/video_to_notebook/crawl/subtitles.py`**
 
 ```python
 """Parse WebVTT / SRT subtitles into time-stamped cues."""
@@ -945,7 +945,7 @@ Expected: `4 passed`.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add src/course_merger/crawl/__init__.py src/course_merger/crawl/subtitles.py tests/fixtures/ tests/unit/test_subtitles.py
+git add src/video_to_notebook/crawl/__init__.py src/video_to_notebook/crawl/subtitles.py tests/fixtures/ tests/unit/test_subtitles.py
 git commit -m "feat(crawl): WebVTT parser with dedup, tag stripping, entity decoding"
 ```
 
@@ -956,7 +956,7 @@ git commit -m "feat(crawl): WebVTT parser with dedup, tag stripping, entity deco
 ### Task 8: Chunker (Cue → Chunk)
 
 **Files:**
-- Create: `src/course_merger/crawl/base.py`
+- Create: `src/video_to_notebook/crawl/base.py`
 - Create: `tests/unit/test_chunker.py`
 
 The chunker groups consecutive cues into ~300-800 token chunks. v1 uses a sliding-window approach over cue boundaries (no chapter detection — that arrives in v2). The actual "token" measurement is approximate via word count × 1.3.
@@ -967,8 +967,8 @@ The chunker groups consecutive cues into ~300-800 token chunks. v1 uses a slidin
 # tests/unit/test_chunker.py
 from __future__ import annotations
 
-from course_merger.crawl.base import Chunk, Chunker
-from course_merger.crawl.subtitles import Cue
+from video_to_notebook.crawl.base import Chunk, Chunker
+from video_to_notebook.crawl.subtitles import Cue
 
 
 def _mk_cues(count: int, words_per_cue: int = 5, dur: float = 3.0) -> list[Cue]:
@@ -1025,7 +1025,7 @@ uv run pytest tests/unit/test_chunker.py -v
 
 Expected: `ImportError`.
 
-- [ ] **Step 3: Write `src/course_merger/crawl/base.py`**
+- [ ] **Step 3: Write `src/video_to_notebook/crawl/base.py`**
 
 ```python
 """Crawler protocol + chunker (cue → chunk)."""
@@ -1034,7 +1034,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol
 
-from course_merger.crawl.subtitles import Cue
+from video_to_notebook.crawl.subtitles import Cue
 
 
 @dataclass(frozen=True, slots=True)
@@ -1125,7 +1125,7 @@ Expected: `4 passed`.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/course_merger/crawl/base.py tests/unit/test_chunker.py
+git add src/video_to_notebook/crawl/base.py tests/unit/test_chunker.py
 git commit -m "feat(crawl): Chunker groups cues to target token budget"
 ```
 
@@ -1136,7 +1136,7 @@ git commit -m "feat(crawl): Chunker groups cues to target token budget"
 ### Task 9: YouTube adapter (yt-dlp subprocess)
 
 **Files:**
-- Create: `src/course_merger/crawl/youtube.py`
+- Create: `src/video_to_notebook/crawl/youtube.py`
 - Create: `tests/unit/test_crawler_youtube.py`
 
 The adapter shells out to `yt-dlp` with a stable flag combo. Tests mock `subprocess.run` so they don't need network.
@@ -1154,7 +1154,7 @@ from unittest.mock import patch
 
 import pytest
 
-from course_merger.crawl.youtube import YouTubeCrawler
+from video_to_notebook.crawl.youtube import YouTubeCrawler
 
 
 def _fake_completed(stdout: str = "", stderr: str = "", returncode: int = 0):
@@ -1223,7 +1223,7 @@ uv run pytest tests/unit/test_crawler_youtube.py -v
 
 Expected: `ImportError`.
 
-- [ ] **Step 3: Write `src/course_merger/crawl/youtube.py`**
+- [ ] **Step 3: Write `src/video_to_notebook/crawl/youtube.py`**
 
 ```python
 """YouTube adapter: shells out to yt-dlp for playlist enumeration and subtitle download."""
@@ -1330,7 +1330,7 @@ Expected: `4 passed`.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/course_merger/crawl/youtube.py tests/unit/test_crawler_youtube.py
+git add src/video_to_notebook/crawl/youtube.py tests/unit/test_crawler_youtube.py
 git commit -m "feat(crawl): YouTube adapter (yt-dlp playlist + VTT subtitle download)"
 ```
 
@@ -1341,7 +1341,7 @@ git commit -m "feat(crawl): YouTube adapter (yt-dlp playlist + VTT subtitle down
 ### Task 10: Bilibili adapter
 
 **Files:**
-- Create: `src/course_merger/crawl/bilibili.py`
+- Create: `src/video_to_notebook/crawl/bilibili.py`
 - Create: `tests/fixtures/mini_course/bilibili_lecture1.vtt`
 - Create: `tests/unit/test_crawler_bilibili.py`
 
@@ -1375,7 +1375,7 @@ from unittest.mock import patch
 
 import pytest
 
-from course_merger.crawl.bilibili import BilibiliCrawler, BilibiliCookieError
+from video_to_notebook.crawl.bilibili import BilibiliCrawler, BilibiliCookieError
 
 
 def _fake_completed(stdout: str = "", stderr: str = "", returncode: int = 0):
@@ -1450,7 +1450,7 @@ uv run pytest tests/unit/test_crawler_bilibili.py -v
 
 Expected: `ImportError`.
 
-- [ ] **Step 4: Write `src/course_merger/crawl/bilibili.py`**
+- [ ] **Step 4: Write `src/video_to_notebook/crawl/bilibili.py`**
 
 ```python
 """Bilibili adapter: yt-dlp with cookies (required) and ?p=N playlist pagination."""
@@ -1574,7 +1574,7 @@ Expected: `4 passed`.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add src/course_merger/crawl/bilibili.py tests/fixtures/mini_course/bilibili_lecture1.vtt tests/unit/test_crawler_bilibili.py
+git add src/video_to_notebook/crawl/bilibili.py tests/fixtures/mini_course/bilibili_lecture1.vtt tests/unit/test_crawler_bilibili.py
 git commit -m "feat(crawl): Bilibili adapter with cookie + ai-zh/ai-en fallback"
 ```
 
@@ -1585,8 +1585,8 @@ git commit -m "feat(crawl): Bilibili adapter with cookie + ai-zh/ai-en fallback"
 ### Task 11: Wire crawlers into CLI
 
 **Files:**
-- Modify: `src/course_merger/cli.py` (add `crawl` command)
-- Create: `src/course_merger/crawl/runner.py` (orchestrates list → download → parse → chunk → insert)
+- Modify: `src/video_to_notebook/cli.py` (add `crawl` command)
+- Create: `src/video_to_notebook/crawl/runner.py` (orchestrates list → download → parse → chunk → insert)
 - Create: `tests/integration/test_crawl_smoke.py`
 
 The `crawl` command does the boring orchestration: pick a crawler by URL host, list the playlist, for each entry download VTT, parse, chunk, and write to DB. Heavily mocked at the crawler boundary in tests.
@@ -1603,8 +1603,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from course_merger.crawl.runner import CrawlReport, run_crawl
-from course_merger.db.session import connect, init_db
+from video_to_notebook.crawl.runner import CrawlReport, run_crawl
+from video_to_notebook.db.session import connect, init_db
 
 
 @pytest.fixture
@@ -1696,7 +1696,7 @@ uv run pytest tests/unit/test_crawl_runner.py -v
 
 Expected: `ImportError`.
 
-- [ ] **Step 3: Write `src/course_merger/crawl/runner.py`**
+- [ ] **Step 3: Write `src/video_to_notebook/crawl/runner.py`**
 
 ```python
 """Orchestrator: crawler → subtitles → chunker → DB."""
@@ -1707,9 +1707,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Protocol
 
-from course_merger.crawl.base import Chunker
-from course_merger.crawl.subtitles import parse_vtt
-from course_merger.db.session import connect
+from video_to_notebook.crawl.base import Chunker
+from video_to_notebook.crawl.subtitles import parse_vtt
+from video_to_notebook.db.session import connect
 
 
 class _CrawlerLike(Protocol):
@@ -1843,7 +1843,7 @@ Expected: `2 passed`.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/course_merger/crawl/runner.py tests/unit/test_crawl_runner.py
+git add src/video_to_notebook/crawl/runner.py tests/unit/test_crawl_runner.py
 git commit -m "feat(crawl): runner orchestrates crawler -> subtitles -> chunker -> DB"
 ```
 
@@ -1852,7 +1852,7 @@ git commit -m "feat(crawl): runner orchestrates crawler -> subtitles -> chunker 
 ### Task 12: Add `crawl` CLI subcommand
 
 **Files:**
-- Modify: `src/course_merger/cli.py`
+- Modify: `src/video_to_notebook/cli.py`
 - Create: `tests/integration/test_crawl_smoke.py`
 
 - [ ] **Step 1: Write the failing integration test**
@@ -1867,8 +1867,8 @@ from unittest.mock import patch
 import pytest
 from typer.testing import CliRunner
 
-from course_merger.cli import app
-from course_merger.db.session import connect
+from video_to_notebook.cli import app
+from video_to_notebook.db.session import connect
 
 runner = CliRunner()
 
@@ -1883,9 +1883,9 @@ def test_crawl_youtube_end_to_end(tmp_project: Path, fixtures_dir: Path):
     fake_list = [{"idx": 1, "video_id": "v1", "title": "Intro", "video_url": "https://yt/v1"}]
 
     with (
-        patch("course_merger.crawl.youtube.YouTubeCrawler.list_playlist", return_value=fake_list),
+        patch("video_to_notebook.crawl.youtube.YouTubeCrawler.list_playlist", return_value=fake_list),
         patch(
-            "course_merger.crawl.youtube.YouTubeCrawler.download_subtitle_vtt",
+            "video_to_notebook.crawl.youtube.YouTubeCrawler.download_subtitle_vtt",
             return_value=vtt_text,
         ),
     ):
@@ -1896,7 +1896,7 @@ def test_crawl_youtube_end_to_end(tmp_project: Path, fixtures_dir: Path):
 
     assert result.exit_code == 0, result.stdout
 
-    db = tmp_project / ".course-merger" / "db.sqlite"
+    db = tmp_project / ".video-to-notebook" / "db.sqlite"
     with connect(db) as conn:
         (courses,) = conn.execute("SELECT COUNT(*) FROM courses").fetchone()
         (lectures,) = conn.execute("SELECT COUNT(*) FROM lectures WHERE status='ok'").fetchone()
@@ -1934,7 +1934,7 @@ uv run pytest tests/integration/test_crawl_smoke.py -v
 
 Expected: failures (no `crawl` command registered yet).
 
-- [ ] **Step 3: Modify `src/course_merger/cli.py` — add `crawl` command**
+- [ ] **Step 3: Modify `src/video_to_notebook/cli.py` — add `crawl` command**
 
 Add these imports and the new command to `cli.py`:
 
@@ -1942,10 +1942,10 @@ Add these imports and the new command to `cli.py`:
 # Add to top of cli.py imports:
 from urllib.parse import urlparse
 
-from course_merger.config import ProjectNotInitializedError, find_project_root
-from course_merger.crawl.bilibili import BilibiliCookieError, BilibiliCrawler
-from course_merger.crawl.runner import run_crawl
-from course_merger.crawl.youtube import YouTubeCrawler
+from video_to_notebook.config import ProjectNotInitializedError, find_project_root
+from video_to_notebook.crawl.bilibili import BilibiliCookieError, BilibiliCrawler
+from video_to_notebook.crawl.runner import run_crawl
+from video_to_notebook.crawl.youtube import YouTubeCrawler
 
 
 def _detect_platform(url: str) -> str:
@@ -2041,7 +2041,7 @@ Expected: everything green.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add src/course_merger/cli.py tests/integration/test_crawl_smoke.py
+git add src/video_to_notebook/cli.py tests/integration/test_crawl_smoke.py
 git commit -m "feat(cli): \`crawl\` subcommand routes by URL host and calls crawler runner"
 ```
 
@@ -2057,7 +2057,7 @@ git commit -m "feat(cli): \`crawl\` subcommand routes by URL host and calls craw
 - [ ] **Step 1: Replace README quickstart section**
 
 ```markdown
-# course-merger
+# video-to-notebook
 
 Crawl open-courseware (YouTube / Bilibili), tag chunks with concept labels via Claude, cluster labels into a unified ontology across courses, and emit an interactive static HTML site for self-study.
 
@@ -2068,31 +2068,31 @@ Crawl open-courseware (YouTube / Bilibili), tag chunks with concept labels via C
 
 ```bash
 # 1. Install
-git clone https://github.com/chenlinzhuo/course-merger.git
-cd course-merger
+git clone https://github.com/chenlinzhuo/video-to-notebook.git
+cd video-to-notebook
 uv venv && uv pip install -e ".[dev]"
 
 # 2. Initialize a project
 mkdir my-courses && cd my-courses
-uv run course-merger init
+uv run video-to-notebook init
 
 # 3. Crawl a YouTube playlist
-uv run course-merger crawl \
+uv run video-to-notebook crawl \
     "https://www.youtube.com/playlist?list=PLxxx" \
     --name cs336
 
 # 4. Crawl a Bilibili playlist (requires logged-in browser)
-uv run course-merger crawl \
+uv run video-to-notebook crawl \
     "https://www.bilibili.com/video/BVxxx/" \
     --name "vizuara-llm" \
     --cookies-from edge
 ```
 
-After `crawl`, all transcripts and chunks live in `.course-merger/db.sqlite`. Inspect with:
+After `crawl`, all transcripts and chunks live in `.video-to-notebook/db.sqlite`. Inspect with:
 
 ```bash
-sqlite3 .course-merger/db.sqlite "SELECT slug, title FROM courses;"
-sqlite3 .course-merger/db.sqlite "SELECT COUNT(*) FROM chunks;"
+sqlite3 .video-to-notebook/db.sqlite "SELECT slug, title FROM courses;"
+sqlite3 .video-to-notebook/db.sqlite "SELECT COUNT(*) FROM chunks;"
 ```
 
 ## Roadmap
@@ -2104,7 +2104,7 @@ sqlite3 .course-merger/db.sqlite "SELECT COUNT(*) FROM chunks;"
 
 ## Design
 
-Full design spec: [`docs/specs/2026-05-09-course-merger-skill-design.md`](docs/specs/2026-05-09-course-merger-skill-design.md).
+Full design spec: [`docs/specs/2026-05-09-video-to-notebook-skill-design.md`](docs/specs/2026-05-09-video-to-notebook-skill-design.md).
 
 ## License
 
@@ -2138,17 +2138,17 @@ This task is the GREEN check for the whole plan — run against a real public vi
 
 ```bash
 cd /tmp && rm -rf cm-real && mkdir cm-real && cd cm-real
-uv run --project /Users/chenlinzhuo/code/course-merger course-merger init
+uv run --project /Users/chenlinzhuo/code/video-to-notebook video-to-notebook init
 ```
 
-Expected: `initialized course-merger project at /tmp/cm-real`.
+Expected: `initialized video-to-notebook project at /tmp/cm-real`.
 
 - [ ] **Step 2: Crawl a real YouTube playlist**
 
 Use the playlist we previously used in this session (Vizuara - Build Claude Code from Scratch):
 
 ```bash
-uv run --project /Users/chenlinzhuo/code/course-merger course-merger crawl \
+uv run --project /Users/chenlinzhuo/code/video-to-notebook video-to-notebook crawl \
     "https://www.youtube.com/playlist?list=PLPTV0NXA_ZShnka8uVzF3mSvZdilfiGWG" \
     --name "vizuara-build-claude-code"
 ```
@@ -2158,9 +2158,9 @@ Expected: `done: 3 ok, 0 no-subs, 1 errors` (the L4 video is members-only — it
 - [ ] **Step 3: Verify DB state**
 
 ```bash
-sqlite3 .course-merger/db.sqlite \
+sqlite3 .video-to-notebook/db.sqlite \
     "SELECT idx, title, status, LENGTH(transcript) FROM lectures ORDER BY idx;"
-sqlite3 .course-merger/db.sqlite \
+sqlite3 .video-to-notebook/db.sqlite \
     "SELECT COUNT(*) AS chunks_total FROM chunks;"
 ```
 
@@ -2169,10 +2169,10 @@ Expected: 3 rows with `status='ok'` and non-null transcripts; one row with non-o
 - [ ] **Step 4: Verify idempotency**
 
 ```bash
-uv run --project /Users/chenlinzhuo/code/course-merger course-merger crawl \
+uv run --project /Users/chenlinzhuo/code/video-to-notebook video-to-notebook crawl \
     "https://www.youtube.com/playlist?list=PLPTV0NXA_ZShnka8uVzF3mSvZdilfiGWG" \
     --name "vizuara-build-claude-code"
-sqlite3 .course-merger/db.sqlite "SELECT COUNT(*) FROM lectures;"
+sqlite3 .video-to-notebook/db.sqlite "SELECT COUNT(*) FROM lectures;"
 ```
 
 Expected: same lecture count as before (no duplicates).
@@ -2180,7 +2180,7 @@ Expected: same lecture count as before (no duplicates).
 - [ ] **Step 5: Tag the completion**
 
 ```bash
-cd /Users/chenlinzhuo/code/course-merger
+cd /Users/chenlinzhuo/code/video-to-notebook
 git tag plan-1-done
 git log --oneline plan-1-done
 ```
@@ -2196,7 +2196,7 @@ Plan 1 ships. Ready to start Plan 2 (Tag + Cluster).
 - §1 Goals — incremental architecture (DB-backed, idempotent crawl): ✅ Task 11 idempotency test.
 - §2 v1 platforms YouTube + Bilibili: ✅ Tasks 9 + 10.
 - §3 Architecture diagram (DB at center, crawl as one of 4 commands): ✅ Tasks 4-12 build the crawl arm + DB.
-- §4 Repo layout: ✅ Plan covers `src/course_merger/{cli,config,db/,crawl/}` and `tests/{unit,integration,fixtures}`.
+- §4 Repo layout: ✅ Plan covers `src/video_to_notebook/{cli,config,db/,crawl/}` and `tests/{unit,integration,fixtures}`.
 - §5 Data model — Plan 1 implements `courses`, `lectures`, `chunks` (and indices); concepts/aliases/chunk_concepts/build_meta deferred to Plan 2 explicitly.
 - §6 CLI — Plan 1 implements `init` + `crawl`; `tag`/`cluster`/`build`/`serve`/`review` deferred to Plans 2-3.
 - §8 Error handling for crawl — Task 11 (`no_subs`, `error` statuses), Task 12 (cookie missing → actionable error), Task 12 (bare crawl before init → clear error).

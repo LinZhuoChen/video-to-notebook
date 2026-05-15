@@ -2,6 +2,7 @@
 import Base from '../../../layouts/Base.astro';
 import ConceptOccurrenceTable from '../../../components/ConceptOccurrenceTable.astro';
 import { getCollection } from 'astro:content';
+import { t } from '../../../i18n';
 
 export async function getStaticPaths() {
   const concepts = await getCollection('concept');
@@ -79,8 +80,8 @@ const courseSlugsForCompare = Array.from(new Set(occurrences.map(o => o.course_s
 ---
 <Base title={concept.data.canonical_name}>
   <div class="cd-page" data-module-idx={mIdx}>
-    <nav class="cd-breadcrumb" aria-label="面包屑">
-      <a href="/concepts/">概念百科</a>
+    <nav class="cd-breadcrumb" aria-label={t.concept_breadcrumb_aria}>
+      <a href="/concepts/">{t.concept_breadcrumb_index}</a>
       <span class="cd-sep">›</span>
       {module && <><span class="cd-module-name">{module}</span><span class="cd-sep">›</span></>}
       <span class="cd-here">{concept.data.canonical_name}</span>
@@ -93,22 +94,22 @@ const courseSlugsForCompare = Array.from(new Set(occurrences.map(o => o.course_s
     ) : (
       <section class="cd-stub">
         <header class="concept-header">
-          <span class="concept-eyebrow">概念</span>
+          <span class="concept-eyebrow">{t.concept_eyebrow}</span>
           <h1>{concept.data.canonical_name}</h1>
           {concept.data.description && <p class="concept-tagline">{concept.data.description}</p>}
         </header>
         <div class="cd-pending">
-          <p>这个概念暂时还没有详细解释。我们正在编写图文教程，包括：</p>
+          <p>{t.concept_no_explainer_title}</p>
           <ul>
-            <li>📐 直觉与定义（生活类比 + 形式化表达）</li>
-            <li>🎨 SVG 图示 + 动画演示</li>
-            <li>🧮 手算示例</li>
-            <li>⚠️ 常见误区</li>
-            <li>🔗 相关概念交叉链接</li>
+            <li>{t.concept_no_explainer_bullet_intuition}</li>
+            <li>{t.concept_no_explainer_bullet_svg}</li>
+            <li>{t.concept_no_explainer_bullet_example}</li>
+            <li>{t.concept_no_explainer_bullet_pitfalls}</li>
+            <li>{t.concept_no_explainer_bullet_seealso}</li>
           </ul>
           <p class="cd-pending-help">
-            CLI 生成命令：<br/>
-            <code>course-merger explain --concept {concept.slug} --print-prompts</code>
+            {t.concept_pending_cli_label}<br/>
+            <code>video-to-notebook explain --concept {concept.slug} --print-prompts</code>
           </p>
         </div>
       </section>
@@ -117,22 +118,22 @@ const courseSlugsForCompare = Array.from(new Set(occurrences.map(o => o.course_s
     {(concept.data.aliases.length > 0 || courseSlugsForCompare.length > 0) && (
       <aside class="cd-meta">
         <dl>
-          <dt>概念 slug</dt>
+          <dt>{t.concept_meta_slug}</dt>
           <dd><code>{concept.slug}</code></dd>
-          <dt>来源</dt>
+          <dt>{t.concept_meta_source}</dt>
           <dd>{concept.data.ontology_source}</dd>
           {concept.data.aliases.length > 0 && (
             <>
-              <dt>别名</dt>
+              <dt>{t.concept_meta_aliases}</dt>
               <dd>{concept.data.aliases.map((a: string) => <code>{a}</code>).join(', ')}</dd>
             </>
           )}
-          <dt>出现次数</dt>
+          <dt>{t.concept_meta_occurrences}</dt>
           <dd>{occurrences.length}</dd>
         </dl>
         {courseSlugsForCompare.length > 1 && (
           <a class="cd-compare" href={`/concepts/${concept.slug}/compare/?courses=${courseSlugsForCompare.join(',')}`}>
-            跨课程对比 ({courseSlugsForCompare.length} 门) →
+            {t.concept_compare_link(courseSlugsForCompare.length)}
           </a>
         )}
       </aside>
@@ -140,7 +141,7 @@ const courseSlugsForCompare = Array.from(new Set(occurrences.map(o => o.course_s
 
     {occurrences.length > 0 && (
       <details class="cd-sources">
-        <summary>查看 {occurrences.length} 条课程原文出处</summary>
+        <summary>{t.concept_source_count_summary(occurrences.length)}</summary>
         <ConceptOccurrenceTable occurrences={occurrences} />
       </details>
     )}

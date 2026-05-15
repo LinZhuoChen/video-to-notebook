@@ -1,6 +1,7 @@
 ---
 import Base from '../../layouts/Base.astro';
 import { getCollection } from 'astro:content';
+import { t, currentLanguage } from '../../i18n';
 
 let manifest: any = { explainers: [] };
 try {
@@ -53,26 +54,26 @@ for (const it of items) {
   groups.get(key)!.push(it);
 }
 
-// Pinned "已详解" rail of explained concepts
+// Pinned rail of explained concepts
 const explainedItems = items.filter(i => i._explained);
+const explainedSectionTitle = currentLanguage === 'en' ? 'Explained' : '已详解';
+const explainedSuffix = currentLanguage === 'en' ? 'with illustrated entries' : '个已配图文详解';
 ---
-<Base title="概念百科">
+<Base title={t.concepts_encyclopedia}>
   <div class="cx-page">
     <header class="cx-header">
-      <div class="cx-eyebrow">course-merger encyclopedia</div>
-      <h1 class="cx-title">概念百科</h1>
+      <div class="cx-eyebrow">video-to-notebook encyclopedia</div>
+      <h1 class="cx-title">{t.concepts_encyclopedia}</h1>
       <p class="cx-stats">
-        <strong>{items.length}</strong> 个概念 ·
-        <strong>{totalExplained}</strong> 个已配图文详解
+        <strong>{items.length}</strong> {t.concepts_count_stats(items.length).replace(/^\d+\s*/, '')}
+        <strong>{totalExplained}</strong> {explainedSuffix}
       </p>
-      <p class="cx-help">
-        每个概念都是一份独立的图文解释：直觉 → 公式 → 图示 → 动画 → 例题 → 常见误区。
-      </p>
+      <p class="cx-help">{t.concepts_blurb}</p>
     </header>
 
     {explainedItems.length > 0 && (
       <section class="cx-featured">
-        <h2 class="cx-section-title">已详解</h2>
+        <h2 class="cx-section-title">{explainedSectionTitle}</h2>
         <div class="cx-featured-grid">
           {explainedItems.map(c => (
             <a class="cx-card" href={`/concepts/${c.slug}/`} data-module-idx={c._mIdx || 1}>

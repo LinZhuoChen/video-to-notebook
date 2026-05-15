@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from course_merger.cluster.embedding import Embedder, cosine_similarity
+from video_to_notebook.cluster.embedding import Embedder, cosine_similarity
 
 
 @pytest.fixture(scope="session")

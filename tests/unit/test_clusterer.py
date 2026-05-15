@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from course_merger.cluster.clusterer import Cluster, cluster_by_cosine
+from video_to_notebook.cluster.clusterer import Cluster, cluster_by_cosine
 
 
 def _orthogonal_vector(seed: int, dim: int = 384) -> np.ndarray:

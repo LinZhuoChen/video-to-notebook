@@ -8,9 +8,9 @@ import numpy as np
 import pytest
 from typer.testing import CliRunner
 
-from course_merger.cli import app
-from course_merger.cluster.llm_review import ReviewDecision
-from course_merger.db.session import connect
+from video_to_notebook.cli import app
+from video_to_notebook.cluster.llm_review import ReviewDecision
+from video_to_notebook.db.session import connect
 
 runner = CliRunner()
 
@@ -19,7 +19,7 @@ runner = CliRunner()
 def test_cluster_cli_end_to_end(tmp_project: Path, fixtures_dir: Path):
     runner.invoke(app, ["init"])
 
-    db = tmp_project / ".course-merger" / "db.sqlite"
+    db = tmp_project / ".video-to-notebook" / "db.sqlite"
     with connect(db) as conn:
         cur = conn.execute(
             "INSERT INTO courses (slug, title, platform, source_url, added_at) "
@@ -61,8 +61,8 @@ def test_cluster_cli_end_to_end(tmp_project: Path, fixtures_dir: Path):
     fake_reviewer.review.return_value = fake_decision
 
     with (
-        patch("course_merger.cli.Embedder", return_value=fake_embedder),
-        patch("course_merger.cli.Reviewer", return_value=fake_reviewer),
+        patch("video_to_notebook.cli.Embedder", return_value=fake_embedder),
+        patch("video_to_notebook.cli.Reviewer", return_value=fake_reviewer),
         patch("anthropic.Anthropic", return_value=object()),
     ):
         result = runner.invoke(
@@ -83,7 +83,7 @@ def test_cluster_cli_end_to_end(tmp_project: Path, fixtures_dir: Path):
 @pytest.mark.integration
 def test_cluster_print_prompts_emits_envelope(tmp_project: Path, fixtures_dir: Path):
     runner.invoke(app, ["init"])
-    db = tmp_project / ".course-merger" / "db.sqlite"
+    db = tmp_project / ".video-to-notebook" / "db.sqlite"
     with connect(db) as conn:
         conn.execute(
             "INSERT INTO courses (slug, title, platform, source_url, added_at) "
@@ -107,7 +107,7 @@ def test_cluster_print_prompts_emits_envelope(tmp_project: Path, fixtures_dir: P
     shutil.copy(fixtures_dir / "ontology.yaml", ont_path)
 
     with patch(
-        "course_merger.cluster.embedding.Embedder.embed_batch",
+        "video_to_notebook.cluster.embedding.Embedder.embed_batch",
         return_value=np.ones((1, 384), dtype=np.float32),
     ):
         result = runner.invoke(

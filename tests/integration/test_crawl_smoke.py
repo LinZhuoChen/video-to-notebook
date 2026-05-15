@@ -6,8 +6,8 @@ from unittest.mock import patch
 import pytest
 from typer.testing import CliRunner
 
-from course_merger.cli import app
-from course_merger.db.session import connect
+from video_to_notebook.cli import app
+from video_to_notebook.db.session import connect
 
 runner = CliRunner()
 
@@ -21,9 +21,9 @@ def test_crawl_youtube_end_to_end(tmp_project: Path, fixtures_dir: Path):
     fake_list = [{"idx": 1, "video_id": "v1", "title": "Intro", "video_url": "https://yt/v1"}]
 
     with (
-        patch("course_merger.crawl.youtube.YouTubeCrawler.list_playlist", return_value=fake_list),
+        patch("video_to_notebook.crawl.youtube.YouTubeCrawler.list_playlist", return_value=fake_list),
         patch(
-            "course_merger.crawl.youtube.YouTubeCrawler.download_subtitle_vtt",
+            "video_to_notebook.crawl.youtube.YouTubeCrawler.download_subtitle_vtt",
             return_value=vtt_text,
         ),
     ):
@@ -34,7 +34,7 @@ def test_crawl_youtube_end_to_end(tmp_project: Path, fixtures_dir: Path):
 
     assert result.exit_code == 0, result.stdout
 
-    db = tmp_project / ".course-merger" / "db.sqlite"
+    db = tmp_project / ".video-to-notebook" / "db.sqlite"
     with connect(db) as conn:
         (courses,) = conn.execute("SELECT COUNT(*) FROM courses").fetchone()
         (lectures,) = conn.execute("SELECT COUNT(*) FROM lectures WHERE status='ok'").fetchone()
@@ -52,7 +52,7 @@ def test_crawl_bilibili_requires_cookies(tmp_project: Path):
     # which raises BilibiliCookieError when cookies_from is None.
     fake_list = [{"idx": 1, "video_id": "BVxxx", "title": "L1",
                   "video_url": "https://www.bilibili.com/video/BVxxx/?p=1"}]
-    with patch("course_merger.crawl.bilibili.BilibiliCrawler.list_playlist", return_value=fake_list):
+    with patch("video_to_notebook.crawl.bilibili.BilibiliCrawler.list_playlist", return_value=fake_list):
         result = runner.invoke(
             app,
             ["crawl", "https://www.bilibili.com/video/BVxxx/", "--name", "x"],
@@ -74,9 +74,9 @@ def test_crawl_exits_nonzero_on_lecture_error(tmp_project: Path):
 
     fake_list = [{"idx": 1, "video_id": "v1", "title": "L1", "video_url": "https://yt/v1"}]
     with (
-        patch("course_merger.crawl.youtube.YouTubeCrawler.list_playlist", return_value=fake_list),
+        patch("video_to_notebook.crawl.youtube.YouTubeCrawler.list_playlist", return_value=fake_list),
         patch(
-            "course_merger.crawl.youtube.YouTubeCrawler.download_subtitle_vtt",
+            "video_to_notebook.crawl.youtube.YouTubeCrawler.download_subtitle_vtt",
             side_effect=RuntimeError("boom"),
         ),
     ):

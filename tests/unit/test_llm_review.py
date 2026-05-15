@@ -5,13 +5,13 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from course_merger.cluster.clusterer import Cluster
-from course_merger.cluster.llm_review import (
+from video_to_notebook.cluster.clusterer import Cluster
+from video_to_notebook.cluster.llm_review import (
     ReviewDecision,
     Reviewer,
     parse_review_response,
 )
-from course_merger.tag.ontology import load_ontology
+from video_to_notebook.tag.ontology import load_ontology
 from tests.fixtures.review_responses import (
     AMBIGUOUS_DECISION,
     CREATE_DECISION,

@@ -5,12 +5,12 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from course_merger.tag.claude_tagger import (
+from video_to_notebook.tag.claude_tagger import (
     ClaudeTagger,
     TagResult,
     parse_tagger_response,
 )
-from course_merger.tag.ontology import load_ontology
+from video_to_notebook.tag.ontology import load_ontology
 from tests.fixtures.tagger_responses import (
     EMPTY,
     GOOD_TWO_TAGS,

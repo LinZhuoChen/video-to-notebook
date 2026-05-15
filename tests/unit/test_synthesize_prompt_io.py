@@ -4,8 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from course_merger.db.session import connect, init_db
-from course_merger.synthesize.prompt_io import (
+from video_to_notebook.db.session import connect, init_db
+from video_to_notebook.synthesize.prompt_io import (
     apply_synthesize_results,
     collect_synthesize_prompts,
 )
@@ -70,7 +70,7 @@ def test_apply_writes_fragment_and_marks_chapter(tmp_path: Path):
     fragment = tmp_path / "fragment.html"
     fragment.write_text("<article><h1>Hi</h1></article>")
 
-    state_dir = tmp_path / ".course-merger"
+    state_dir = tmp_path / ".video-to-notebook"
     state_dir.mkdir(parents=True, exist_ok=True)
 
     results = {
@@ -104,7 +104,7 @@ def test_apply_rejects_wrong_schema(tmp_path: Path):
     _seed(db)
     fragment = tmp_path / "f.html"
     fragment.write_text("<article></article>")
-    state_dir = tmp_path / ".course-merger"
+    state_dir = tmp_path / ".video-to-notebook"
     state_dir.mkdir()
 
     with pytest.raises(ValueError, match="schema_version"):
@@ -123,7 +123,7 @@ def test_apply_rejects_wrong_schema(tmp_path: Path):
 def test_apply_rejects_missing_fragment(tmp_path: Path):
     db = tmp_path / "db.sqlite"
     _seed(db)
-    state_dir = tmp_path / ".course-merger"
+    state_dir = tmp_path / ".video-to-notebook"
     state_dir.mkdir()
 
     with pytest.raises(FileNotFoundError):
@@ -144,7 +144,7 @@ def test_apply_rejects_chapter_not_planned(tmp_path: Path):
     _seed(db)
     fragment = tmp_path / "f.html"
     fragment.write_text("<article></article>")
-    state_dir = tmp_path / ".course-merger"
+    state_dir = tmp_path / ".video-to-notebook"
     state_dir.mkdir()
 
     with pytest.raises(ValueError, match="no chapter at order_idx"):

@@ -4,8 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from course_merger.db.session import connect, init_db
-from course_merger.explain.prompt_io import (
+from video_to_notebook.db.session import connect, init_db
+from video_to_notebook.explain.prompt_io import (
     apply_explain_results,
     collect_explain_prompts,
 )

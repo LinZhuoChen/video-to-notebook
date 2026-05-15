@@ -2,6 +2,7 @@
 import Base from '../../layouts/Base.astro';
 import TextbookNav from '../../components/TextbookNav.astro';
 import ChapterNav from '../../components/ChapterNav.astro';
+import { t, currentLanguage } from '../../i18n';
 
 export async function getStaticPaths() {
   let chapters: any[] = [];
@@ -43,7 +44,7 @@ const nextHref = next ? `/textbook/${next.order_idx}/` : '';
     <article class="chapter-content" data-module-idx={mIdx}>
       <header class="chapter-header" data-module-idx={mIdx}>
         <div class="chapter-meta">
-          <span class="chapter-num">第 {chapter.order_idx} 章</span>
+          <span class="chapter-num">{currentLanguage === 'en' ? `Chapter ${chapter.order_idx}` : `第 ${chapter.order_idx} 章`}</span>
           <span class="chapter-dot">·</span>
           <span class="module-label">{chapter.module}</span>
         </div>
@@ -56,14 +57,14 @@ const nextHref = next ? `/textbook/${next.order_idx}/` : '';
       </div>
       <ChapterNav prev={prev} next={next} />
     </article>
-    <aside class="chapter-minimap" aria-label="本章大纲">
-      <div class="minimap-label">本章大纲</div>
+    <aside class="chapter-minimap" aria-label={currentLanguage === 'en' ? 'chapter outline' : '本章大纲'}>
+      <div class="minimap-label">{currentLanguage === 'en' ? 'In this chapter' : '本章大纲'}</div>
       <ol class="minimap-list" id="minimap-list"></ol>
     </aside>
   </div>
 
   <div class="keyhint" aria-hidden="true">
-    <span>← →</span> 切换章节
+    <span>← →</span> {t.chapter_kbd_switch_hint}
   </div>
 
   <script is:inline define:vars={{ prevHref, nextHref }}>

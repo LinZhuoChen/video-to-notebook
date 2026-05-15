@@ -5,8 +5,8 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
-from course_merger.cli import app
-from course_merger.db.session import connect
+from video_to_notebook.cli import app
+from video_to_notebook.db.session import connect
 
 runner = CliRunner()
 
@@ -15,7 +15,7 @@ runner = CliRunner()
 def test_build_cli_writes_content(tmp_project: Path):
     runner.invoke(app, ["init"])
 
-    db = tmp_project / ".course-merger" / "db.sqlite"
+    db = tmp_project / ".video-to-notebook" / "db.sqlite"
     with connect(db) as conn:
         conn.execute(
             "INSERT INTO courses (id, slug, title, platform, source_url, added_at) "

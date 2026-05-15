@@ -1,4 +1,4 @@
 def test_imports():
-    import course_merger
+    import video_to_notebook
 
-    assert course_merger.__version__ == "0.1.0"
+    assert video_to_notebook.__version__ == "0.1.0"

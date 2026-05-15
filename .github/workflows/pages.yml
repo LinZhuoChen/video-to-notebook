@@ -6,7 +6,7 @@ on:
     paths:
       - 'examples/frontier-notebook/**'
       - 'template-site/**'
-      - 'src/course_merger/**'
+      - 'src/video_to_notebook/**'
       - '.github/workflows/pages.yml'
   workflow_dispatch:
 
@@ -33,7 +33,7 @@ jobs:
       - name: Set up Python
         run: uv python install 3.12
 
-      - name: Install course-merger
+      - name: Install video-to-notebook
         run: uv pip install --system -e ".[dev]"
 
       - name: Set up Node
@@ -45,7 +45,7 @@ jobs:
         id: cache-corpus
         uses: actions/cache@v4
         with:
-          path: examples/frontier-notebook/.course-merger-project/.course-merger
+          path: examples/frontier-notebook/.video-to-notebook-project/.video-to-notebook
           key: corpus-${{ hashFiles('examples/frontier-notebook/courses.toml', 'examples/frontier-notebook/ontology.yaml') }}-v1
 
       - name: Build the demo
@@ -58,7 +58,7 @@ jobs:
       - name: Upload pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: examples/frontier-notebook/.course-merger-project/site/dist
+          path: examples/frontier-notebook/.video-to-notebook-project/site/dist
 
       - name: Deploy to GitHub Pages
         id: deployment

@@ -7,9 +7,9 @@ from unittest.mock import patch
 import pytest
 from typer.testing import CliRunner
 
-from course_merger.cli import app
-from course_merger.db.session import connect
-from course_merger.tag.claude_tagger import Tag, TagResult
+from video_to_notebook.cli import app
+from video_to_notebook.db.session import connect
+from video_to_notebook.tag.claude_tagger import Tag, TagResult
 
 runner = CliRunner()
 
@@ -17,7 +17,7 @@ runner = CliRunner()
 @pytest.mark.integration
 def test_tag_cli_end_to_end(tmp_project: Path, fixtures_dir: Path):
     runner.invoke(app, ["init"])
-    db = tmp_project / ".course-merger" / "db.sqlite"
+    db = tmp_project / ".video-to-notebook" / "db.sqlite"
     with connect(db) as conn:
         cur = conn.execute(
             "INSERT INTO courses (slug, title, platform, source_url, added_at) "
@@ -48,7 +48,7 @@ def test_tag_cli_end_to_end(tmp_project: Path, fixtures_dir: Path):
     )
     with (
         patch(
-            "course_merger.tag.claude_tagger.ClaudeTagger.tag_chunk",
+            "video_to_notebook.tag.claude_tagger.ClaudeTagger.tag_chunk",
             return_value=fake_result,
         ),
         patch("anthropic.Anthropic", return_value=object()),
@@ -77,7 +77,7 @@ def test_tag_errors_when_not_initialized(tmp_project: Path, fixtures_dir: Path):
 @pytest.mark.integration
 def test_tag_print_prompts_emits_envelope(tmp_project: Path, fixtures_dir: Path):
     runner.invoke(app, ["init"])
-    db = tmp_project / ".course-merger" / "db.sqlite"
+    db = tmp_project / ".video-to-notebook" / "db.sqlite"
     with connect(db) as conn:
         conn.execute(
             "INSERT INTO courses (slug, title, platform, source_url, added_at) "
@@ -110,7 +110,7 @@ def test_tag_print_prompts_emits_envelope(tmp_project: Path, fixtures_dir: Path)
 @pytest.mark.integration
 def test_tag_apply_results_writes_db(tmp_project: Path, fixtures_dir: Path):
     runner.invoke(app, ["init"])
-    db = tmp_project / ".course-merger" / "db.sqlite"
+    db = tmp_project / ".video-to-notebook" / "db.sqlite"
     with connect(db) as conn:
         cur = conn.execute(
             "INSERT INTO courses (slug, title, platform, source_url, added_at) "

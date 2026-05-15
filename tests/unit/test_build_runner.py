@@ -3,8 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import patch
 
-from course_merger.build.runner import BuildReport, run_build
-from course_merger.db.session import connect, init_db
+from video_to_notebook.build.runner import BuildReport, run_build
+from video_to_notebook.db.session import connect, init_db
 
 
 def _seed_full(db_path: Path) -> None:
@@ -36,7 +36,7 @@ def test_run_build_writes_content_files(tmp_path: Path):
     db = tmp_path / "db.sqlite"
     _seed_full(db)
 
-    with patch("course_merger.build.runner._run_astro_build") as mock_npm:
+    with patch("video_to_notebook.build.runner._run_astro_build") as mock_npm:
         mock_npm.return_value = 0
         report = run_build(project_root=tmp_path, db_path=db, npm_build=True)
 
@@ -57,7 +57,7 @@ def test_run_build_skips_npm_when_disabled(tmp_path: Path):
     db = tmp_path / "db.sqlite"
     _seed_full(db)
 
-    with patch("course_merger.build.runner._run_astro_build") as mock_npm:
+    with patch("video_to_notebook.build.runner._run_astro_build") as mock_npm:
         run_build(project_root=tmp_path, db_path=db, npm_build=False)
     assert not mock_npm.called
 
@@ -74,7 +74,7 @@ def test_run_build_incremental_only_dirty(tmp_path: Path):
             "INSERT INTO build_meta (key, value) VALUES ('dirty_concepts', '[\"attention\"]')"
         )
 
-    with patch("course_merger.build.runner._run_astro_build") as mock_npm:
+    with patch("video_to_notebook.build.runner._run_astro_build") as mock_npm:
         mock_npm.return_value = 0
         report = run_build(
             project_root=tmp_path, db_path=db, npm_build=False, incremental=True

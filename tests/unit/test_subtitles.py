@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from course_merger.crawl.subtitles import Cue, parse_vtt
+from video_to_notebook.crawl.subtitles import Cue, parse_vtt
 
 
 def test_parse_vtt_basic(fixtures_dir: Path):

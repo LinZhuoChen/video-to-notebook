@@ -1,4 +1,6 @@
 ---
+import { t, currentLanguage } from '../i18n';
+
 interface ChapterMeta {
   order_idx: number;
   module: string;
@@ -29,12 +31,12 @@ const done = chapters.filter(c => c.status === 'synthesized').length;
 ---
 <aside class="textbook-nav">
   <div class="nav-header">
-    <a class="nav-title" href="/textbook/">教材</a>
+    <a class="nav-title" href="/textbook/">{t.nav_textbook}</a>
     <div class="nav-progress">
       <div class="nav-progress-track">
         <div class="nav-progress-fill" style={`width: ${total ? (done * 100 / total) : 0}%`}></div>
       </div>
-      <div class="nav-progress-text">{done} / {total} 章</div>
+      <div class="nav-progress-text">{done} / {total} {currentLanguage === 'en' ? 'chapters' : '章'}</div>
     </div>
   </div>
 

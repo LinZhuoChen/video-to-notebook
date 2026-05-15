@@ -4,13 +4,13 @@ from pathlib import Path
 
 import pytest
 
-from course_merger.db.session import connect, init_db
-from course_merger.tag.ontology import load_ontology
-from course_merger.tag.prompt_io import (
+from video_to_notebook.db.session import connect, init_db
+from video_to_notebook.tag.ontology import load_ontology
+from video_to_notebook.tag.prompt_io import (
     apply_tag_results,
     collect_tag_prompts,
 )
-from course_merger.tag.runner import TagReport
+from video_to_notebook.tag.runner import TagReport
 
 
 def _seed(db_path: Path) -> None:

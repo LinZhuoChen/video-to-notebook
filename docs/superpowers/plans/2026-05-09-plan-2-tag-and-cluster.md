@@ -2,22 +2,22 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Ship `course-merger tag && course-merger cluster`. After Plan 2, every crawled chunk has 1-3 Claude-Haiku-assigned concept tags, and proposed new concepts get LLM-reviewed and merged into the canonical ontology via embedding clustering.
+**Goal:** Ship `video-to-notebook tag && video-to-notebook cluster`. After Plan 2, every crawled chunk has 1-3 Claude-Haiku-assigned concept tags, and proposed new concepts get LLM-reviewed and merged into the canonical ontology via embedding clustering.
 
 **Architecture:** A migration runner (PRAGMA `user_version`) lets us add 4 new tables without breaking Plan 1's DB. The `tag` command loops untagged chunks → calls Claude Haiku with a cacheable system prompt containing the ontology → writes `chunk_concepts` rows. The `cluster` command embeds all `proposed:` tags via sentence-transformers, groups them by cosine similarity, then asks Sonnet per-cluster whether to merge / create / reject.
 
 **Tech Stack:** Python 3.12 + anthropic SDK 0.36+ + sentence-transformers (all-MiniLM-L6-v2) + numpy + PyYAML. Tests mock the Anthropic boundary; embedding tests use the real (small) model.
 
-**Repo:** `/Users/chenlinzhuo/code/course-merger/` (at tag `plan-1-done`, commit `0b0a292`). Plan-1 backlog (WAL mode, `BilibiliCookieError` location, yt-dlp returncode) gets cleared in Phase 0 before Plan-2 features layer on.
+**Repo:** `/Users/chenlinzhuo/code/video-to-notebook/` (at tag `plan-1-done`, commit `0b0a292`). Plan-1 backlog (WAL mode, `BilibiliCookieError` location, yt-dlp returncode) gets cleared in Phase 0 before Plan-2 features layer on.
 
 ---
 
 ## File Structure
 
 ```
-course-merger/
+video-to-notebook/
 ├── pyproject.toml                          # MODIFY: add anthropic, sentence-transformers, pyyaml, numpy, scipy
-├── src/course_merger/
+├── src/video_to_notebook/
 │   ├── cli.py                              # MODIFY: add `tag` and `cluster` commands
 │   ├── db/
 │   │   ├── schema.sql                      # MODIFY: full v2 schema (used by fresh init)
@@ -80,7 +80,7 @@ Each module has one responsibility:
 ### Task 1: Enable SQLite WAL mode
 
 **Files:**
-- Modify: `src/course_merger/db/session.py:24-40`
+- Modify: `src/video_to_notebook/db/session.py:24-40`
 - Modify: `tests/unit/test_db_session.py` — add test
 
 WAL (Write-Ahead Log) lets readers operate concurrently with a writer. Important for Plan 2 (`tag` writes, `cluster` reads chunks concurrently in future) and Plan 3 (`build` reads while `tag` runs).
@@ -101,12 +101,12 @@ def test_wal_mode_enabled(tmp_path: Path):
 - [ ] **Step 2: Run test, confirm failure**
 
 ```bash
-cd /Users/chenlinzhuo/code/course-merger && .venv/bin/pytest tests/unit/test_db_session.py::test_wal_mode_enabled -v
+cd /Users/chenlinzhuo/code/video-to-notebook && .venv/bin/pytest tests/unit/test_db_session.py::test_wal_mode_enabled -v
 ```
 
 Expected: FAIL — current default journal mode is `delete`, not `wal`.
 
-- [ ] **Step 3: Modify `init_db` in `src/course_merger/db/session.py`**
+- [ ] **Step 3: Modify `init_db` in `src/video_to_notebook/db/session.py`**
 
 Replace the `init_db` function body:
 
@@ -135,7 +135,7 @@ Expected: 5/5 pass (4 existing + 1 new).
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/course_merger/db/session.py tests/unit/test_db_session.py
+git add src/video_to_notebook/db/session.py tests/unit/test_db_session.py
 git commit -m "feat(db): enable SQLite WAL mode for concurrent reads"
 ```
 
@@ -144,10 +144,10 @@ git commit -m "feat(db): enable SQLite WAL mode for concurrent reads"
 ### Task 2: Lift `BilibiliCookieError` to `crawl/exceptions.py`
 
 **Files:**
-- Create: `src/course_merger/crawl/exceptions.py`
-- Modify: `src/course_merger/crawl/bilibili.py:12-13` (remove definition, import instead)
-- Modify: `src/course_merger/crawl/runner.py:10` (update import)
-- Modify: `src/course_merger/cli.py:13` (update import)
+- Create: `src/video_to_notebook/crawl/exceptions.py`
+- Modify: `src/video_to_notebook/crawl/bilibili.py:12-13` (remove definition, import instead)
+- Modify: `src/video_to_notebook/crawl/runner.py:10` (update import)
+- Modify: `src/video_to_notebook/cli.py:13` (update import)
 - Create: `tests/unit/test_exceptions.py`
 
 When more crawler errors arrive (yt-dlp 404, generic platform errors), they belong with `BilibiliCookieError`. Centralizing now is cheap.
@@ -160,7 +160,7 @@ from __future__ import annotations
 
 import pytest
 
-from course_merger.crawl.exceptions import BilibiliCookieError
+from video_to_notebook.crawl.exceptions import BilibiliCookieError
 
 
 def test_bilibili_cookie_error_is_runtime_error():
@@ -175,8 +175,8 @@ def test_bilibili_cookie_error_raises():
 
 def test_backward_compat_import_from_bilibili():
     """The old import location must still work to avoid breaking callers."""
-    from course_merger.crawl.bilibili import BilibiliCookieError as B1
-    from course_merger.crawl.exceptions import BilibiliCookieError as B2
+    from video_to_notebook.crawl.bilibili import BilibiliCookieError as B1
+    from video_to_notebook.crawl.exceptions import BilibiliCookieError as B2
     assert B1 is B2
 ```
 
@@ -186,9 +186,9 @@ def test_backward_compat_import_from_bilibili():
 .venv/bin/pytest tests/unit/test_exceptions.py -v
 ```
 
-Expected: `ModuleNotFoundError: No module named 'course_merger.crawl.exceptions'`.
+Expected: `ModuleNotFoundError: No module named 'video_to_notebook.crawl.exceptions'`.
 
-- [ ] **Step 3: Create `src/course_merger/crawl/exceptions.py`**
+- [ ] **Step 3: Create `src/video_to_notebook/crawl/exceptions.py`**
 
 ```python
 """Crawler exceptions shared across platform adapters."""
@@ -199,7 +199,7 @@ class BilibiliCookieError(RuntimeError):
     """Raised when Bilibili rejects the request due to missing/expired cookies."""
 ```
 
-- [ ] **Step 4: Modify `src/course_merger/crawl/bilibili.py`**
+- [ ] **Step 4: Modify `src/video_to_notebook/crawl/bilibili.py`**
 
 Replace lines 12-13 (the local class definition) with a re-export so existing imports keep working:
 
@@ -208,32 +208,32 @@ Replace lines 12-13 (the local class definition) with a re-export so existing im
 #   class BilibiliCookieError(RuntimeError):
 #       """Raised when Bilibili rejects the request due to missing/expired cookies."""
 # With:
-from course_merger.crawl.exceptions import BilibiliCookieError
+from video_to_notebook.crawl.exceptions import BilibiliCookieError
 
 __all__ = ["BilibiliCookieError", "BilibiliCrawler"]
 ```
 
-- [ ] **Step 5: Modify `src/course_merger/crawl/runner.py:10`**
+- [ ] **Step 5: Modify `src/video_to_notebook/crawl/runner.py:10`**
 
 Change:
 ```python
-from course_merger.crawl.bilibili import BilibiliCookieError
+from video_to_notebook.crawl.bilibili import BilibiliCookieError
 ```
 to:
 ```python
-from course_merger.crawl.exceptions import BilibiliCookieError
+from video_to_notebook.crawl.exceptions import BilibiliCookieError
 ```
 
-- [ ] **Step 6: Modify `src/course_merger/cli.py:13`**
+- [ ] **Step 6: Modify `src/video_to_notebook/cli.py:13`**
 
 Change:
 ```python
-from course_merger.crawl.bilibili import BilibiliCookieError, BilibiliCrawler
+from video_to_notebook.crawl.bilibili import BilibiliCookieError, BilibiliCrawler
 ```
 to:
 ```python
-from course_merger.crawl.bilibili import BilibiliCrawler
-from course_merger.crawl.exceptions import BilibiliCookieError
+from video_to_notebook.crawl.bilibili import BilibiliCrawler
+from video_to_notebook.crawl.exceptions import BilibiliCookieError
 ```
 
 - [ ] **Step 7: Run full suite**
@@ -248,7 +248,7 @@ Expected: 41 pass (38 existing + 3 new), pyright clean.
 - [ ] **Step 8: Commit**
 
 ```bash
-git add src/course_merger/crawl/exceptions.py src/course_merger/crawl/bilibili.py src/course_merger/crawl/runner.py src/course_merger/cli.py tests/unit/test_exceptions.py
+git add src/video_to_notebook/crawl/exceptions.py src/video_to_notebook/crawl/bilibili.py src/video_to_notebook/crawl/runner.py src/video_to_notebook/cli.py tests/unit/test_exceptions.py
 git commit -m "refactor(crawl): lift BilibiliCookieError to crawl/exceptions.py"
 ```
 
@@ -257,8 +257,8 @@ git commit -m "refactor(crawl): lift BilibiliCookieError to crawl/exceptions.py"
 ### Task 3: yt-dlp returncode check in `list_playlist`
 
 **Files:**
-- Modify: `src/course_merger/crawl/youtube.py:19-48` (the `list_playlist` method)
-- Modify: `src/course_merger/crawl/bilibili.py:33-61` (same method)
+- Modify: `src/video_to_notebook/crawl/youtube.py:19-48` (the `list_playlist` method)
+- Modify: `src/video_to_notebook/crawl/bilibili.py:33-61` (same method)
 - Create: `tests/unit/test_crawler_youtube.py` — add new test
 - Create: `tests/unit/test_crawler_bilibili.py` — add new test
 
@@ -269,7 +269,7 @@ Plan 1's `list_playlist` ignored yt-dlp's exit code: a 403 on the playlist URL i
 Append to `tests/unit/test_crawler_youtube.py`:
 
 ```python
-from course_merger.crawl.youtube import YouTubeCrawler, PlaylistFetchError
+from video_to_notebook.crawl.youtube import YouTubeCrawler, PlaylistFetchError
 
 
 def test_list_playlist_raises_on_nonzero_returncode():
@@ -283,8 +283,8 @@ def test_list_playlist_raises_on_nonzero_returncode():
 Append to `tests/unit/test_crawler_bilibili.py`:
 
 ```python
-from course_merger.crawl.bilibili import BilibiliCrawler
-from course_merger.crawl.exceptions import PlaylistFetchError
+from video_to_notebook.crawl.bilibili import BilibiliCrawler
+from video_to_notebook.crawl.exceptions import PlaylistFetchError
 
 
 def test_list_playlist_raises_on_nonzero_returncode():
@@ -302,7 +302,7 @@ def test_list_playlist_raises_on_nonzero_returncode():
 
 Expected: `ImportError: cannot import name 'PlaylistFetchError'`.
 
-- [ ] **Step 3: Add `PlaylistFetchError` to `src/course_merger/crawl/exceptions.py`**
+- [ ] **Step 3: Add `PlaylistFetchError` to `src/video_to_notebook/crawl/exceptions.py`**
 
 Append:
 
@@ -311,11 +311,11 @@ class PlaylistFetchError(RuntimeError):
     """Raised when yt-dlp fails to enumerate a playlist (e.g. 404, 403, invalid URL)."""
 ```
 
-- [ ] **Step 4: Modify `src/course_merger/crawl/youtube.py`**
+- [ ] **Step 4: Modify `src/video_to_notebook/crawl/youtube.py`**
 
 Add the import at the top:
 ```python
-from course_merger.crawl.exceptions import PlaylistFetchError
+from video_to_notebook.crawl.exceptions import PlaylistFetchError
 ```
 
 And replace the body of `list_playlist`:
@@ -357,12 +357,12 @@ And replace the body of `list_playlist`:
         return entries
 ```
 
-- [ ] **Step 5: Modify `src/course_merger/crawl/bilibili.py`**
+- [ ] **Step 5: Modify `src/video_to_notebook/crawl/bilibili.py`**
 
 Same import and same returncode check inserted at the top of `list_playlist`:
 
 ```python
-from course_merger.crawl.exceptions import BilibiliCookieError, PlaylistFetchError
+from video_to_notebook.crawl.exceptions import BilibiliCookieError, PlaylistFetchError
 ```
 
 Replace `result = subprocess.run(...)` block with:
@@ -378,10 +378,10 @@ Replace `result = subprocess.run(...)` block with:
 
 - [ ] **Step 6: Catch `PlaylistFetchError` in CLI**
 
-Modify `src/course_merger/cli.py` — in `crawl_cmd`, change the try/except block around `run_crawl` to also catch `PlaylistFetchError`:
+Modify `src/video_to_notebook/cli.py` — in `crawl_cmd`, change the try/except block around `run_crawl` to also catch `PlaylistFetchError`:
 
 ```python
-from course_merger.crawl.exceptions import BilibiliCookieError, PlaylistFetchError
+from video_to_notebook.crawl.exceptions import BilibiliCookieError, PlaylistFetchError
 
 # ... inside crawl_cmd ...
     try:
@@ -414,7 +414,7 @@ Expected: 43 pass, pyright clean.
 - [ ] **Step 8: Commit**
 
 ```bash
-git add src/course_merger/crawl/ src/course_merger/cli.py tests/unit/test_crawler_youtube.py tests/unit/test_crawler_bilibili.py
+git add src/video_to_notebook/crawl/ src/video_to_notebook/cli.py tests/unit/test_crawler_youtube.py tests/unit/test_crawler_bilibili.py
 git commit -m "feat(crawl): yt-dlp nonzero returncode raises PlaylistFetchError"
 ```
 
@@ -425,9 +425,9 @@ git commit -m "feat(crawl): yt-dlp nonzero returncode raises PlaylistFetchError"
 ### Task 4: PRAGMA `user_version` + migrations runner
 
 **Files:**
-- Create: `src/course_merger/db/migrations/__init__.py` (empty marker, optional but keeps things tidy)
-- Create: `src/course_merger/db/migrations/0001_initial.sql`
-- Modify: `src/course_merger/db/session.py` — add `_run_migrations`, rewire `init_db`
+- Create: `src/video_to_notebook/db/migrations/__init__.py` (empty marker, optional but keeps things tidy)
+- Create: `src/video_to_notebook/db/migrations/0001_initial.sql`
+- Modify: `src/video_to_notebook/db/session.py` — add `_run_migrations`, rewire `init_db`
 - Create: `tests/unit/test_migrations.py`
 
 The mechanism: SQLite tracks an integer in `PRAGMA user_version`. `init_db` scans `migrations/000N_*.sql` in order; for every file whose number is greater than `user_version`, it executes the file (within a transaction) and then bumps `user_version`. Idempotent.
@@ -445,7 +445,7 @@ from pathlib import Path
 
 import pytest
 
-from course_merger.db.session import _migration_files, connect, init_db
+from video_to_notebook.db.session import _migration_files, connect, init_db
 
 
 def test_fresh_db_runs_all_migrations(tmp_path: Path):
@@ -486,9 +486,9 @@ def test_migration_files_are_ordered():
 
 Expected: ImportError or attribute errors (`_migration_files` doesn't exist).
 
-- [ ] **Step 3: Create `src/course_merger/db/migrations/0001_initial.sql`**
+- [ ] **Step 3: Create `src/video_to_notebook/db/migrations/0001_initial.sql`**
 
-Copy the content from `src/course_merger/db/schema.sql` verbatim (Plan-1 schema). This file becomes the canonical "v1" migration:
+Copy the content from `src/video_to_notebook/db/schema.sql` verbatim (Plan-1 schema). This file becomes the canonical "v1" migration:
 
 ```sql
 -- 0001: initial schema (Plan 1 — courses, lectures, chunks).
@@ -527,7 +527,7 @@ CREATE TABLE IF NOT EXISTS chunks (
 CREATE INDEX IF NOT EXISTS idx_chunk_lecture ON chunks(lecture_id);
 ```
 
-- [ ] **Step 4: Replace `src/course_merger/db/session.py`**
+- [ ] **Step 4: Replace `src/video_to_notebook/db/session.py`**
 
 ```python
 """SQLite connection lifecycle, transaction helpers, and migration runner."""
@@ -599,15 +599,15 @@ def connect(db_path: Path) -> Iterator[sqlite3.Connection]:
         conn.close()
 ```
 
-- [ ] **Step 5: Delete the now-redundant `src/course_merger/db/schema.sql`**
+- [ ] **Step 5: Delete the now-redundant `src/video_to_notebook/db/schema.sql`**
 
 ```bash
-rm src/course_merger/db/schema.sql
+rm src/video_to_notebook/db/schema.sql
 ```
 
 (The old `init_db` referenced this file. With the migrations runner taking over, it's dead.)
 
-- [ ] **Step 6: Create empty marker `src/course_merger/db/migrations/__init__.py`** (zero bytes — only there so packaging tooling sees the directory; not required for sql discovery)
+- [ ] **Step 6: Create empty marker `src/video_to_notebook/db/migrations/__init__.py`** (zero bytes — only there so packaging tooling sees the directory; not required for sql discovery)
 
 - [ ] **Step 7: Verify pyproject.toml includes the migrations directory in packaging**
 
@@ -615,9 +615,9 @@ Add to `pyproject.toml` under `[tool.hatch.build.targets.wheel]`:
 
 ```toml
 [tool.hatch.build.targets.wheel]
-packages = ["src/course_merger"]
+packages = ["src/video_to_notebook"]
 [tool.hatch.build.targets.wheel.force-include]
-"src/course_merger/db/migrations" = "course_merger/db/migrations"
+"src/video_to_notebook/db/migrations" = "video_to_notebook/db/migrations"
 ```
 
 (hatchling auto-includes Python files but not `.sql`; this ensures `.sql` files ship in the wheel.)
@@ -633,8 +633,8 @@ Expected: all existing tests pass + 3 new migration tests pass. The Plan-1 e2e t
 - [ ] **Step 9: Commit**
 
 ```bash
-git add src/course_merger/db/ pyproject.toml tests/unit/test_migrations.py
-git rm src/course_merger/db/schema.sql 2>/dev/null || true
+git add src/video_to_notebook/db/ pyproject.toml tests/unit/test_migrations.py
+git rm src/video_to_notebook/db/schema.sql 2>/dev/null || true
 git commit -m "feat(db): migration runner via PRAGMA user_version; relocate v1 schema to migrations/0001"
 ```
 
@@ -645,7 +645,7 @@ git commit -m "feat(db): migration runner via PRAGMA user_version; relocate v1 s
 ### Task 5: Migration `0002_concepts.sql`
 
 **Files:**
-- Create: `src/course_merger/db/migrations/0002_concepts.sql`
+- Create: `src/video_to_notebook/db/migrations/0002_concepts.sql`
 - Modify: `tests/unit/test_migrations.py` — add assertions for new tables
 
 - [ ] **Step 1: Add failing test**
@@ -705,7 +705,7 @@ def test_concept_aliases_enforce_unique(tmp_path: Path):
 
 Expected: 2 new tests fail.
 
-- [ ] **Step 3: Create `src/course_merger/db/migrations/0002_concepts.sql`**
+- [ ] **Step 3: Create `src/video_to_notebook/db/migrations/0002_concepts.sql`**
 
 ```sql
 -- 0002: concept ontology, chunk-concept assignments, dirty-build tracking (Plan 2).
@@ -772,7 +772,7 @@ Expected: all pass (crawl tests now run on a v2 schema, which is a superset of v
 - [ ] **Step 6: Commit**
 
 ```bash
-git add src/course_merger/db/migrations/0002_concepts.sql tests/unit/test_migrations.py
+git add src/video_to_notebook/db/migrations/0002_concepts.sql tests/unit/test_migrations.py
 git commit -m "feat(db): migration 0002 adds concepts/aliases/chunk_concepts/build_meta/proposed_tags"
 ```
 
@@ -784,8 +784,8 @@ git commit -m "feat(db): migration 0002 adds concepts/aliases/chunk_concepts/bui
 
 **Files:**
 - Modify: `pyproject.toml` — add `pyyaml`
-- Create: `src/course_merger/tag/__init__.py` (empty)
-- Create: `src/course_merger/tag/ontology.py`
+- Create: `src/video_to_notebook/tag/__init__.py` (empty)
+- Create: `src/video_to_notebook/tag/ontology.py`
 - Create: `tests/fixtures/ontology.yaml`
 - Create: `tests/unit/test_ontology.py`
 
@@ -805,7 +805,7 @@ dependencies = [
 Install:
 
 ```bash
-cd /Users/chenlinzhuo/code/course-merger && uv pip install -e ".[dev]"
+cd /Users/chenlinzhuo/code/video-to-notebook && uv pip install -e ".[dev]"
 ```
 
 - [ ] **Step 2: Create fixture `tests/fixtures/ontology.yaml`**
@@ -842,7 +842,7 @@ from pathlib import Path
 
 import pytest
 
-from course_merger.tag.ontology import (
+from video_to_notebook.tag.ontology import (
     Concept,
     Ontology,
     load_ontology,
@@ -903,7 +903,7 @@ def test_load_ontology_rejects_duplicate_slug(tmp_path: Path):
 
 Expected: ImportError.
 
-- [ ] **Step 5: Write `src/course_merger/tag/ontology.py`**
+- [ ] **Step 5: Write `src/video_to_notebook/tag/ontology.py`**
 
 ```python
 """YAML ontology loader: in-memory model of seed concepts with alias lookup."""
@@ -984,7 +984,7 @@ Expected: 5 pass.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add pyproject.toml src/course_merger/tag/__init__.py src/course_merger/tag/ontology.py tests/fixtures/ontology.yaml tests/unit/test_ontology.py
+git add pyproject.toml src/video_to_notebook/tag/__init__.py src/video_to_notebook/tag/ontology.py tests/fixtures/ontology.yaml tests/unit/test_ontology.py
 git commit -m "feat(tag): YAML ontology loader with slug + alias lookup"
 ```
 
@@ -996,8 +996,8 @@ git commit -m "feat(tag): YAML ontology loader with slug + alias lookup"
 
 **Files:**
 - Modify: `pyproject.toml` — add `anthropic`
-- Create: `src/course_merger/tag/prompts.py`
-- Create: `src/course_merger/tag/claude_tagger.py`
+- Create: `src/video_to_notebook/tag/prompts.py`
+- Create: `src/video_to_notebook/tag/claude_tagger.py`
 - Create: `tests/fixtures/tagger_responses.py`
 - Create: `tests/unit/test_claude_tagger.py`
 
@@ -1023,7 +1023,7 @@ Install:
 uv pip install -e ".[dev]"
 ```
 
-- [ ] **Step 2: Create `src/course_merger/tag/prompts.py`**
+- [ ] **Step 2: Create `src/video_to_notebook/tag/prompts.py`**
 
 ```python
 """Versioned prompt constants for the Claude Haiku tagger.
@@ -1105,12 +1105,12 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from course_merger.tag.claude_tagger import (
+from video_to_notebook.tag.claude_tagger import (
     ClaudeTagger,
     TagResult,
     parse_tagger_response,
 )
-from course_merger.tag.ontology import load_ontology
+from video_to_notebook.tag.ontology import load_ontology
 from tests.fixtures.tagger_responses import (
     EMPTY,
     GOOD_TWO_TAGS,
@@ -1199,7 +1199,7 @@ def test_tagger_returns_empty_after_two_failures(fixtures_dir: Path):
 
 Expected: ImportError.
 
-- [ ] **Step 6: Write `src/course_merger/tag/claude_tagger.py`**
+- [ ] **Step 6: Write `src/video_to_notebook/tag/claude_tagger.py`**
 
 ```python
 """Claude Haiku tagger: builds prompts, calls Anthropic API with caching, parses JSON.
@@ -1213,8 +1213,8 @@ import json
 from dataclasses import dataclass, field
 from typing import Any
 
-from course_merger.tag.ontology import Ontology
-from course_merger.tag.prompts import TAGGER_PROMPT_VERSION, TAGGER_SYSTEM_TEMPLATE
+from video_to_notebook.tag.ontology import Ontology
+from video_to_notebook.tag.prompts import TAGGER_PROMPT_VERSION, TAGGER_SYSTEM_TEMPLATE
 
 
 _PROPOSED_PREFIX = "proposed:"
@@ -1345,7 +1345,7 @@ Expected: clean.
 - [ ] **Step 9: Commit**
 
 ```bash
-git add pyproject.toml src/course_merger/tag/prompts.py src/course_merger/tag/claude_tagger.py tests/fixtures/tagger_responses.py tests/unit/test_claude_tagger.py
+git add pyproject.toml src/video_to_notebook/tag/prompts.py src/video_to_notebook/tag/claude_tagger.py tests/fixtures/tagger_responses.py tests/unit/test_claude_tagger.py
 git commit -m "feat(tag): Claude Haiku tagger with prompt caching + JSON parse + retry"
 ```
 
@@ -1356,8 +1356,8 @@ git commit -m "feat(tag): Claude Haiku tagger with prompt caching + JSON parse +
 ### Task 8: tag runner + CLI wiring
 
 **Files:**
-- Create: `src/course_merger/tag/runner.py`
-- Modify: `src/course_merger/cli.py` — add `tag` command
+- Create: `src/video_to_notebook/tag/runner.py`
+- Modify: `src/video_to_notebook/cli.py` — add `tag` command
 - Create: `tests/unit/test_tag_runner.py`
 - Create: `tests/integration/test_tag_smoke.py`
 
@@ -1374,10 +1374,10 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from course_merger.db.session import connect, init_db
-from course_merger.tag.claude_tagger import Tag, TagResult
-from course_merger.tag.ontology import load_ontology
-from course_merger.tag.runner import TagReport, run_tag
+from video_to_notebook.db.session import connect, init_db
+from video_to_notebook.tag.claude_tagger import Tag, TagResult
+from video_to_notebook.tag.ontology import load_ontology
+from video_to_notebook.tag.runner import TagReport, run_tag
 
 
 def _seed_one_course_with_chunks(db_path: Path, n_chunks: int = 3) -> int:
@@ -1538,7 +1538,7 @@ def test_run_tag_respects_limit(tmp_path: Path, onto):
 
 Expected: ImportError.
 
-- [ ] **Step 3: Write `src/course_merger/tag/runner.py`**
+- [ ] **Step 3: Write `src/video_to_notebook/tag/runner.py`**
 
 ```python
 """Orchestrator: load chunks → tag via Claude → write chunk_concepts + proposed_tags."""
@@ -1548,9 +1548,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Protocol
 
-from course_merger.db.session import connect
-from course_merger.tag.claude_tagger import TagResult
-from course_merger.tag.ontology import Ontology
+from video_to_notebook.db.session import connect
+from video_to_notebook.tag.claude_tagger import TagResult
+from video_to_notebook.tag.ontology import Ontology
 
 
 class _TaggerLike(Protocol):
@@ -1676,9 +1676,9 @@ from unittest.mock import patch
 import pytest
 from typer.testing import CliRunner
 
-from course_merger.cli import app
-from course_merger.db.session import connect
-from course_merger.tag.claude_tagger import Tag, TagResult
+from video_to_notebook.cli import app
+from video_to_notebook.db.session import connect
+from video_to_notebook.tag.claude_tagger import Tag, TagResult
 
 runner = CliRunner()
 
@@ -1687,7 +1687,7 @@ runner = CliRunner()
 def test_tag_cli_end_to_end(tmp_project: Path, fixtures_dir: Path):
     # 1. init + manually seed a course with one chunk
     runner.invoke(app, ["init"])
-    db = tmp_project / ".course-merger" / "db.sqlite"
+    db = tmp_project / ".video-to-notebook" / "db.sqlite"
     with connect(db) as conn:
         cur = conn.execute(
             "INSERT INTO courses (slug, title, platform, source_url, added_at) "
@@ -1720,7 +1720,7 @@ def test_tag_cli_end_to_end(tmp_project: Path, fixtures_dir: Path):
         tags=(Tag(slug="self-attention", confidence=0.95, is_proposed=False),)
     )
     with patch(
-        "course_merger.tag.claude_tagger.ClaudeTagger.tag_chunk",
+        "video_to_notebook.tag.claude_tagger.ClaudeTagger.tag_chunk",
         return_value=fake_result,
     ):
         # Also patch anthropic.Anthropic so we don't need an API key.
@@ -1746,14 +1746,14 @@ def test_tag_errors_when_not_initialized(tmp_project: Path, fixtures_dir: Path):
     assert "init" in result.stdout.lower()
 ```
 
-- [ ] **Step 5: Modify `src/course_merger/cli.py` — add `tag` command**
+- [ ] **Step 5: Modify `src/video_to_notebook/cli.py` — add `tag` command**
 
 Add these imports near the existing crawler imports:
 
 ```python
-from course_merger.tag.claude_tagger import ClaudeTagger
-from course_merger.tag.ontology import load_ontology
-from course_merger.tag.runner import run_tag, TagReport
+from video_to_notebook.tag.claude_tagger import ClaudeTagger
+from video_to_notebook.tag.ontology import load_ontology
+from video_to_notebook.tag.runner import run_tag, TagReport
 ```
 
 Append at the end of the file:
@@ -1818,7 +1818,7 @@ Expected: all green.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add src/course_merger/tag/runner.py src/course_merger/cli.py tests/unit/test_tag_runner.py tests/integration/test_tag_smoke.py
+git add src/video_to_notebook/tag/runner.py src/video_to_notebook/cli.py tests/unit/test_tag_runner.py tests/integration/test_tag_smoke.py
 git commit -m "feat(tag): \\\`tag\\\` CLI orchestrates Claude tagging into chunk_concepts + proposed_tags"
 ```
 
@@ -1830,8 +1830,8 @@ git commit -m "feat(tag): \\\`tag\\\` CLI orchestrates Claude tagging into chunk
 
 **Files:**
 - Modify: `pyproject.toml` — add `sentence-transformers`, `numpy`
-- Create: `src/course_merger/cluster/__init__.py` (empty)
-- Create: `src/course_merger/cluster/embedding.py`
+- Create: `src/video_to_notebook/cluster/__init__.py` (empty)
+- Create: `src/video_to_notebook/cluster/embedding.py`
 - Create: `tests/unit/test_embedding.py`
 
 The model `all-MiniLM-L6-v2` is ~80 MB, downloaded on first use. Tests use a session-scoped fixture so it's loaded once across all tests.
@@ -1860,7 +1860,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from course_merger.cluster.embedding import Embedder, cosine_similarity
+from video_to_notebook.cluster.embedding import Embedder, cosine_similarity
 
 
 @pytest.fixture(scope="session")
@@ -1900,7 +1900,7 @@ def test_cosine_self_is_one(embedder):
 
 Expected: ImportError.
 
-- [ ] **Step 4: Write `src/course_merger/cluster/embedding.py`**
+- [ ] **Step 4: Write `src/video_to_notebook/cluster/embedding.py`**
 
 ```python
 """sentence-transformers wrapper for embedding short text strings (tags, concept names).
@@ -1957,7 +1957,7 @@ Expected: 4 pass (first run downloads the model; ~30s on first invocation, then 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add pyproject.toml src/course_merger/cluster/__init__.py src/course_merger/cluster/embedding.py tests/unit/test_embedding.py
+git add pyproject.toml src/video_to_notebook/cluster/__init__.py src/video_to_notebook/cluster/embedding.py tests/unit/test_embedding.py
 git commit -m "feat(cluster): sentence-transformers embedder + cosine similarity"
 ```
 
@@ -1968,7 +1968,7 @@ git commit -m "feat(cluster): sentence-transformers embedder + cosine similarity
 ### Task 10: Cosine-similarity greedy clusterer
 
 **Files:**
-- Create: `src/course_merger/cluster/clusterer.py`
+- Create: `src/video_to_notebook/cluster/clusterer.py`
 - Create: `tests/unit/test_clusterer.py`
 
 Algorithm: build a similarity matrix from embeddings, then greedy single-linkage cluster — for each item, find its nearest neighbor; if similarity >= threshold, join their clusters (union-find). Otherwise start a new cluster.
@@ -1981,7 +1981,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from course_merger.cluster.clusterer import Cluster, cluster_by_cosine
+from video_to_notebook.cluster.clusterer import Cluster, cluster_by_cosine
 
 
 def _orthogonal_vector(seed: int, dim: int = 384) -> np.ndarray:
@@ -2035,7 +2035,7 @@ def test_cluster_single_item():
 
 Expected: ImportError.
 
-- [ ] **Step 3: Write `src/course_merger/cluster/clusterer.py`**
+- [ ] **Step 3: Write `src/video_to_notebook/cluster/clusterer.py`**
 
 ```python
 """Pure clustering algorithm: cosine similarity + union-find single-linkage."""
@@ -2108,7 +2108,7 @@ Expected: 4 pass.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/course_merger/cluster/clusterer.py tests/unit/test_clusterer.py
+git add src/video_to_notebook/cluster/clusterer.py tests/unit/test_clusterer.py
 git commit -m "feat(cluster): cosine-similarity union-find clusterer"
 ```
 
@@ -2119,14 +2119,14 @@ git commit -m "feat(cluster): cosine-similarity union-find clusterer"
 ### Task 11: LLM review pass
 
 **Files:**
-- Create: `src/course_merger/cluster/prompts.py`
-- Create: `src/course_merger/cluster/llm_review.py`
+- Create: `src/video_to_notebook/cluster/prompts.py`
+- Create: `src/video_to_notebook/cluster/llm_review.py`
 - Create: `tests/fixtures/review_responses.py`
 - Create: `tests/unit/test_llm_review.py`
 
 Per cluster of proposed tags, ask Sonnet: merge into existing? Create new? Reject? Ambiguous?
 
-- [ ] **Step 1: Create `src/course_merger/cluster/prompts.py`**
+- [ ] **Step 1: Create `src/video_to_notebook/cluster/prompts.py`**
 
 ```python
 """Versioned prompts for the Sonnet cluster review pass."""
@@ -2212,13 +2212,13 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from course_merger.cluster.clusterer import Cluster
-from course_merger.cluster.llm_review import (
+from video_to_notebook.cluster.clusterer import Cluster
+from video_to_notebook.cluster.llm_review import (
     ReviewDecision,
     Reviewer,
     parse_review_response,
 )
-from course_merger.tag.ontology import load_ontology
+from video_to_notebook.tag.ontology import load_ontology
 from tests.fixtures.review_responses import (
     AMBIGUOUS_DECISION,
     CREATE_DECISION,
@@ -2281,7 +2281,7 @@ def test_reviewer_calls_sonnet(onto):
 .venv/bin/pytest tests/unit/test_llm_review.py -v
 ```
 
-- [ ] **Step 5: Write `src/course_merger/cluster/llm_review.py`**
+- [ ] **Step 5: Write `src/video_to_notebook/cluster/llm_review.py`**
 
 ```python
 """Sonnet review pass: per-cluster merge/create/reject decision."""
@@ -2291,13 +2291,13 @@ import json
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from course_merger.cluster.clusterer import Cluster
-from course_merger.cluster.prompts import (
+from video_to_notebook.cluster.clusterer import Cluster
+from video_to_notebook.cluster.prompts import (
     CLUSTER_REVIEW_PROMPT_VERSION,
     REVIEW_SYSTEM,
     REVIEW_USER_TEMPLATE,
 )
-from course_merger.tag.ontology import Ontology
+from video_to_notebook.tag.ontology import Ontology
 
 
 Decision = Literal["merge", "create", "reject", "ambiguous"]
@@ -2397,7 +2397,7 @@ Expected: 5 pass.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add src/course_merger/cluster/prompts.py src/course_merger/cluster/llm_review.py tests/fixtures/review_responses.py tests/unit/test_llm_review.py
+git add src/video_to_notebook/cluster/prompts.py src/video_to_notebook/cluster/llm_review.py tests/fixtures/review_responses.py tests/unit/test_llm_review.py
 git commit -m "feat(cluster): Sonnet reviewer (merge/create/reject/ambiguous) per cluster"
 ```
 
@@ -2408,8 +2408,8 @@ git commit -m "feat(cluster): Sonnet reviewer (merge/create/reject/ambiguous) pe
 ### Task 12: cluster runner + CLI wiring
 
 **Files:**
-- Create: `src/course_merger/cluster/runner.py`
-- Modify: `src/course_merger/cli.py` — add `cluster` command
+- Create: `src/video_to_notebook/cluster/runner.py`
+- Modify: `src/video_to_notebook/cli.py` — add `cluster` command
 - Create: `tests/unit/test_cluster_runner.py`
 - Create: `tests/integration/test_cluster_smoke.py`
 
@@ -2434,11 +2434,11 @@ from unittest.mock import MagicMock
 import numpy as np
 import pytest
 
-from course_merger.cluster.clusterer import Cluster
-from course_merger.cluster.llm_review import ReviewDecision
-from course_merger.cluster.runner import ClusterReport, run_cluster
-from course_merger.db.session import connect, init_db
-from course_merger.tag.ontology import load_ontology
+from video_to_notebook.cluster.clusterer import Cluster
+from video_to_notebook.cluster.llm_review import ReviewDecision
+from video_to_notebook.cluster.runner import ClusterReport, run_cluster
+from video_to_notebook.db.session import connect, init_db
+from video_to_notebook.tag.ontology import load_ontology
 
 
 def _seed(db_path: Path) -> int:
@@ -2621,7 +2621,7 @@ def test_cluster_ambiguous_queues_review(tmp_path: Path, onto):
 .venv/bin/pytest tests/unit/test_cluster_runner.py -v
 ```
 
-- [ ] **Step 3: Write `src/course_merger/cluster/runner.py`**
+- [ ] **Step 3: Write `src/video_to_notebook/cluster/runner.py`**
 
 ```python
 """Orchestrator: proposed_tags → embed → cluster → review → write concepts/aliases."""
@@ -2634,9 +2634,9 @@ from typing import Protocol
 
 import numpy as np
 
-from course_merger.cluster.clusterer import Cluster, cluster_by_cosine
-from course_merger.cluster.llm_review import ReviewDecision
-from course_merger.db.session import connect
+from video_to_notebook.cluster.clusterer import Cluster, cluster_by_cosine
+from video_to_notebook.cluster.llm_review import ReviewDecision
+from video_to_notebook.db.session import connect
 
 
 class _EmbedderLike(Protocol):
@@ -2830,14 +2830,14 @@ def run_cluster(
 
 Expected: 4 pass.
 
-- [ ] **Step 5: Add `cluster` CLI command in `src/course_merger/cli.py`**
+- [ ] **Step 5: Add `cluster` CLI command in `src/video_to_notebook/cli.py`**
 
 Add imports:
 
 ```python
-from course_merger.cluster.embedding import Embedder
-from course_merger.cluster.llm_review import Reviewer
-from course_merger.cluster.runner import run_cluster
+from video_to_notebook.cluster.embedding import Embedder
+from video_to_notebook.cluster.llm_review import Reviewer
+from video_to_notebook.cluster.runner import run_cluster
 ```
 
 Append command:
@@ -2895,9 +2895,9 @@ import numpy as np
 import pytest
 from typer.testing import CliRunner
 
-from course_merger.cli import app
-from course_merger.cluster.llm_review import ReviewDecision
-from course_merger.db.session import connect
+from video_to_notebook.cli import app
+from video_to_notebook.cluster.llm_review import ReviewDecision
+from video_to_notebook.db.session import connect
 
 runner = CliRunner()
 
@@ -2907,7 +2907,7 @@ def test_cluster_cli_end_to_end(tmp_project: Path, fixtures_dir: Path):
     runner.invoke(app, ["init"])
 
     # Seed a minimal corpus with proposed tags
-    db = tmp_project / ".course-merger" / "db.sqlite"
+    db = tmp_project / ".video-to-notebook" / "db.sqlite"
     with connect(db) as conn:
         cur = conn.execute(
             "INSERT INTO courses (slug, title, platform, source_url, added_at) "
@@ -2949,8 +2949,8 @@ def test_cluster_cli_end_to_end(tmp_project: Path, fixtures_dir: Path):
     fake_reviewer.review.return_value = fake_decision
 
     with (
-        patch("course_merger.cluster.embedding.Embedder", return_value=fake_embedder),
-        patch("course_merger.cluster.llm_review.Reviewer", return_value=fake_reviewer),
+        patch("video_to_notebook.cluster.embedding.Embedder", return_value=fake_embedder),
+        patch("video_to_notebook.cluster.llm_review.Reviewer", return_value=fake_reviewer),
         patch("anthropic.Anthropic", return_value=object()),
     ):
         result = runner.invoke(
@@ -2978,7 +2978,7 @@ def test_cluster_cli_end_to_end(tmp_project: Path, fixtures_dir: Path):
 - [ ] **Step 8: Commit**
 
 ```bash
-git add src/course_merger/cluster/runner.py src/course_merger/cli.py tests/unit/test_cluster_runner.py tests/integration/test_cluster_smoke.py
+git add src/video_to_notebook/cluster/runner.py src/video_to_notebook/cli.py tests/unit/test_cluster_runner.py tests/integration/test_cluster_smoke.py
 git commit -m "feat(cluster): \\\`cluster\\\` CLI orchestrates embed → group → review → DB"
 ```
 
@@ -3083,37 +3083,37 @@ Replace the quickstart section with the expanded version:
 
 ```bash
 # 1. Install
-git clone https://github.com/chenlinzhuo/course-merger.git
-cd course-merger
+git clone https://github.com/chenlinzhuo/video-to-notebook.git
+cd video-to-notebook
 uv venv && uv pip install -e ".[dev]"
 
 # 2. Initialize a project
 mkdir my-courses && cd my-courses
-uv run course-merger init
+uv run video-to-notebook init
 
 # 3. Crawl one or more courses
-uv run course-merger crawl \
+uv run video-to-notebook crawl \
     "https://www.youtube.com/playlist?list=PLxxx" --name cs336
-uv run course-merger crawl \
+uv run video-to-notebook crawl \
     "https://www.bilibili.com/video/BVxxx/" --name "vizuara-llm" \
     --cookies-from edge
 
 # 4. Tag chunks with concept labels (Claude Haiku, ~$0.10 per course)
 export ANTHROPIC_API_KEY=sk-ant-...
-uv run course-merger tag --ontology /path/to/ontology.yaml
+uv run video-to-notebook tag --ontology /path/to/ontology.yaml
 
 # 5. Cluster proposed tags into the canonical ontology (Claude Sonnet, ~$0.30 per pass)
-uv run course-merger cluster --ontology /path/to/ontology.yaml
+uv run video-to-notebook cluster --ontology /path/to/ontology.yaml
 ```
 
-After these steps, `.course-merger/db.sqlite` contains:
+After these steps, `.video-to-notebook/db.sqlite` contains:
 - Courses, lectures, chunks (Plan 1)
 - `concepts`, `concept_aliases`, `chunk_concepts` (Plan 2)
 
 Inspect:
 
 ```bash
-sqlite3 .course-merger/db.sqlite \\
+sqlite3 .video-to-notebook/db.sqlite \\
     "SELECT canonical_name, COUNT(*) AS occurrences \\
      FROM concepts c JOIN chunk_concepts cc ON c.id = cc.concept_id \\
      GROUP BY c.id ORDER BY occurrences DESC LIMIT 10;"
@@ -3152,13 +3152,13 @@ This task is a manual verification — no new code, no new tests in the repo. We
 
 ```bash
 rm -rf /tmp/cm-plan2 && mkdir /tmp/cm-plan2 && cd /tmp/cm-plan2
-uv run --project /Users/chenlinzhuo/code/course-merger course-merger init
+uv run --project /Users/chenlinzhuo/code/video-to-notebook video-to-notebook init
 ```
 
 - [ ] **Step 2: Crawl the Vizuara playlist**
 
 ```bash
-uv run --project /Users/chenlinzhuo/code/course-merger course-merger crawl \
+uv run --project /Users/chenlinzhuo/code/video-to-notebook video-to-notebook crawl \
     "https://www.youtube.com/playlist?list=PLPTV0NXA_ZShnka8uVzF3mSvZdilfiGWG" \
     --name "vizuara-build-claude-code"
 ```
@@ -3169,8 +3169,8 @@ Expected: `done: 4 ok, 0 no-subs, 0 errors`.
 
 ```bash
 export ANTHROPIC_API_KEY=...   # set your key
-uv run --project /Users/chenlinzhuo/code/course-merger course-merger tag \
-    --ontology /Users/chenlinzhuo/code/course-merger/examples/ontology-llm.yaml \
+uv run --project /Users/chenlinzhuo/code/video-to-notebook video-to-notebook tag \
+    --ontology /Users/chenlinzhuo/code/video-to-notebook/examples/ontology-llm.yaml \
     --limit 50   # cost cap for first try
 ```
 
@@ -3179,7 +3179,7 @@ Expected: `done: 50 chunks tagged, ~30-50 known tags, ~5-20 proposed tags, 0 par
 - [ ] **Step 4: Inspect the proposed tags**
 
 ```bash
-sqlite3 .course-merger/db.sqlite \
+sqlite3 .video-to-notebook/db.sqlite \
     "SELECT raw_tag, COUNT(*) AS n FROM proposed_tags GROUP BY raw_tag ORDER BY n DESC LIMIT 20;"
 ```
 
@@ -3188,8 +3188,8 @@ Look at the tags — are they real concepts, or noise? This tells you whether th
 - [ ] **Step 5: Cluster the proposed tags**
 
 ```bash
-uv run --project /Users/chenlinzhuo/code/course-merger course-merger cluster \
-    --ontology /Users/chenlinzhuo/code/course-merger/examples/ontology-llm.yaml
+uv run --project /Users/chenlinzhuo/code/video-to-notebook video-to-notebook cluster \
+    --ontology /Users/chenlinzhuo/code/video-to-notebook/examples/ontology-llm.yaml
 ```
 
 Expected: `N clusters reviewed | M merged, K created, ...`. Cost ≈ $0.10-0.30.
@@ -3197,17 +3197,17 @@ Expected: `N clusters reviewed | M merged, K created, ...`. Cost ≈ $0.10-0.30.
 - [ ] **Step 6: Inspect the final concept table**
 
 ```bash
-sqlite3 .course-merger/db.sqlite \
+sqlite3 .video-to-notebook/db.sqlite \
     "SELECT canonical_name, ontology_source FROM concepts ORDER BY id;"
-sqlite3 .course-merger/db.sqlite \
+sqlite3 .video-to-notebook/db.sqlite \
     "SELECT alias, c.slug FROM concept_aliases ca JOIN concepts c ON ca.concept_id=c.id ORDER BY c.slug;"
 ```
 
 - [ ] **Step 7: Idempotency check — re-run `tag` should do nothing new**
 
 ```bash
-uv run --project /Users/chenlinzhuo/code/course-merger course-merger tag \
-    --ontology /Users/chenlinzhuo/code/course-merger/examples/ontology-llm.yaml \
+uv run --project /Users/chenlinzhuo/code/video-to-notebook video-to-notebook tag \
+    --ontology /Users/chenlinzhuo/code/video-to-notebook/examples/ontology-llm.yaml \
     --limit 200
 ```
 
@@ -3216,7 +3216,7 @@ Expected: `0 chunks tagged` (because all chunks already have `chunk_concepts` or
 - [ ] **Step 8: Tag the completion**
 
 ```bash
-cd /Users/chenlinzhuo/code/course-merger
+cd /Users/chenlinzhuo/code/video-to-notebook
 git tag plan-2-done
 git log --oneline plan-1-done..plan-2-done
 ```

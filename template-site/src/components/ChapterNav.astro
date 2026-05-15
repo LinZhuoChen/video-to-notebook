@@ -1,4 +1,6 @@
 ---
+import { t, currentLanguage } from '../i18n';
+
 interface ChapterMeta {
   order_idx: number;
   title: string;
@@ -8,19 +10,20 @@ interface Props {
   next: ChapterMeta | null;
 }
 const { prev, next } = Astro.props;
+const chLabel = (n: number) => currentLanguage === 'en' ? `Chapter ${n}` : `第 ${n} 章`;
 ---
 <nav class="chapter-nav">
   {prev ? (
     <a class="ch-nav-card prev" href={`/textbook/${prev.order_idx}/`}>
-      <span class="ch-nav-dir">← 上一章</span>
-      <span class="ch-nav-num">第 {prev.order_idx} 章</span>
+      <span class="ch-nav-dir">{t.chapter_prev}</span>
+      <span class="ch-nav-num">{chLabel(prev.order_idx)}</span>
       <span class="ch-nav-title">{prev.title}</span>
     </a>
   ) : <span class="ch-nav-placeholder"></span>}
   {next ? (
     <a class="ch-nav-card next" href={`/textbook/${next.order_idx}/`}>
-      <span class="ch-nav-dir">下一章 →</span>
-      <span class="ch-nav-num">第 {next.order_idx} 章</span>
+      <span class="ch-nav-dir">{t.chapter_next}</span>
+      <span class="ch-nav-num">{chLabel(next.order_idx)}</span>
       <span class="ch-nav-title">{next.title}</span>
     </a>
   ) : <span class="ch-nav-placeholder"></span>}

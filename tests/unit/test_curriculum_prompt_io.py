@@ -4,11 +4,11 @@ from pathlib import Path
 
 import pytest
 
-from course_merger.curriculum.prompt_io import (
+from video_to_notebook.curriculum.prompt_io import (
     apply_curriculum_results,
     collect_curriculum_prompts,
 )
-from course_merger.db.session import connect, init_db
+from video_to_notebook.db.session import connect, init_db
 
 
 def _seed(db_path: Path) -> None:

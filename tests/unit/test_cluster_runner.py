@@ -6,10 +6,10 @@ from unittest.mock import MagicMock
 import numpy as np
 import pytest
 
-from course_merger.cluster.llm_review import ReviewDecision
-from course_merger.cluster.runner import ClusterReport, run_cluster
-from course_merger.db.session import connect, init_db
-from course_merger.tag.ontology import load_ontology
+from video_to_notebook.cluster.llm_review import ReviewDecision
+from video_to_notebook.cluster.runner import ClusterReport, run_cluster
+from video_to_notebook.db.session import connect, init_db
+from video_to_notebook.tag.ontology import load_ontology
 
 
 def _seed(db_path: Path) -> int:

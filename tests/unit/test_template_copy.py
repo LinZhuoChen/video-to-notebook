@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from course_merger.build.template_copy import ensure_site_dir
+from video_to_notebook.build.template_copy import ensure_site_dir
 
 
 def test_ensure_site_dir_copies_template(tmp_path: Path):

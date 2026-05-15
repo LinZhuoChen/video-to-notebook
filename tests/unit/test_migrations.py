@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from course_merger.db.session import _migration_files, connect, init_db
+from video_to_notebook.db.session import _migration_files, connect, init_db
 
 
 def test_fresh_db_runs_all_migrations(tmp_path: Path):

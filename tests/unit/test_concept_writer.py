@@ -3,8 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from course_merger.build.concept_writer import write_concept_explainer_assets
-from course_merger.db.session import connect, init_db
+from video_to_notebook.build.concept_writer import write_concept_explainer_assets
+from video_to_notebook.db.session import connect, init_db
 
 
 def _seed(db_path: Path, state_dir: Path) -> None:
@@ -32,7 +32,7 @@ def _seed(db_path: Path, state_dir: Path) -> None:
 
 def test_writes_manifest_and_copies_explained_concepts(tmp_path: Path):
     db = tmp_path / "db.sqlite"
-    state = tmp_path / ".course-merger"
+    state = tmp_path / ".video-to-notebook"
     site = tmp_path / "site"
     _seed(db, state)
 
@@ -50,7 +50,7 @@ def test_writes_manifest_and_copies_explained_concepts(tmp_path: Path):
 
 def test_idempotent(tmp_path: Path):
     db = tmp_path / "db.sqlite"
-    state = tmp_path / ".course-merger"
+    state = tmp_path / ".video-to-notebook"
     site = tmp_path / "site"
     _seed(db, state)
     write_concept_explainer_assets(db_path=db, state_dir=state, site_dir=site)
@@ -62,7 +62,7 @@ def test_idempotent(tmp_path: Path):
 
 def test_handles_no_explainers(tmp_path: Path):
     db = tmp_path / "db.sqlite"
-    state = tmp_path / ".course-merger"
+    state = tmp_path / ".video-to-notebook"
     site = tmp_path / "site"
     init_db(db)
     write_concept_explainer_assets(db_path=db, state_dir=state, site_dir=site)

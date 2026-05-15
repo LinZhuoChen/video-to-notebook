@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# build.sh — run the full course-merger pipeline for the Frontier Notebook demo
+# build.sh — run the full video-to-notebook pipeline for the Frontier Notebook demo
 #
 # Reads courses.toml in this directory, crawls every entry, tags & clusters
 # using ontology.yaml, builds the static site.
@@ -7,7 +7,7 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
-PROJECT="$HERE/.course-merger-project"
+PROJECT="$HERE/.video-to-notebook-project"
 ONTOLOGY="$HERE/ontology.yaml"
 COURSES="$HERE/courses.toml"
 
@@ -16,8 +16,8 @@ if [ -z "${ANTHROPIC_API_KEY:-}" ]; then
   exit 1
 fi
 
-if ! command -v course-merger >/dev/null 2>&1; then
-  echo "error: course-merger not on PATH. Install with: pip install course-merger" >&2
+if ! command -v video-to-notebook >/dev/null 2>&1; then
+  echo "error: video-to-notebook not on PATH. Install with: pip install video-to-notebook" >&2
   exit 2
 fi
 
@@ -29,8 +29,8 @@ fi
 mkdir -p "$PROJECT"
 cd "$PROJECT"
 
-if [ ! -d ".course-merger" ]; then
-  course-merger init
+if [ ! -d ".video-to-notebook" ]; then
+  video-to-notebook init
 fi
 
 # Parse courses.toml — extract slug + url pairs.
@@ -53,21 +53,21 @@ while IFS='|' read -r SLUG URL PLATFORM COOKIES; do
   if [ -n "$COOKIES" ]; then
     EXTRA="--cookies-from $COOKIES"
   fi
-  course-merger crawl "$URL" --name "$SLUG" $EXTRA
+  video-to-notebook crawl "$URL" --name "$SLUG" $EXTRA
 done < /tmp/cm-courses.txt
 
 echo ""
 echo "=== tag ==="
-course-merger tag --ontology "$ONTOLOGY"
+video-to-notebook tag --ontology "$ONTOLOGY"
 
 echo ""
 echo "=== cluster ==="
-course-merger cluster --ontology "$ONTOLOGY"
+video-to-notebook cluster --ontology "$ONTOLOGY"
 
 echo ""
 echo "=== build ==="
-course-merger build
+video-to-notebook build
 
 echo ""
 echo "DONE. Open: file://$PROJECT/site/dist/index.html"
-echo "       Or: cd '$PROJECT' && course-merger serve"
+echo "       Or: cd '$PROJECT' && video-to-notebook serve"

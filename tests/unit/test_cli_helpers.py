@@ -1,4 +1,4 @@
-from course_merger.cli import _slug_from_url
+from video_to_notebook.cli import _slug_from_url
 
 
 def test_slug_from_youtube_playlist():

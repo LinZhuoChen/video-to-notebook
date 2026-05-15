@@ -1,6 +1,6 @@
-# Contributing to course-merger
+# Contributing to video-to-notebook
 
-Thanks for your interest! course-merger is a small project, but we welcome contributions in three places especially:
+Thanks for your interest! video-to-notebook is a small project, but we welcome contributions in three places especially:
 
 1. **New crawler adapters** — Coursera, edX, MIT-OCW, B站 collections, etc.
 2. **Ontology files** for non-AI/CS domains (biology, history, music theory, …) under `examples/`.
@@ -9,8 +9,8 @@ Thanks for your interest! course-merger is a small project, but we welcome contr
 ## Development setup
 
 ```bash
-git clone https://github.com/chenlinzhuo/course-merger.git
-cd course-merger
+git clone https://github.com/chenlinzhuo/video-to-notebook.git
+cd video-to-notebook
 
 # Install with dev dependencies. We use uv but pip works too.
 uv pip install -e ".[dev]"
@@ -29,7 +29,7 @@ Node 20+ is required for the Astro build (the `template-site/` package). To exer
 ```bash
 cd template-site && npm install && cd ..
 mkdir /tmp/cm-dev && cd /tmp/cm-dev
-course-merger init
+video-to-notebook init
 # (crawl / tag / cluster / build to your taste)
 ```
 
@@ -43,7 +43,7 @@ course-merger init
 ## Architecture sketch
 
 ```
-course_merger/
+video_to_notebook/
 ├── cli.py              # typer entrypoint (init, crawl, tag, cluster, build, curriculum, synthesize, explain, serve)
 ├── config.py           # PROJECT_MARKER, find_project_root
 ├── crawl/              # yt-dlp adapters: YouTube, Bilibili
@@ -84,10 +84,10 @@ Open an issue with:
 - What you ran (full command line)
 - What you expected
 - What happened (paste error tracebacks verbatim in a `<details>` block)
-- `course-merger version` output
+- `video-to-notebook version` output
 - OS + Python version
 
-For crawl/tag bugs, please include the corresponding `course-merger crawl --debug` or `tag --print-prompts` JSON output if redactable.
+For crawl/tag bugs, please include the corresponding `video-to-notebook crawl --debug` or `tag --print-prompts` JSON output if redactable.
 
 ## License
 

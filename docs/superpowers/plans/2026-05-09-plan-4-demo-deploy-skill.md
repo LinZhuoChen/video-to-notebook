@@ -2,23 +2,23 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Ship `course-merger` v1.0 — wrap the CLI as a Claude Code skill plugin so users can drive the pipeline via natural language; ship an `examples/frontier-notebook/` demo config with a one-click pipeline runner; auto-deploy the demo to GitHub Pages on every push to `main`; rewrite the README as a complete v1 walkthrough.
+**Goal:** Ship `video-to-notebook` v1.0 — wrap the CLI as a Claude Code skill plugin so users can drive the pipeline via natural language; ship an `examples/frontier-notebook/` demo config with a one-click pipeline runner; auto-deploy the demo to GitHub Pages on every push to `main`; rewrite the README as a complete v1 walkthrough.
 
-**Architecture:** A `skills/course-merger/SKILL.md` file declares the Claude Code skill with trigger keywords and step-by-step instructions for Claude to execute. `examples/frontier-notebook/` ships a `courses.toml` config + `build.sh` that chains the 5 CLI commands; the GitHub Pages workflow runs this script on a cache miss and uploads `site/dist/` to the gh-pages branch.
+**Architecture:** A `skills/video-to-notebook/SKILL.md` file declares the Claude Code skill with trigger keywords and step-by-step instructions for Claude to execute. `examples/frontier-notebook/` ships a `courses.toml` config + `build.sh` that chains the 5 CLI commands; the GitHub Pages workflow runs this script on a cache miss and uploads `site/dist/` to the gh-pages branch.
 
 **Tech Stack:** Bash (one-click script + skill wrappers) + TOML (course config) + GitHub Actions (pages deploy) + Markdown (skill + docs). No new Python or JS dependencies.
 
-**Repo:** `/Users/chenlinzhuo/code/course-merger/` (at tag `plan-3-done`, commit `3c11400`).
+**Repo:** `/Users/chenlinzhuo/code/video-to-notebook/` (at tag `plan-3-done`, commit `3c11400`).
 
 ---
 
 ## File Structure
 
 ```
-course-merger/
+video-to-notebook/
 ├── README.md                                       # MODIFY: full v1 walkthrough
 ├── skills/                                         # NEW directory
-│   └── course-merger/
+│   └── video-to-notebook/
 │       ├── SKILL.md                                # NEW: Claude Code skill plugin
 │       └── scripts/
 │           ├── run-pipeline.sh                     # NEW: chained crawl→tag→cluster→build
@@ -37,8 +37,8 @@ course-merger/
 ```
 
 Boundary discipline:
-- `skills/course-merger/SKILL.md`: Claude Code skill manifest (markdown + YAML frontmatter).
-- `skills/course-merger/scripts/`: lean bash scripts the skill invokes via Claude's Bash tool.
+- `skills/video-to-notebook/SKILL.md`: Claude Code skill manifest (markdown + YAML frontmatter).
+- `skills/video-to-notebook/scripts/`: lean bash scripts the skill invokes via Claude's Bash tool.
 - `examples/frontier-notebook/`: a complete worked example a new user can copy and customize.
 - `.github/workflows/pages.yml`: separate from `ci.yml` (CI runs on every PR; pages only on push to main).
 
@@ -46,28 +46,28 @@ Boundary discipline:
 
 ## Phase 0: Skill Plugin
 
-### Task 1: Write `skills/course-merger/SKILL.md`
+### Task 1: Write `skills/video-to-notebook/SKILL.md`
 
 **Files:**
-- Create: `skills/course-merger/SKILL.md`
+- Create: `skills/video-to-notebook/SKILL.md`
 
 The skill manifest. Tells Claude Code when to invoke (trigger phrases), what arguments to expect, and the step-by-step CLI workflow.
 
 - [ ] **Step 1: Create the directory + file**
 
 ```bash
-mkdir -p /Users/chenlinzhuo/code/course-merger/skills/course-merger/scripts
+mkdir -p /Users/chenlinzhuo/code/video-to-notebook/skills/video-to-notebook/scripts
 ```
 
-- [ ] **Step 2: Write `skills/course-merger/SKILL.md`**
+- [ ] **Step 2: Write `skills/video-to-notebook/SKILL.md`**
 
 ```markdown
 ---
-name: course-merger
+name: video-to-notebook
 description: Use when the user wants to crawl open-courseware (YouTube/Bilibili playlists), tag content with concept labels via Claude, cluster them into a unified ontology across courses, and build an interactive static HTML site for self-study. Triggers include "build a study site from these courses", "merge these courses into one knowledge map", "crawl this playlist and make pages for each concept", "ingest these lectures and let me browse by concept", "做一个跨课程的学习站", "把这些课合并成一个", "爬这门课做知识地图". NOT for: tagging single transcripts (use the user's own scripts), summarizing one video (use video-course-notes), or general note-taking (use obsidian-brain).
 ---
 
-# course-merger
+# video-to-notebook
 
 A Python CLI that crawls open-courseware, tags it with Claude, and renders a cross-course concept-anchored static site. The skill walks the user through the 5-step pipeline.
 
@@ -89,12 +89,12 @@ NOT this skill if the request is:
 ## Prerequisites — check before starting
 
 ```bash
-which course-merger 2>/dev/null || echo "MISSING"
+which video-to-notebook 2>/dev/null || echo "MISSING"
 node --version 2>/dev/null || echo "MISSING-NODE"
 echo "ANTHROPIC_API_KEY: $([ -n "$ANTHROPIC_API_KEY" ] && echo SET || echo MISSING)"
 ```
 
-If `course-merger` is MISSING: install with `pip install course-merger` or `uv tool install course-merger`.
+If `video-to-notebook` is MISSING: install with `pip install video-to-notebook` or `uv tool install video-to-notebook`.
 If Node is MISSING: install Node 20+ (brew install node).
 If ANTHROPIC_API_KEY is MISSING: stop and ask the user to set it — without it, tag/cluster fail.
 
@@ -106,10 +106,10 @@ After confirming prerequisites, work through this with the user. Confirm each st
 
 ```bash
 cd <project-dir>     # ask the user where to set up the project
-course-merger init
+video-to-notebook init
 ```
 
-If the directory already has `.course-merger/`, ask whether to use it or `--force` re-init.
+If the directory already has `.video-to-notebook/`, ask whether to use it or `--force` re-init.
 
 ### Step 2: Crawl each course
 
@@ -117,10 +117,10 @@ For each course URL the user provides:
 
 ```bash
 # YouTube
-course-merger crawl "<url>" --name "<slug>"
+video-to-notebook crawl "<url>" --name "<slug>"
 
 # Bilibili (requires logged-in browser)
-course-merger crawl "<url>" --name "<slug>" --cookies-from edge
+video-to-notebook crawl "<url>" --name "<slug>" --cookies-from edge
 ```
 
 Use `--name` to give a human-readable slug (e.g. `cs336`, `gpu-mode`). Without it the slug is derived from the URL's playlist/video ID, which is ugly.
@@ -134,7 +134,7 @@ The user MUST provide an ontology YAML. If they don't have one:
 - For other domains, ask them to draft 10-30 seed concepts in the YAML format (see `examples/ontology-llm.yaml` for shape).
 
 ```bash
-course-merger tag --ontology <path-to-ontology.yaml> --limit 100
+video-to-notebook tag --ontology <path-to-ontology.yaml> --limit 100
 ```
 
 Use `--limit 100` for the first run to cost-cap the API spend. After they're happy with the tags, run without `--limit` to tag the rest.
@@ -142,7 +142,7 @@ Use `--limit 100` for the first run to cost-cap the API spend. After they're hap
 ### Step 4: Cluster proposed tags (costs ~$0.30/run)
 
 ```bash
-course-merger cluster --ontology <path-to-ontology.yaml>
+video-to-notebook cluster --ontology <path-to-ontology.yaml>
 ```
 
 Reports merged/created/rejected/ambiguous counts. If many are ambiguous, the user may want to enlarge their seed ontology and re-run.
@@ -150,13 +150,13 @@ Reports merged/created/rejected/ambiguous counts. If many are ambiguous, the use
 ### Step 5: Build the static site
 
 ```bash
-course-merger build           # produces site/dist/
-course-merger serve           # local preview at http://localhost:4321
+video-to-notebook build           # produces site/dist/
+video-to-notebook serve           # local preview at http://localhost:4321
 ```
 
 The user can browse and tell you what to tweak. Common follow-ups:
 - "Tag more chunks": re-run step 3 with a higher `--limit`.
-- "Re-render after editing ontology": `course-merger build --incremental` only re-renders concepts marked dirty by the last `cluster` run.
+- "Re-render after editing ontology": `video-to-notebook build --incremental` only re-renders concepts marked dirty by the last `cluster` run.
 - "Deploy": see `examples/frontier-notebook/` for the GitHub Pages pattern.
 
 ## Quick recipes
@@ -171,7 +171,7 @@ bash <skill-dir>/scripts/run-pipeline.sh <project-dir> <ontology.yaml> <url1> [<
 
 ```bash
 # How many chunks need tagging?
-sqlite3 .course-merger/db.sqlite "SELECT COUNT(*) FROM chunks WHERE NOT EXISTS (SELECT 1 FROM chunk_concepts WHERE chunk_concepts.chunk_id = chunks.id)"
+sqlite3 .video-to-notebook/db.sqlite "SELECT COUNT(*) FROM chunks WHERE NOT EXISTS (SELECT 1 FROM chunk_concepts WHERE chunk_concepts.chunk_id = chunks.id)"
 ```
 
 At ~$0.0008/chunk (Claude Haiku with prompt caching), 1000 untagged chunks ≈ $0.80.
@@ -180,14 +180,14 @@ At ~$0.0008/chunk (Claude Haiku with prompt caching), 1000 untagged chunks ≈ $
 
 - **Don't tag the same project twice without `--limit`** — the second run will skip tagged chunks but still iterate the whole DB. Use `--course <slug>` to scope.
 - **Don't rebuild ontology mid-pipeline without thought** — if you change the seed YAML between `tag` and `cluster`, proposed tags may not cluster well.
-- **Don't deploy a demo without a `.gitignore` that excludes `.course-merger/db.sqlite`** — the DB has raw transcripts which may be large or include problematic content.
+- **Don't deploy a demo without a `.gitignore` that excludes `.video-to-notebook/db.sqlite`** — the DB has raw transcripts which may be large or include problematic content.
 ```
 
 - [ ] **Step 3: Verify file**
 
 ```bash
-ls -la /Users/chenlinzhuo/code/course-merger/skills/course-merger/SKILL.md
-head -3 /Users/chenlinzhuo/code/course-merger/skills/course-merger/SKILL.md
+ls -la /Users/chenlinzhuo/code/video-to-notebook/skills/video-to-notebook/SKILL.md
+head -3 /Users/chenlinzhuo/code/video-to-notebook/skills/video-to-notebook/SKILL.md
 ```
 
 Expected: file exists, starts with `---` (YAML frontmatter delimiter).
@@ -195,9 +195,9 @@ Expected: file exists, starts with `---` (YAML frontmatter delimiter).
 - [ ] **Step 4: Commit**
 
 ```bash
-cd /Users/chenlinzhuo/code/course-merger
-git add skills/course-merger/SKILL.md
-git commit -m "feat(skill): Claude Code skill plugin manifest for course-merger"
+cd /Users/chenlinzhuo/code/video-to-notebook
+git add skills/video-to-notebook/SKILL.md
+git commit -m "feat(skill): Claude Code skill plugin manifest for video-to-notebook"
 ```
 
 ---
@@ -205,11 +205,11 @@ git commit -m "feat(skill): Claude Code skill plugin manifest for course-merger"
 ### Task 2: Pipeline runner script
 
 **Files:**
-- Create: `skills/course-merger/scripts/run-pipeline.sh`
+- Create: `skills/video-to-notebook/scripts/run-pipeline.sh`
 
 A one-shot wrapper Claude can suggest for users who want to chain the full pipeline.
 
-- [ ] **Step 1: Write `skills/course-merger/scripts/run-pipeline.sh`**
+- [ ] **Step 1: Write `skills/video-to-notebook/scripts/run-pipeline.sh`**
 
 ```bash
 #!/usr/bin/env bash
@@ -219,7 +219,7 @@ A one-shot wrapper Claude can suggest for users who want to chain the full pipel
 #   bash run-pipeline.sh <project-dir> <ontology.yaml> <course-url> [<course-url> ...]
 #
 # Each course URL gets crawled into a slug derived from its playlist/video ID.
-# Requires: course-merger installed, ANTHROPIC_API_KEY set, Node 20+ for build.
+# Requires: video-to-notebook installed, ANTHROPIC_API_KEY set, Node 20+ for build.
 
 set -euo pipefail
 
@@ -245,36 +245,36 @@ fi
 mkdir -p "$PROJECT_DIR"
 cd "$PROJECT_DIR"
 
-if [ ! -d ".course-merger" ]; then
-  echo ">>> course-merger init"
-  course-merger init
+if [ ! -d ".video-to-notebook" ]; then
+  echo ">>> video-to-notebook init"
+  video-to-notebook init
 else
-  echo ">>> reusing existing .course-merger/"
+  echo ">>> reusing existing .video-to-notebook/"
 fi
 
 for url in "$@"; do
-  echo ">>> course-merger crawl $url"
-  course-merger crawl "$url"
+  echo ">>> video-to-notebook crawl $url"
+  video-to-notebook crawl "$url"
 done
 
-echo ">>> course-merger tag --ontology $ONTOLOGY"
-course-merger tag --ontology "$ONTOLOGY"
+echo ">>> video-to-notebook tag --ontology $ONTOLOGY"
+video-to-notebook tag --ontology "$ONTOLOGY"
 
-echo ">>> course-merger cluster --ontology $ONTOLOGY"
-course-merger cluster --ontology "$ONTOLOGY"
+echo ">>> video-to-notebook cluster --ontology $ONTOLOGY"
+video-to-notebook cluster --ontology "$ONTOLOGY"
 
-echo ">>> course-merger build"
-course-merger build
+echo ">>> video-to-notebook build"
+video-to-notebook build
 
 echo ""
-echo "DONE. Open site/dist/index.html or run 'course-merger serve'."
+echo "DONE. Open site/dist/index.html or run 'video-to-notebook serve'."
 ```
 
 - [ ] **Step 2: Make executable + verify**
 
 ```bash
-chmod +x /Users/chenlinzhuo/code/course-merger/skills/course-merger/scripts/run-pipeline.sh
-bash -n /Users/chenlinzhuo/code/course-merger/skills/course-merger/scripts/run-pipeline.sh
+chmod +x /Users/chenlinzhuo/code/video-to-notebook/skills/video-to-notebook/scripts/run-pipeline.sh
+bash -n /Users/chenlinzhuo/code/video-to-notebook/skills/video-to-notebook/scripts/run-pipeline.sh
 ```
 
 `bash -n` is syntax-only check; should exit 0 with no output.
@@ -282,7 +282,7 @@ bash -n /Users/chenlinzhuo/code/course-merger/skills/course-merger/scripts/run-p
 - [ ] **Step 3: Smoke test the usage error path**
 
 ```bash
-bash /Users/chenlinzhuo/code/course-merger/skills/course-merger/scripts/run-pipeline.sh 2>&1
+bash /Users/chenlinzhuo/code/video-to-notebook/skills/video-to-notebook/scripts/run-pipeline.sh 2>&1
 ```
 
 Expected: prints usage line, exits 1.
@@ -290,8 +290,8 @@ Expected: prints usage line, exits 1.
 - [ ] **Step 4: Commit**
 
 ```bash
-cd /Users/chenlinzhuo/code/course-merger
-git add skills/course-merger/scripts/run-pipeline.sh
+cd /Users/chenlinzhuo/code/video-to-notebook
+git add skills/video-to-notebook/scripts/run-pipeline.sh
 git commit -m "feat(skill): one-click pipeline runner script"
 ```
 
@@ -300,7 +300,7 @@ git commit -m "feat(skill): one-click pipeline runner script"
 ### Task 3: Local install script
 
 **Files:**
-- Create: `skills/course-merger/scripts/install-locally.sh`
+- Create: `skills/video-to-notebook/scripts/install-locally.sh`
 
 A small helper that symlinks (or copies) the skill into `~/.claude/skills/` so it's pickable by Claude Code without publishing to a marketplace.
 
@@ -308,7 +308,7 @@ A small helper that symlinks (or copies) the skill into `~/.claude/skills/` so i
 
 ```bash
 #!/usr/bin/env bash
-# install-locally.sh — symlink the course-merger skill into ~/.claude/skills/
+# install-locally.sh — symlink the video-to-notebook skill into ~/.claude/skills/
 #
 # After running this, Claude Code will discover the skill on next session start.
 # Use this before there's a public marketplace listing.
@@ -317,7 +317,7 @@ set -euo pipefail
 
 SKILL_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 TARGET_PARENT="$HOME/.claude/skills"
-TARGET="$TARGET_PARENT/course-merger"
+TARGET="$TARGET_PARENT/video-to-notebook"
 
 mkdir -p "$TARGET_PARENT"
 
@@ -336,15 +336,15 @@ echo "Verify with: ls -la $TARGET"
 - [ ] **Step 2: Make executable + smoke test**
 
 ```bash
-chmod +x /Users/chenlinzhuo/code/course-merger/skills/course-merger/scripts/install-locally.sh
-bash -n /Users/chenlinzhuo/code/course-merger/skills/course-merger/scripts/install-locally.sh
+chmod +x /Users/chenlinzhuo/code/video-to-notebook/skills/video-to-notebook/scripts/install-locally.sh
+bash -n /Users/chenlinzhuo/code/video-to-notebook/skills/video-to-notebook/scripts/install-locally.sh
 ```
 
 - [ ] **Step 3: Commit**
 
 ```bash
-cd /Users/chenlinzhuo/code/course-merger
-git add skills/course-merger/scripts/install-locally.sh
+cd /Users/chenlinzhuo/code/video-to-notebook
+git add skills/video-to-notebook/scripts/install-locally.sh
 git commit -m "feat(skill): install-locally.sh symlinks skill into ~/.claude/skills/"
 ```
 
@@ -366,7 +366,7 @@ A curated example for the author's "World Models × Agents" knowledge product. O
 ```toml
 # Frontier Notebook — curated open-courseware corpus
 #
-# Each [[course]] entry maps to one `course-merger crawl` invocation.
+# Each [[course]] entry maps to one `video-to-notebook crawl` invocation.
 # Slug becomes the URL path on the site (e.g. /courses/cs336/).
 
 [[course]]
@@ -563,7 +563,7 @@ concepts:
 ```markdown
 # Frontier Notebook — World Models × Agents
 
-A curated `course-merger` demo project. Crawls 5 open courses, tags them with a 30-concept ontology, and produces an interactive knowledge map.
+A curated `video-to-notebook` demo project. Crawls 5 open courses, tags them with a 30-concept ontology, and produces an interactive knowledge map.
 
 This directory is **shipped as a template**: copy it, edit `courses.toml` and `ontology.yaml` for your own corpus, then run `build.sh`.
 
@@ -575,7 +575,7 @@ export ANTHROPIC_API_KEY=sk-ant-...
 bash examples/frontier-notebook/build.sh
 ```
 
-After ~30 min (depending on network + Claude latency), open `examples/frontier-notebook/.course-merger-project/site/dist/index.html` in a browser.
+After ~30 min (depending on network + Claude latency), open `examples/frontier-notebook/.video-to-notebook-project/site/dist/index.html` in a browser.
 
 ## Cost estimate
 
@@ -589,7 +589,7 @@ After ~30 min (depending on network + Claude latency), open `examples/frontier-n
 
 ## Customize for your corpus
 
-1. Edit `courses.toml` — replace the 5 YouTube URLs with your own playlists. For Bilibili, set `platform = "bilibili"` and pass `--cookies-from edge` to `course-merger crawl`.
+1. Edit `courses.toml` — replace the 5 YouTube URLs with your own playlists. For Bilibili, set `platform = "bilibili"` and pass `--cookies-from edge` to `video-to-notebook crawl`.
 2. Edit `ontology.yaml` — add seed concepts that match your domain. ~30 concepts is a good starting point; the cluster pass will discover more.
 3. Re-run `bash build.sh`.
 
@@ -606,7 +606,7 @@ Enable Pages in repo settings → set source to `gh-pages` branch. Demo will liv
 - [ ] **Step 4: Commit**
 
 ```bash
-cd /Users/chenlinzhuo/code/course-merger
+cd /Users/chenlinzhuo/code/video-to-notebook
 git add examples/frontier-notebook/
 git commit -m "feat(examples): frontier-notebook demo config (ontology + courses.toml + README)"
 ```
@@ -618,13 +618,13 @@ git commit -m "feat(examples): frontier-notebook demo config (ontology + courses
 **Files:**
 - Create: `examples/frontier-notebook/build.sh`
 
-The one-click pipeline runner for this specific demo. Reads `courses.toml`, runs the full pipeline, lands a built site under `.course-merger-project/site/dist/`.
+The one-click pipeline runner for this specific demo. Reads `courses.toml`, runs the full pipeline, lands a built site under `.video-to-notebook-project/site/dist/`.
 
 - [ ] **Step 1: Write `examples/frontier-notebook/build.sh`**
 
 ```bash
 #!/usr/bin/env bash
-# build.sh — run the full course-merger pipeline for the Frontier Notebook demo
+# build.sh — run the full video-to-notebook pipeline for the Frontier Notebook demo
 #
 # Reads courses.toml in this directory, crawls every entry, tags & clusters
 # using ontology.yaml, builds the static site.
@@ -632,7 +632,7 @@ The one-click pipeline runner for this specific demo. Reads `courses.toml`, runs
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
-PROJECT="$HERE/.course-merger-project"
+PROJECT="$HERE/.video-to-notebook-project"
 ONTOLOGY="$HERE/ontology.yaml"
 COURSES="$HERE/courses.toml"
 
@@ -641,8 +641,8 @@ if [ -z "${ANTHROPIC_API_KEY:-}" ]; then
   exit 1
 fi
 
-if ! command -v course-merger >/dev/null 2>&1; then
-  echo "error: course-merger not on PATH. Install with: pip install course-merger" >&2
+if ! command -v video-to-notebook >/dev/null 2>&1; then
+  echo "error: video-to-notebook not on PATH. Install with: pip install video-to-notebook" >&2
   exit 2
 fi
 
@@ -654,8 +654,8 @@ fi
 mkdir -p "$PROJECT"
 cd "$PROJECT"
 
-if [ ! -d ".course-merger" ]; then
-  course-merger init
+if [ ! -d ".video-to-notebook" ]; then
+  video-to-notebook init
 fi
 
 # Parse courses.toml — extract slug + url pairs.
@@ -679,37 +679,37 @@ while IFS='|' read -r SLUG URL PLATFORM COOKIES; do
   if [ -n "$COOKIES" ]; then
     EXTRA="--cookies-from $COOKIES"
   fi
-  course-merger crawl "$URL" --name "$SLUG" $EXTRA
+  video-to-notebook crawl "$URL" --name "$SLUG" $EXTRA
 done < /tmp/cm-courses.txt
 
 echo ""
 echo "=== tag ==="
-course-merger tag --ontology "$ONTOLOGY"
+video-to-notebook tag --ontology "$ONTOLOGY"
 
 echo ""
 echo "=== cluster ==="
-course-merger cluster --ontology "$ONTOLOGY"
+video-to-notebook cluster --ontology "$ONTOLOGY"
 
 echo ""
 echo "=== build ==="
-course-merger build
+video-to-notebook build
 
 echo ""
 echo "DONE. Open: file://$PROJECT/site/dist/index.html"
-echo "       Or: cd '$PROJECT' && course-merger serve"
+echo "       Or: cd '$PROJECT' && video-to-notebook serve"
 ```
 
 - [ ] **Step 2: Make executable + syntax-check**
 
 ```bash
-chmod +x /Users/chenlinzhuo/code/course-merger/examples/frontier-notebook/build.sh
-bash -n /Users/chenlinzhuo/code/course-merger/examples/frontier-notebook/build.sh
+chmod +x /Users/chenlinzhuo/code/video-to-notebook/examples/frontier-notebook/build.sh
+bash -n /Users/chenlinzhuo/code/video-to-notebook/examples/frontier-notebook/build.sh
 ```
 
 - [ ] **Step 3: Smoke-test missing-API-key path**
 
 ```bash
-( unset ANTHROPIC_API_KEY && bash /Users/chenlinzhuo/code/course-merger/examples/frontier-notebook/build.sh 2>&1 ) | head
+( unset ANTHROPIC_API_KEY && bash /Users/chenlinzhuo/code/video-to-notebook/examples/frontier-notebook/build.sh 2>&1 ) | head
 ```
 
 Expected: `error: ANTHROPIC_API_KEY is not set` + exit code 1.
@@ -717,7 +717,7 @@ Expected: `error: ANTHROPIC_API_KEY is not set` + exit code 1.
 - [ ] **Step 4: Commit**
 
 ```bash
-cd /Users/chenlinzhuo/code/course-merger
+cd /Users/chenlinzhuo/code/video-to-notebook
 git add examples/frontier-notebook/build.sh
 git commit -m "feat(examples): build.sh for one-click Frontier Notebook pipeline"
 ```
@@ -761,7 +761,7 @@ export default defineConfig({
 - [ ] **Step 2: Verify local dev still builds with defaults**
 
 ```bash
-cd /Users/chenlinzhuo/code/course-merger/template-site
+cd /Users/chenlinzhuo/code/video-to-notebook/template-site
 npm run build 2>&1 | tail -5
 ```
 
@@ -770,7 +770,7 @@ Expected: build succeeds (the empty content collections produce 4 static pages: 
 - [ ] **Step 3: Commit**
 
 ```bash
-cd /Users/chenlinzhuo/code/course-merger
+cd /Users/chenlinzhuo/code/video-to-notebook
 git add template-site/astro.config.mjs
 git commit -m "feat(site): SITE_URL + BASE_PATH env vars for GitHub Pages deployment"
 ```
@@ -795,7 +795,7 @@ on:
     paths:
       - 'examples/frontier-notebook/**'
       - 'template-site/**'
-      - 'src/course_merger/**'
+      - 'src/video_to_notebook/**'
       - '.github/workflows/pages.yml'
   workflow_dispatch:
 
@@ -822,7 +822,7 @@ jobs:
       - name: Set up Python
         run: uv python install 3.12
 
-      - name: Install course-merger
+      - name: Install video-to-notebook
         run: uv pip install --system -e ".[dev]"
 
       - name: Set up Node
@@ -834,7 +834,7 @@ jobs:
         id: cache-corpus
         uses: actions/cache@v4
         with:
-          path: examples/frontier-notebook/.course-merger-project/.course-merger
+          path: examples/frontier-notebook/.video-to-notebook-project/.video-to-notebook
           key: corpus-${{ hashFiles('examples/frontier-notebook/courses.toml', 'examples/frontier-notebook/ontology.yaml') }}-v1
 
       - name: Build the demo
@@ -847,19 +847,19 @@ jobs:
       - name: Upload pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: examples/frontier-notebook/.course-merger-project/site/dist
+          path: examples/frontier-notebook/.video-to-notebook-project/site/dist
 
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
 ```
 
-> The cache key changes when courses.toml or ontology.yaml change; otherwise the SQLite DB is restored and crawl/tag/cluster all become no-ops (idempotent). Only `course-merger build` runs.
+> The cache key changes when courses.toml or ontology.yaml change; otherwise the SQLite DB is restored and crawl/tag/cluster all become no-ops (idempotent). Only `video-to-notebook build` runs.
 
 - [ ] **Step 2: Verify YAML syntax**
 
 ```bash
-python3 -c "import yaml; yaml.safe_load(open('/Users/chenlinzhuo/code/course-merger/.github/workflows/pages.yml'))"
+python3 -c "import yaml; yaml.safe_load(open('/Users/chenlinzhuo/code/video-to-notebook/.github/workflows/pages.yml'))"
 ```
 
 Expected: no output (no errors).
@@ -867,7 +867,7 @@ Expected: no output (no errors).
 - [ ] **Step 3: Commit**
 
 ```bash
-cd /Users/chenlinzhuo/code/course-merger
+cd /Users/chenlinzhuo/code/video-to-notebook
 git add .github/workflows/pages.yml
 git commit -m "ci(pages): auto-deploy demo to GitHub Pages on push to main"
 ```
@@ -888,24 +888,24 @@ Replace with a complete walkthrough now that the v1 surface is shipped.
 - [ ] **Step 1: Replace `README.md` entirely**
 
 ```markdown
-# course-merger
+# video-to-notebook
 
 > Crawl open-courseware, tag chunks with concept labels via Claude, and render an interactive cross-course concept-anchored static site for self-study.
 
-[![CI](https://github.com/chenlinzhuo/course-merger/actions/workflows/ci.yml/badge.svg)](https://github.com/chenlinzhuo/course-merger/actions/workflows/ci.yml)
+[![CI](https://github.com/chenlinzhuo/video-to-notebook/actions/workflows/ci.yml/badge.svg)](https://github.com/chenlinzhuo/video-to-notebook/actions/workflows/ci.yml)
 
 The killer feature: a **"Compare across courses"** view. Pick any concept (e.g. *Self-Attention*), see how Stanford CS336, GPU MODE, and Vizuara each teach it — side by side, with click-to-seek timestamped video.
 
 ## Demo
 
-Live demo: [chenlinzhuo.github.io/course-merger/](https://chenlinzhuo.github.io/course-merger/) — built from the 5 World-Models × Agents courses in `examples/frontier-notebook/`.
+Live demo: [chenlinzhuo.github.io/video-to-notebook/](https://chenlinzhuo.github.io/video-to-notebook/) — built from the 5 World-Models × Agents courses in `examples/frontier-notebook/`.
 
 ## Install
 
 ```bash
 # 1. Python CLI (3.12+)
-pip install course-merger
-# or: uv tool install course-merger
+pip install video-to-notebook
+# or: uv tool install video-to-notebook
 
 # 2. External requirements
 brew install node yt-dlp        # Node 20+ for the HTML build; yt-dlp for crawling
@@ -922,23 +922,23 @@ export ANTHROPIC_API_KEY=sk-ant-...
 mkdir my-study-site && cd my-study-site
 
 # 1. Initialize
-course-merger init
+video-to-notebook init
 
 # 2. Crawl one or more courses
-course-merger crawl "https://www.youtube.com/playlist?list=PLxxx" --name cs336
-course-merger crawl "https://www.bilibili.com/video/BVxxx/" --name "vizuara-llm" --cookies-from edge
+video-to-notebook crawl "https://www.youtube.com/playlist?list=PLxxx" --name cs336
+video-to-notebook crawl "https://www.bilibili.com/video/BVxxx/" --name "vizuara-llm" --cookies-from edge
 
 # 3. Tag chunks with concept labels (Claude Haiku, ~$0.10/course)
-course-merger tag --ontology examples/ontology-llm.yaml --limit 200
+video-to-notebook tag --ontology examples/ontology-llm.yaml --limit 200
 
 # 4. Cluster proposed tags (Claude Sonnet, ~$0.30/run)
-course-merger cluster --ontology examples/ontology-llm.yaml
+video-to-notebook cluster --ontology examples/ontology-llm.yaml
 
 # 5. Build the static site
-course-merger build
+video-to-notebook build
 
 # Preview locally at http://localhost:4321
-course-merger serve
+video-to-notebook serve
 ```
 
 After step 5, `site/dist/` is a complete static site you can serve from any HTTP server or deploy to GitHub Pages.
@@ -947,7 +947,7 @@ After step 5, `site/dist/` is a complete static site you can serve from any HTTP
 
 ```
                  ┌──────────────────────────────────────┐
-                 │           SQLite (.course-merger/db) │
+                 │           SQLite (.video-to-notebook/db) │
                  │  courses · lectures · chunks         │
                  │  concepts · chunk_concepts · aliases │
                  └──────────────────────────────────────┘
@@ -966,8 +966,8 @@ Each subcommand is **idempotent and resumable**. Add a new course → only that 
 Install once:
 
 ```bash
-git clone https://github.com/chenlinzhuo/course-merger.git
-bash course-merger/skills/course-merger/scripts/install-locally.sh
+git clone https://github.com/chenlinzhuo/video-to-notebook.git
+bash video-to-notebook/skills/video-to-notebook/scripts/install-locally.sh
 ```
 
 Then in Claude Code:
@@ -976,7 +976,7 @@ Then in Claude Code:
 
 Claude will walk through the 5 steps with you, asking for confirmation before tag/cluster (which cost money).
 
-The full skill manifest is at `skills/course-merger/SKILL.md`.
+The full skill manifest is at `skills/video-to-notebook/SKILL.md`.
 
 ## Customize for your own corpus
 
@@ -988,7 +988,7 @@ cp -r examples/frontier-notebook examples/my-corpus
 bash examples/my-corpus/build.sh
 ```
 
-The build script chains crawl/tag/cluster/build, reads `courses.toml`, and lands a working site at `examples/my-corpus/.course-merger-project/site/dist/`.
+The build script chains crawl/tag/cluster/build, reads `courses.toml`, and lands a working site at `examples/my-corpus/.video-to-notebook-project/site/dist/`.
 
 ## Cost reality check
 
@@ -1014,7 +1014,7 @@ For a 5-course corpus, expect ~$2-4 first run. Re-runs are free thanks to per-ch
 
 ## Architecture & design
 
-- Design spec: [`docs/specs/2026-05-09-course-merger-skill-design.md`](docs/specs/2026-05-09-course-merger-skill-design.md)
+- Design spec: [`docs/specs/2026-05-09-video-to-notebook-skill-design.md`](docs/specs/2026-05-09-video-to-notebook-skill-design.md)
 - Implementation plans (TDD-decomposed):
   - Plan 1: [Foundation + Crawl](docs/superpowers/plans/2026-05-09-plan-1-foundation-and-crawl.md)
   - Plan 2: [Tag + Cluster](docs/superpowers/plans/2026-05-09-plan-2-tag-and-cluster.md)
@@ -1033,15 +1033,15 @@ MIT
 - [ ] **Step 2: Verify file is well-formed Markdown**
 
 ```bash
-head -20 /Users/chenlinzhuo/code/course-merger/README.md
+head -20 /Users/chenlinzhuo/code/video-to-notebook/README.md
 ```
 
-Expected: starts with `# course-merger`, contains the link to demo, no markdown syntax errors.
+Expected: starts with `# video-to-notebook`, contains the link to demo, no markdown syntax errors.
 
 - [ ] **Step 3: Commit**
 
 ```bash
-cd /Users/chenlinzhuo/code/course-merger
+cd /Users/chenlinzhuo/code/video-to-notebook
 git add README.md
 git commit -m "docs: full v1 README — install, quickstart, skill, demo, costs, roadmap"
 ```
@@ -1057,7 +1057,7 @@ This task is a manual end-to-end sanity check before tagging v1.0.
 - [ ] **Step 1: Run the full test suite (non-e2e)**
 
 ```bash
-cd /Users/chenlinzhuo/code/course-merger
+cd /Users/chenlinzhuo/code/video-to-notebook
 .venv/bin/pytest -v -m "not e2e"
 .venv/bin/pyright src tests
 ```
@@ -1067,8 +1067,8 @@ Expected: all green.
 - [ ] **Step 2: Smoke-test the install-locally script**
 
 ```bash
-bash skills/course-merger/scripts/install-locally.sh
-ls -la ~/.claude/skills/course-merger
+bash skills/video-to-notebook/scripts/install-locally.sh
+ls -la ~/.claude/skills/video-to-notebook
 ```
 
 Expected: symlink exists pointing back to repo.
@@ -1101,13 +1101,13 @@ git log --oneline plan-3-done..plan-4-done
 
 ```bash
 echo ""
-echo "course-merger v1.0.0 SHIPPED"
+echo "video-to-notebook v1.0.0 SHIPPED"
 echo "============================"
 echo "Commits (Plan 1 → Plan 4): $(git rev-list --count plan-1-done~..plan-4-done)"
 echo "Tests passing: $(.venv/bin/pytest -m 'not e2e' --collect-only -q 2>/dev/null | tail -1)"
 echo ""
 echo "Try the skill:"
-echo "  bash skills/course-merger/scripts/install-locally.sh"
+echo "  bash skills/video-to-notebook/scripts/install-locally.sh"
 echo ""
 echo "Try the demo:"
 echo "  export ANTHROPIC_API_KEY=..."
@@ -1120,11 +1120,11 @@ echo "  bash examples/frontier-notebook/build.sh"
 
 **Spec coverage (Plan 4 portion):**
 
-- §4 `skills/course-merger/SKILL.md`: ✅ Task 1.
-- §4 `skills/course-merger/scripts/`: ✅ Task 2 (`run-pipeline.sh`), Task 3 (`install-locally.sh`).
+- §4 `skills/video-to-notebook/SKILL.md`: ✅ Task 1.
+- §4 `skills/video-to-notebook/scripts/`: ✅ Task 2 (`run-pipeline.sh`), Task 3 (`install-locally.sh`).
 - §4 `examples/frontier-notebook/`: ✅ Tasks 4 (config) + 5 (script).
 - §4 `.github/workflows/pages.yml`: ✅ Task 7.
-- §10 distribution: `pip install course-merger` already in pyproject (Plan 1); Claude Code skill plugin path established here. ✅
+- §10 distribution: `pip install video-to-notebook` already in pyproject (Plan 1); Claude Code skill plugin path established here. ✅
 
 **Out of scope (correctly deferred):**
 
@@ -1138,7 +1138,7 @@ echo "  bash examples/frontier-notebook/build.sh"
 
 - `courses.toml` schema (`[[course]] slug = ... url = ... platform = ... cookies_from = ...`) matches what `build.sh` parses in its inline Python TOML loader.
 - The `SITE_URL` + `BASE_PATH` env vars in `astro.config.mjs` (Task 6) match what `pages.yml` (Task 7) sets.
-- The skill description's prerequisite checks (Task 1) match the actual CLI requirements (course-merger, node, ANTHROPIC_API_KEY).
-- `install-locally.sh` (Task 3) writes a symlink at `~/.claude/skills/course-merger/` — Claude Code's documented skill discovery path.
+- The skill description's prerequisite checks (Task 1) match the actual CLI requirements (video-to-notebook, node, ANTHROPIC_API_KEY).
+- `install-locally.sh` (Task 3) writes a symlink at `~/.claude/skills/video-to-notebook/` — Claude Code's documented skill discovery path.
 
 **No backlog from Plan 3** to address — the slug-frontmatter bug already landed as part of Plan 3's hotfix.

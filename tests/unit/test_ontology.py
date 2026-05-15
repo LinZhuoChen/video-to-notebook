@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from course_merger.tag.ontology import (
+from video_to_notebook.tag.ontology import (
     Concept,
     Ontology,
     load_ontology,

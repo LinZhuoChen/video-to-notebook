@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from course_merger.build.writers import (
+from video_to_notebook.build.writers import (
     write_concept_md,
     write_course_md,
     write_lecture_md,

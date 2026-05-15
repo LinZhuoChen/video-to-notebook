@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 100" role="img" aria-label="video-to-notebook stacked wordmark">
+  <title>video-to-notebook — Stacked wordmark</title>
+  <g font-family="'Source Serif 4', 'Source Serif Pro', 'Source Serif', 'Iowan Old Style', 'Palatino', 'Georgia', serif"
+     fill="currentColor">
+    <!-- top: video (italic, lighter — the source) -->
+    <text x="120" y="36" text-anchor="middle"
+          font-size="30" font-style="italic" font-weight="400" letter-spacing="0.02em" opacity="0.85">
+      video
+    </text>
+    <!-- bottom: to notebook (upright, heavier — the destination) -->
+    <text x="120" y="82" text-anchor="middle"
+          font-size="30" font-weight="700" letter-spacing="-0.005em">
+      to notebook
+    </text>
+  </g>
+  <!-- transformation rule between the two lines -->
+  <g stroke="currentColor" stroke-width="1.6" stroke-linecap="round" fill="none">
+    <line x1="80" y1="52" x2="156" y2="52" />
+    <polyline points="150,47 160,52 150,57" stroke-linejoin="round" />
+  </g>
+</svg>

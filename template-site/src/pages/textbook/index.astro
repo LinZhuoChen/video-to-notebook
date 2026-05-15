@@ -1,5 +1,6 @@
 ---
 import Base from '../../layouts/Base.astro';
+import { t, currentLanguage } from '../../i18n';
 
 let chapters: any[] = [];
 try {
@@ -18,14 +19,14 @@ for (const ch of chapters) {
 const total = chapters.length;
 const done = chapters.filter(c => c.status === 'synthesized').length;
 ---
-<Base title="教材目录">
+<Base title={t.textbook_toc}>
   <div class="toc-page">
     <header class="toc-header">
-      <div class="toc-eyebrow">course-merger textbook</div>
-      <h1 class="toc-title">教材目录</h1>
+      <div class="toc-eyebrow">video-to-notebook textbook</div>
+      <h1 class="toc-title">{t.textbook_toc}</h1>
       {total > 0 && (
         <p class="toc-stats">
-          <strong>{done}</strong> / {total} 章已生成
+          <strong>{done}</strong> / {total} {currentLanguage === 'en' ? 'chapters generated' : '章已生成'}
           <span class="toc-progress-track"><span class="toc-progress-fill" style={`width:${(done * 100 / total)}%`}></span></span>
         </p>
       )}
@@ -33,8 +34,8 @@ const done = chapters.filter(c => c.status === 'synthesized').length;
 
     {chapters.length === 0 && (
       <div class="toc-empty">
-        <p>暂无课程内容。</p>
-        <p class="toc-help">先运行 <code>course-merger curriculum --apply-results &lt;file&gt;</code> 设计目录，再运行 <code>course-merger synthesize</code> 生成章节。</p>
+        <p>{t.textbook_empty}</p>
+        <p class="toc-help" set:html={t.textbook_empty_hint_html}></p>
       </div>
     )}
 
@@ -56,7 +57,7 @@ const done = chapters.filter(c => c.status === 'synthesized').length;
                   </a>
                 ) : (
                   <div class="toc-chapter-disabled">
-                    <h3 class="toc-chapter-title">{ch.title} <span class="toc-pending">待生成</span></h3>
+                    <h3 class="toc-chapter-title">{ch.title} <span class="toc-pending">{currentLanguage === 'en' ? 'pending' : '待生成'}</span></h3>
                     <p class="toc-chapter-blurb">{ch.blurb}</p>
                   </div>
                 )}

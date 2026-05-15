@@ -1,6 +1,6 @@
 # Frontier Notebook — curated open-courseware corpus
 #
-# Each [[course]] entry maps to one `course-merger crawl` invocation.
+# Each [[course]] entry maps to one `video-to-notebook crawl` invocation.
 # Slug becomes the URL path on the site (e.g. /courses/cs336/).
 
 [[course]]

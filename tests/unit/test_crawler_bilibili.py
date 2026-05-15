@@ -6,8 +6,8 @@ from unittest.mock import patch
 
 import pytest
 
-from course_merger.crawl.bilibili import BilibiliCookieError, BilibiliCrawler
-from course_merger.crawl.exceptions import PlaylistFetchError
+from video_to_notebook.crawl.bilibili import BilibiliCookieError, BilibiliCrawler
+from video_to_notebook.crawl.exceptions import PlaylistFetchError
 
 
 def _fake_completed(stdout: str = "", stderr: str = "", returncode: int = 0):

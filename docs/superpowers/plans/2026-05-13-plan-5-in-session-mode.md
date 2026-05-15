@@ -2,21 +2,21 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Let Claude Max subscribers run the full `course-merger` pipeline inside a Claude Code conversation without paying for separate Anthropic API access. The `tag` and `cluster` commands each grow `--print-prompts` (emits a JSON envelope of decisions to make) and `--apply-results <file>` (reads decisions JSON, writes to DB). Claude in conversation produces the decisions using its own reasoning, billed via the user's Max subscription.
+**Goal:** Let Claude Max subscribers run the full `video-to-notebook` pipeline inside a Claude Code conversation without paying for separate Anthropic API access. The `tag` and `cluster` commands each grow `--print-prompts` (emits a JSON envelope of decisions to make) and `--apply-results <file>` (reads decisions JSON, writes to DB). Claude in conversation produces the decisions using its own reasoning, billed via the user's Max subscription.
 
 **Architecture:** Each command's API-backed path stays untouched. A new `prompt_io.py` module per package (`tag/`, `cluster/`) exposes pure functions that (a) collect work items into a JSON envelope and (b) apply a results JSON to the DB. The CLI grows new flags that wire into these new functions, mutually exclusive with the existing API-call mode. No new dependencies.
 
 **Tech Stack:** Same as v1 (Python 3.12 + Typer + SQLite). Only adds JSON serialization patterns over existing tag/cluster logic.
 
-**Repo:** `/Users/chenlinzhuo/code/course-merger/` (at tag `v1.0.0`).
+**Repo:** `/Users/chenlinzhuo/code/video-to-notebook/` (at tag `v1.0.0`).
 
 ---
 
 ## File Structure
 
 ```
-course-merger/
-├── src/course_merger/
+video-to-notebook/
+├── src/video_to_notebook/
 │   ├── cli.py                              # MODIFY: add --print-prompts / --apply-results to tag + cluster
 │   ├── tag/
 │   │   ├── prompt_io.py                    # NEW: collect_tag_prompts + apply_tag_results
@@ -25,7 +25,7 @@ course-merger/
 │   └── cluster/
 │       ├── prompt_io.py                    # NEW: collect_cluster_prompts + apply_cluster_results
 │       └── runner.py                       # MODIFY (small): expose 3 helpers as public
-├── skills/course-merger/SKILL.md           # MODIFY: in-session workflow section
+├── skills/video-to-notebook/SKILL.md           # MODIFY: in-session workflow section
 ├── README.md                               # MODIFY: in-session mode + trade-off table
 └── tests/
     ├── unit/
@@ -104,8 +104,8 @@ The apply step needs BOTH envelopes; the CLI bundles them as `{"_prompts_envelop
 ## Task 1: Tag in-session mode
 
 **Files:**
-- Create: `src/course_merger/tag/prompt_io.py`
-- Modify: `src/course_merger/cli.py` (add flags to `tag` command)
+- Create: `src/video_to_notebook/tag/prompt_io.py`
+- Modify: `src/video_to_notebook/cli.py` (add flags to `tag` command)
 - Create: `tests/unit/test_tag_prompt_io.py`
 - Modify: `tests/integration/test_tag_smoke.py` (add 3 tests)
 
@@ -121,13 +121,13 @@ from pathlib import Path
 
 import pytest
 
-from course_merger.db.session import connect, init_db
-from course_merger.tag.ontology import load_ontology
-from course_merger.tag.prompt_io import (
+from video_to_notebook.db.session import connect, init_db
+from video_to_notebook.tag.ontology import load_ontology
+from video_to_notebook.tag.prompt_io import (
     apply_tag_results,
     collect_tag_prompts,
 )
-from course_merger.tag.runner import TagReport
+from video_to_notebook.tag.runner import TagReport
 
 
 def _seed(db_path: Path) -> None:
@@ -287,30 +287,30 @@ def test_apply_rejects_wrong_kind(tmp_path: Path, onto):
 ### Step 2: Confirm fails
 
 ```bash
-cd /Users/chenlinzhuo/code/course-merger && .venv/bin/pytest tests/unit/test_tag_prompt_io.py -v
+cd /Users/chenlinzhuo/code/video-to-notebook && .venv/bin/pytest tests/unit/test_tag_prompt_io.py -v
 ```
 
-Expected: ImportError on `course_merger.tag.prompt_io`.
+Expected: ImportError on `video_to_notebook.tag.prompt_io`.
 
-### Step 3: Write `src/course_merger/tag/prompt_io.py`
+### Step 3: Write `src/video_to_notebook/tag/prompt_io.py`
 
 ```python
 """In-session tag mode: collect prompts as JSON, apply decisions back to DB.
 
 Lets Claude Max subscribers run tag inside a Claude Code conversation without
 a separate Anthropic API key. The conversation flow:
-  1. `course-merger tag --print-prompts ...` emits envelope to stdout
+  1. `video-to-notebook tag --print-prompts ...` emits envelope to stdout
   2. Claude (conversation agent) produces decisions JSON
-  3. `course-merger tag --apply-results decisions.json` writes to DB
+  3. `video-to-notebook tag --apply-results decisions.json` writes to DB
 """
 from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
 
-from course_merger.db.session import connect
-from course_merger.tag.ontology import Ontology
-from course_merger.tag.runner import TagReport, _untagged_chunks_query
+from video_to_notebook.db.session import connect
+from video_to_notebook.tag.ontology import Ontology
+from video_to_notebook.tag.runner import TagReport, _untagged_chunks_query
 
 
 SCHEMA_VERSION = "1"
@@ -433,14 +433,14 @@ def apply_tag_results(
 .venv/bin/pytest tests/unit/test_tag_prompt_io.py -v
 ```
 
-### Step 5: Modify `src/course_merger/cli.py`
+### Step 5: Modify `src/video_to_notebook/cli.py`
 
 Add imports near the existing tag imports:
 
 ```python
 import json
 import sys
-from course_merger.tag.prompt_io import apply_tag_results, collect_tag_prompts
+from video_to_notebook.tag.prompt_io import apply_tag_results, collect_tag_prompts
 ```
 
 Replace the `tag_cmd` function body:
@@ -526,7 +526,7 @@ def tag_cmd(
 @pytest.mark.integration
 def test_tag_print_prompts_emits_envelope(tmp_project: Path, fixtures_dir: Path):
     runner.invoke(app, ["init"])
-    db = tmp_project / ".course-merger" / "db.sqlite"
+    db = tmp_project / ".video-to-notebook" / "db.sqlite"
     with connect(db) as conn:
         conn.execute(
             "INSERT INTO courses (slug, title, platform, source_url, added_at) "
@@ -559,7 +559,7 @@ def test_tag_print_prompts_emits_envelope(tmp_project: Path, fixtures_dir: Path)
 @pytest.mark.integration
 def test_tag_apply_results_writes_db(tmp_project: Path, fixtures_dir: Path):
     runner.invoke(app, ["init"])
-    db = tmp_project / ".course-merger" / "db.sqlite"
+    db = tmp_project / ".video-to-notebook" / "db.sqlite"
     with connect(db) as conn:
         cur = conn.execute(
             "INSERT INTO courses (slug, title, platform, source_url, added_at) "
@@ -634,7 +634,7 @@ Expected: existing 103 + 8 unit + 3 integration = 114 pass. Pyright clean.
 ### Step 8: Commit
 
 ```bash
-git add src/course_merger/tag/prompt_io.py src/course_merger/cli.py tests/unit/test_tag_prompt_io.py tests/integration/test_tag_smoke.py
+git add src/video_to_notebook/tag/prompt_io.py src/video_to_notebook/cli.py tests/unit/test_tag_prompt_io.py tests/integration/test_tag_smoke.py
 git commit -m "feat(tag): \\\`--print-prompts\\\` / \\\`--apply-results\\\` for in-session mode (Max path)"
 ```
 
@@ -643,15 +643,15 @@ git commit -m "feat(tag): \\\`--print-prompts\\\` / \\\`--apply-results\\\` for 
 ## Task 2: Cluster in-session mode
 
 **Files:**
-- Modify: `src/course_merger/cluster/runner.py` (rename 3 private helpers → public)
-- Create: `src/course_merger/cluster/prompt_io.py`
-- Modify: `src/course_merger/cli.py` (add flags to `cluster` command)
+- Modify: `src/video_to_notebook/cluster/runner.py` (rename 3 private helpers → public)
+- Create: `src/video_to_notebook/cluster/prompt_io.py`
+- Modify: `src/video_to_notebook/cli.py` (add flags to `cluster` command)
 - Create: `tests/unit/test_cluster_prompt_io.py`
 - Modify: `tests/integration/test_cluster_smoke.py`
 
 ### Step 1: Make 3 runner helpers public
 
-In `src/course_merger/cluster/runner.py`, rename these functions in their definition AND in their call sites within the same file:
+In `src/video_to_notebook/cluster/runner.py`, rename these functions in their definition AND in their call sites within the same file:
 
 | Old name | New name |
 |----------|----------|
@@ -680,13 +680,13 @@ from unittest.mock import MagicMock
 import numpy as np
 import pytest
 
-from course_merger.cluster.prompt_io import (
+from video_to_notebook.cluster.prompt_io import (
     apply_cluster_results,
     collect_cluster_prompts,
 )
-from course_merger.cluster.runner import ClusterReport
-from course_merger.db.session import connect, init_db
-from course_merger.tag.ontology import load_ontology
+from video_to_notebook.cluster.runner import ClusterReport
+from video_to_notebook.db.session import connect, init_db
+from video_to_notebook.tag.ontology import load_ontology
 
 
 def _seed(db_path: Path) -> None:
@@ -913,12 +913,12 @@ def test_apply_rejects_wrong_kind(tmp_path: Path, onto):
         )
 ```
 
-### Step 4: Write `src/course_merger/cluster/prompt_io.py`
+### Step 4: Write `src/video_to_notebook/cluster/prompt_io.py`
 
 ```python
 """In-session cluster mode: collect cluster prompts as JSON, apply decisions to DB.
 
-See `course_merger.tag.prompt_io` for the rationale (Claude Max subscribers).
+See `video_to_notebook.tag.prompt_io` for the rationale (Claude Max subscribers).
 """
 from __future__ import annotations
 
@@ -927,8 +927,8 @@ from typing import Any, Protocol
 
 import numpy as np
 
-from course_merger.cluster.clusterer import Cluster, cluster_by_cosine
-from course_merger.cluster.runner import (
+from video_to_notebook.cluster.clusterer import Cluster, cluster_by_cosine
+from video_to_notebook.cluster.runner import (
     ClusterReport,
     _collect_proposed_tags,
     _sample_chunks_for_cluster,
@@ -936,8 +936,8 @@ from course_merger.cluster.runner import (
     consume_proposed_for_cluster,
     mark_dirty,
 )
-from course_merger.db.session import connect
-from course_merger.tag.ontology import Ontology
+from video_to_notebook.db.session import connect
+from video_to_notebook.tag.ontology import Ontology
 
 
 SCHEMA_VERSION = "1"
@@ -1114,12 +1114,12 @@ def apply_cluster_results(
 .venv/bin/pytest tests/unit/test_cluster_prompt_io.py -v
 ```
 
-### Step 6: Modify `src/course_merger/cli.py` — `cluster_cmd`
+### Step 6: Modify `src/video_to_notebook/cli.py` — `cluster_cmd`
 
 Add imports:
 
 ```python
-from course_merger.cluster.prompt_io import (
+from video_to_notebook.cluster.prompt_io import (
     apply_cluster_results,
     collect_cluster_prompts,
 )
@@ -1214,7 +1214,7 @@ def cluster_cmd(
 @pytest.mark.integration
 def test_cluster_print_prompts_emits_envelope(tmp_project: Path, fixtures_dir: Path):
     runner.invoke(app, ["init"])
-    db = tmp_project / ".course-merger" / "db.sqlite"
+    db = tmp_project / ".video-to-notebook" / "db.sqlite"
     with connect(db) as conn:
         conn.execute(
             "INSERT INTO courses (slug, title, platform, source_url, added_at) "
@@ -1238,7 +1238,7 @@ def test_cluster_print_prompts_emits_envelope(tmp_project: Path, fixtures_dir: P
     shutil.copy(fixtures_dir / "ontology.yaml", ont_path)
 
     with patch(
-        "course_merger.cluster.embedding.Embedder.embed_batch",
+        "video_to_notebook.cluster.embedding.Embedder.embed_batch",
         return_value=np.ones((1, 384), dtype=np.float32),
     ):
         result = runner.invoke(
@@ -1269,7 +1269,7 @@ Expected: 114 + 8 + 1 = 123 pass. Pyright clean.
 ### Step 9: Commit
 
 ```bash
-git add src/course_merger/cluster/ src/course_merger/cli.py tests/unit/test_cluster_prompt_io.py tests/integration/test_cluster_smoke.py
+git add src/video_to_notebook/cluster/ src/video_to_notebook/cli.py tests/unit/test_cluster_prompt_io.py tests/integration/test_cluster_smoke.py
 git commit -m "feat(cluster): \\\`--print-prompts\\\` / \\\`--apply-results\\\` for in-session mode"
 ```
 
@@ -1278,7 +1278,7 @@ git commit -m "feat(cluster): \\\`--print-prompts\\\` / \\\`--apply-results\\\` 
 ## Task 3: SKILL.md in-session workflow + heuristic
 
 **Files:**
-- Modify: `skills/course-merger/SKILL.md`
+- Modify: `skills/video-to-notebook/SKILL.md`
 
 ### Step 1: Read the current SKILL.md and append a new section after "## The 5-step pipeline" (and before "## Quick recipes")
 
@@ -1294,7 +1294,7 @@ If the user has Claude Max (or any Claude Code subscription), they should NOT ne
 After Step 2 (crawl), check chunk count:
 
 ```bash
-sqlite3 .course-merger/db.sqlite "SELECT COUNT(*) FROM chunks"
+sqlite3 .video-to-notebook/db.sqlite "SELECT COUNT(*) FROM chunks"
 ```
 
 | Chunk count | Mode |
@@ -1308,7 +1308,7 @@ If user explicitly says "I have Max" or "no API key", default to in-session rega
 ### In-session tag loop
 
 ```bash
-course-merger tag --ontology <ont.yaml> --print-prompts --limit 20 > /tmp/cm-prompts.json
+video-to-notebook tag --ontology <ont.yaml> --print-prompts --limit 20 > /tmp/cm-prompts.json
 ```
 
 Read `/tmp/cm-prompts.json`:
@@ -1338,7 +1338,7 @@ For each chunk, decide tags (in your own reasoning) and write to `/tmp/cm-result
 Apply:
 
 ```bash
-course-merger tag --ontology <ont.yaml> --apply-results /tmp/cm-results.json
+video-to-notebook tag --ontology <ont.yaml> --apply-results /tmp/cm-results.json
 ```
 
 Repeat until `--print-prompts` returns empty `chunks` array.
@@ -1346,7 +1346,7 @@ Repeat until `--print-prompts` returns empty `chunks` array.
 ### In-session cluster
 
 ```bash
-course-merger cluster --ontology <ont.yaml> --print-prompts > /tmp/cm-cluster-prompts.json
+video-to-notebook cluster --ontology <ont.yaml> --print-prompts > /tmp/cm-cluster-prompts.json
 ```
 
 Read the envelope. For each cluster, decide merge / create / reject / ambiguous.
@@ -1370,14 +1370,14 @@ Construct apply bundle (single file with BOTH envelopes):
 Apply:
 
 ```bash
-course-merger cluster --ontology <ont.yaml> --apply-results /tmp/cm-cluster-apply.json
+video-to-notebook cluster --ontology <ont.yaml> --apply-results /tmp/cm-cluster-apply.json
 ```
 ```
 
 ### Step 2: Commit
 
 ```bash
-git add skills/course-merger/SKILL.md
+git add skills/video-to-notebook/SKILL.md
 git commit -m "feat(skill): in-session workflow for Claude Max users (no API key path)"
 ```
 
@@ -1393,7 +1393,7 @@ git commit -m "feat(skill): in-session workflow for Claude Max users (no API key
 ```markdown
 ## In-session mode (Claude Max users)
 
-If you have a Claude Max subscription, you can skip the Anthropic API key. `course-merger tag` and `course-merger cluster` each accept two new flags:
+If you have a Claude Max subscription, you can skip the Anthropic API key. `video-to-notebook tag` and `video-to-notebook cluster` each accept two new flags:
 
 - `--print-prompts` emits a JSON envelope of work to stdout.
 - `--apply-results <file>` reads a decisions JSON and writes results to the DB.
@@ -1404,17 +1404,17 @@ Inside Claude Code, the conversation goes:
 You: "Crawl this playlist and tag using examples/ontology-llm.yaml. I have Max."
 
 Claude (in conversation):
-  - Bash: course-merger init && course-merger crawl <url>
-  - Bash: course-merger tag --ontology ... --print-prompts --limit 20 > p.json
+  - Bash: video-to-notebook init && video-to-notebook crawl <url>
+  - Bash: video-to-notebook tag --ontology ... --print-prompts --limit 20 > p.json
   - (reads p.json, decides tags via its own reasoning)
   - writes r.json with decisions
-  - Bash: course-merger tag --ontology ... --apply-results r.json
+  - Bash: video-to-notebook tag --ontology ... --apply-results r.json
   - (repeats batch by batch)
   - same loop for cluster
-  - Bash: course-merger build
+  - Bash: video-to-notebook build
 ```
 
-The skill at `skills/course-merger/SKILL.md` automates this. Install via `bash skills/course-merger/scripts/install-locally.sh`.
+The skill at `skills/video-to-notebook/SKILL.md` automates this. Install via `bash skills/video-to-notebook/scripts/install-locally.sh`.
 
 Trade-offs:
 
@@ -1452,13 +1452,13 @@ This task is executed by the controller (Claude in this conversation), not a fre
 
 ```bash
 rm -rf /tmp/cm-in-session && mkdir /tmp/cm-in-session && cd /tmp/cm-in-session
-/Users/chenlinzhuo/code/course-merger/.venv/bin/course-merger init
+/Users/chenlinzhuo/code/video-to-notebook/.venv/bin/video-to-notebook init
 ```
 
 ### Step 2: Crawl a small course
 
 ```bash
-/Users/chenlinzhuo/code/course-merger/.venv/bin/course-merger crawl \
+/Users/chenlinzhuo/code/video-to-notebook/.venv/bin/video-to-notebook crawl \
     "https://www.youtube.com/playlist?list=PLPTV0NXA_ZShnka8uVzF3mSvZdilfiGWG" \
     --name "vizuara-build-claude-code"
 ```
@@ -1468,8 +1468,8 @@ Expected: 3 lectures ok, 1 error (members-only), ~100-150 chunks.
 ### Step 3: Emit tag prompts for first 20 chunks
 
 ```bash
-/Users/chenlinzhuo/code/course-merger/.venv/bin/course-merger tag \
-    --ontology /Users/chenlinzhuo/code/course-merger/examples/ontology-llm.yaml \
+/Users/chenlinzhuo/code/video-to-notebook/.venv/bin/video-to-notebook tag \
+    --ontology /Users/chenlinzhuo/code/video-to-notebook/examples/ontology-llm.yaml \
     --print-prompts --limit 20 > /tmp/cm-prompts-1.json
 
 .venv/bin/python3 -c "
@@ -1497,8 +1497,8 @@ The controller reads `/tmp/cm-prompts-1.json`, decides tags for each chunk by re
 ### Step 5: Apply tag results
 
 ```bash
-/Users/chenlinzhuo/code/course-merger/.venv/bin/course-merger tag \
-    --ontology /Users/chenlinzhuo/code/course-merger/examples/ontology-llm.yaml \
+/Users/chenlinzhuo/code/video-to-notebook/.venv/bin/video-to-notebook tag \
+    --ontology /Users/chenlinzhuo/code/video-to-notebook/examples/ontology-llm.yaml \
     --apply-results /tmp/cm-results-1.json
 ```
 
@@ -1507,9 +1507,9 @@ Expected: `done (in-session): 20 chunks tagged, N known tags, M proposed tags`.
 ### Step 6: Verify DB state
 
 ```bash
-sqlite3 .course-merger/db.sqlite \
+sqlite3 .video-to-notebook/db.sqlite \
     "SELECT tagger_model, COUNT(*) FROM chunk_concepts GROUP BY tagger_model;"
-sqlite3 .course-merger/db.sqlite \
+sqlite3 .video-to-notebook/db.sqlite \
     "SELECT COUNT(*) FROM proposed_tags;"
 ```
 
@@ -1522,8 +1522,8 @@ Loop steps 3-5 with `--limit 20` until print-prompts returns empty `chunks`.
 ### Step 8: Emit cluster prompts
 
 ```bash
-/Users/chenlinzhuo/code/course-merger/.venv/bin/course-merger cluster \
-    --ontology /Users/chenlinzhuo/code/course-merger/examples/ontology-llm.yaml \
+/Users/chenlinzhuo/code/video-to-notebook/.venv/bin/video-to-notebook cluster \
+    --ontology /Users/chenlinzhuo/code/video-to-notebook/examples/ontology-llm.yaml \
     --print-prompts > /tmp/cm-cluster-prompts.json
 ```
 
@@ -1539,15 +1539,15 @@ Controller reads cluster envelope, decides per cluster, writes `/tmp/cm-cluster-
 ```
 
 ```bash
-/Users/chenlinzhuo/code/course-merger/.venv/bin/course-merger cluster \
-    --ontology /Users/chenlinzhuo/code/course-merger/examples/ontology-llm.yaml \
+/Users/chenlinzhuo/code/video-to-notebook/.venv/bin/video-to-notebook cluster \
+    --ontology /Users/chenlinzhuo/code/video-to-notebook/examples/ontology-llm.yaml \
     --apply-results /tmp/cm-cluster-apply.json
 ```
 
 ### Step 10: Build + inspect
 
 ```bash
-/Users/chenlinzhuo/code/course-merger/.venv/bin/course-merger build
+/Users/chenlinzhuo/code/video-to-notebook/.venv/bin/video-to-notebook build
 ls site/dist/concepts/
 ```
 
@@ -1556,7 +1556,7 @@ Open `site/dist/index.html` and verify concept pages show chunks tagged via in-s
 ### Step 11: Tag milestone
 
 ```bash
-cd /Users/chenlinzhuo/code/course-merger
+cd /Users/chenlinzhuo/code/video-to-notebook
 git tag plan-5-done
 git tag -a v1.1.0 -m "v1.1.0 — in-session mode for Claude Max subscribers"
 git log --oneline v1.0.0..v1.1.0

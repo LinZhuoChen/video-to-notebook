@@ -1,6 +1,6 @@
 # Agent protocol
 
-course-merger's LLM stages are designed to be **agent-agnostic**. Any agent that can read JSON, reason, and write JSON can drive the pipeline.
+video-to-notebook's LLM stages are designed to be **agent-agnostic**. Any agent that can read JSON, reason, and write JSON can drive the pipeline.
 
 This document defines the JSON envelope schemas, expected agent behavior, and conventions for the `--print-prompts` / `--apply-results` flow. It's the source of truth for any client (Claude Code, Codex, Cursor, Continue, your own script).
 
@@ -10,7 +10,7 @@ Every LLM-driven stage shares the same shape:
 
 ```
                        ┌─────────────────────────────────┐
-       course-merger   │  *_prompts envelope  (JSON)     │   ──── stdout
+       video-to-notebook   │  *_prompts envelope  (JSON)     │   ──── stdout
    --print-prompts    →└─────────────────────────────────┘
                                       │
                                       ▼
@@ -18,7 +18,7 @@ Every LLM-driven stage shares the same shape:
                                       │
                                       ▼
                        ┌─────────────────────────────────┐
-       course-merger   │  *_results  envelope  (JSON)    │   ──── file path
+       video-to-notebook   │  *_results  envelope  (JSON)    │   ──── file path
    --apply-results    ←└─────────────────────────────────┘
 ```
 
@@ -49,7 +49,7 @@ These are free-form strings. The CLI doesn't validate them, but they're persiste
 
 ### Prompts envelope
 
-`course-merger tag --ontology <ont.yaml> --print-prompts [--limit N] [--course SLUG]`
+`video-to-notebook tag --ontology <ont.yaml> --print-prompts [--limit N] [--course SLUG]`
 
 ```json
 {
@@ -93,7 +93,7 @@ The agent's job: read each chunk, decide which ontology slugs apply (multi-label
 
 ### Prompts envelope
 
-`course-merger cluster --ontology <ont.yaml> --print-prompts`
+`video-to-notebook cluster --ontology <ont.yaml> --print-prompts`
 
 ```json
 {
@@ -144,12 +144,12 @@ The cluster stage requires the prompts envelope back, because `apply` re-derives
 Apply:
 
 ```bash
-course-merger cluster --ontology <ont.yaml> --apply-results bundle.json
+video-to-notebook cluster --ontology <ont.yaml> --apply-results bundle.json
 ```
 
 ## Stage 3 — `curriculum` (chapter ordering for the textbook)
 
-`course-merger curriculum --print-prompts [--samples N]`
+`video-to-notebook curriculum --print-prompts [--samples N]`
 
 ### Prompts envelope
 
@@ -195,7 +195,7 @@ Idempotent: re-applying overwrites the chapter list (use this to iterate).
 
 ## Stage 4 — `synthesize` (per-chapter HTML fragment)
 
-`course-merger synthesize --chapter N --print-prompts`
+`video-to-notebook synthesize --chapter N --print-prompts`
 
 ### Prompts envelope
 
@@ -215,7 +215,7 @@ Idempotent: re-applying overwrites the chapter list (use this to iterate).
     {"course_slug": "cs336", "lecture_idx": 2, "video_url": "...", "start_sec": 268.4, "text": "..."}
   ],
   "style_guide": "...",
-  "output_path_hint": ".course-merger/textbook/1.html"
+  "output_path_hint": ".video-to-notebook/textbook/1.html"
 }
 ```
 
@@ -235,11 +235,11 @@ The style guide enforces: anti-bias opening · inline SVG diagram · optional CS
 }
 ```
 
-Apply copies the fragment to `.course-merger/textbook/N.html` and marks the chapter `synthesized`. Re-applying overwrites.
+Apply copies the fragment to `.video-to-notebook/textbook/N.html` and marks the chapter `synthesized`. Re-applying overwrites.
 
 ## Stage 5 — `explain` (per-concept encyclopedia entry, v1.3+)
 
-`course-merger explain --concept <slug> --print-prompts`
+`video-to-notebook explain --concept <slug> --print-prompts`
 
 ### Prompts envelope
 
@@ -263,7 +263,7 @@ Apply copies the fragment to `.course-merger/textbook/N.html` and marks the chap
     {"slug": "scalar-multiplication", "canonical_name": "Scalar Multiplication", "co_occurrence": 3}
   ],
   "style_guide": "...",
-  "output_path_hint": ".course-merger/concepts/linear-algebra.html"
+  "output_path_hint": ".video-to-notebook/concepts/linear-algebra.html"
 }
 ```
 
@@ -279,17 +279,17 @@ Apply copies the fragment to `.course-merger/textbook/N.html` and marks the chap
 }
 ```
 
-Apply copies into `.course-merger/concepts/<slug>.html` and upserts into `concept_explanations`. Re-applying overwrites.
+Apply copies into `.video-to-notebook/concepts/<slug>.html` and upserts into `concept_explanations`. Re-applying overwrites.
 
 ## Style guide source-of-truth
 
 The `style_guide` field of each `*_prompts` envelope is the verbatim version-pinned text from:
 
-- `src/course_merger/tag/prompts.py` (tagger style)
-- `src/course_merger/cluster/prompts.py` (clusterer style)
-- `src/course_merger/curriculum/prompts.py` (curriculum designer style)
-- `src/course_merger/synthesize/prompts.py` (chapter style)
-- `src/course_merger/explain/prompts.py` (concept-entry v2 contract)
+- `src/video_to_notebook/tag/prompts.py` (tagger style)
+- `src/video_to_notebook/cluster/prompts.py` (clusterer style)
+- `src/video_to_notebook/curriculum/prompts.py` (curriculum designer style)
+- `src/video_to_notebook/synthesize/prompts.py` (chapter style)
+- `src/video_to_notebook/explain/prompts.py` (concept-entry v2 contract)
 
 These files include a `_VERSION` constant (`SYNTHESIZER_VERSION`, `EXPLAINER_VERSION`, etc.). When the contract changes meaningfully the version bumps. Agents should respect the style guide they received — it's the contract for that envelope.
 

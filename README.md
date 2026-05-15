@@ -1,27 +1,33 @@
 <div align="center">
 
-# 📚 course-merger
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/logo/lockup-dark.svg" />
+  <img alt="video-to-notebook" src="assets/logo/lockup-light.svg" width="460" />
+</picture>
 
-**Crawl open-courseware. Tag with Claude. Read as a unified textbook + encyclopedia.**
+**Built for Claude Code & OpenAI Codex.** Read open-courseware as one merged notebook — textbook + concept encyclopedia in a single static site.
 
-Turn a pile of YouTube / Bilibili playlists into a beginner-friendly merged course — illustrated chapters, interactive concept explainers, source-video deep links, fully searchable.
+Point it at a few YouTube playlists on the same topic. Your coding agent does the heavy lifting — crawls the videos, tags every transcript chunk against your ontology, clusters them into a clean concept graph, designs a pedagogical chapter order, and writes each chapter + concept page. **No separate Anthropic API key required**: every LLM stage runs in-session through your agent's existing Claude Code or Codex subscription. Pagefind search and bilingual (中文 / English) output ship at the flip of a flag.
 
-[![CI](https://github.com/chenlinzhuo/course-merger/actions/workflows/ci.yml/badge.svg)](https://github.com/chenlinzhuo/course-merger/actions/workflows/ci.yml)
+[![CI](https://github.com/chenlinzhuo/video-to-notebook/actions/workflows/ci.yml/badge.svg)](https://github.com/chenlinzhuo/video-to-notebook/actions/workflows/ci.yml)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Astro](https://img.shields.io/badge/Astro-5-FF5D01?logo=astro&logoColor=white)](https://astro.build/)
-[![Claude](https://img.shields.io/badge/powered_by-Claude-D97757)](https://anthropic.com/)
+[![Built for Claude Code](https://img.shields.io/badge/built_for-Claude_Code-D97757?logo=anthropic&logoColor=white)](https://claude.com/claude-code)
+[![Built for OpenAI Codex](https://img.shields.io/badge/built_for-OpenAI_Codex-10A37F?logo=openai&logoColor=white)](https://github.com/openai/codex)
 
-[**Live demo**](https://chenlinzhuo.github.io/course-merger/) · [**Quickstart**](#-quickstart) · [**How it works**](#-how-it-works) · [**Use with Claude Code / Codex / any agent**](#-drive-it-from-your-ai-coding-agent) · [**Roadmap**](#-roadmap)
+[**Live demo**](https://chenlinzhuo.github.io/video-to-notebook/) · [**Quickstart**](#-quickstart) · [**How it works**](#-how-it-works) · [**Use with Claude Code / Codex / any agent**](#-drive-it-from-your-ai-coding-agent) · [**Roadmap**](#-roadmap)
 
 ---
 
 </div>
 
+> 🚧 **Early days — expect rough edges.** `video-to-notebook` is in active development; v2.0.0 is the first public release after the `course-merger` → `video-to-notebook` rename. If you hit a bug, a confusing prompt, an off-target chapter, or a crawler that refuses to play nicely with a real playlist, please [**open an issue**](https://github.com/chenlinzhuo/video-to-notebook/issues/new/choose) with the failing command + a few lines of log — that's by far the fastest way to get it fixed. Feature requests, ontology files for new domains, and crawler adapters for non-YouTube platforms are all welcome too.
+
 ## ✨ What you get
 
 ```
-Input:  ─────►  YouTube + Bilibili playlists (3+ courses on the same topic)
+Input:  ─────►  YouTube playlists (3+ courses on the same topic)
                                   │
                                   ▼
                 ┌─────────────────────────────────────────┐
@@ -40,6 +46,18 @@ Output: ─────►  📖 A merged textbook (chapters in pedagogical orde
                 🔎 Cross-course "compare" view + Pagefind search
                 🎬 Click-to-seek deep links into source videos
 ```
+
+## 🧭 Design principles
+
+What separates `video-to-notebook` from "feed playlists to ChatGPT, ask for a summary":
+
+1. **Source fidelity first.** Every chapter and concept page must faithfully transmit how the lecturer *actually* taught the idea — the exact analogies, the whiteboard derivation steps, the verbatim phrasings, the named citations. Your own framing is layered on top with an explicit `🟡 教材外补充` flag. If two courses give different metaphors for the same concept, both get preserved and labelled. If a reader who watched the lectures doesn't recognise the chapter, the system over-generalised.
+
+2. **No fabrication — debug the pipeline instead.** When the source chunks for a chapter come up thin (e.g. all 20 chunks are course-logistics chatter, or one alphabetically-early course dominates the LIMIT), the agent is required to **stop and diagnose** rather than paper over the gap with training-data knowledge. Common bugs to check: chunk-selection SQL with `LIMIT 20 ORDER BY course_slug` (now fixed via depth-first allocation), tagging that matched by lecture-title keyword without the concept being discussed, `--max-source-chunks` too low.
+
+3. **Textbook-note depth, not magazine-summary depth.** Each chapter targets ~5,000–8,000 中文字 with: a TL;DR callout block, 8–14 numbered sections (一二三四 …), step-by-step math derivations where every line has a `**Why**:` annotation, all distinctive lecturer analogies preserved, 3–5 colour-coded callouts (info/note/warning/tip/quote), engineering details embedded as inline callouts (not deferred), a complete runnable PyTorch skeleton when a model is introduced, and 5–7 takeaways anchored to specific lecturer-given examples. Under 4,000 字 = under-developed.
+
+These three rules live inside the [synthesize](src/video_to_notebook/synthesize/prompts.py) and [explain](src/video_to_notebook/explain/prompts.py) style guides, so any agent driving the pipeline inherits them automatically.
 
 ## 📸 Showcase
 
@@ -112,20 +130,19 @@ No React, no Vue. Astro + 200 lines of vanilla JS. The whole concept page weighs
 
 ```bash
 # Install the CLI (Python 3.12+)
-pip install course-merger      # or: uv tool install course-merger
+pip install video-to-notebook      # or: uv tool install video-to-notebook
 brew install node yt-dlp       # Node 20+ for the build, yt-dlp for crawling
 
 # Run the pipeline
 export ANTHROPIC_API_KEY=sk-ant-...
 mkdir my-study-site && cd my-study-site
 
-course-merger init
-course-merger crawl "https://www.youtube.com/playlist?list=PLxxx" --name cs336
-course-merger crawl "https://www.bilibili.com/video/BVxxx/"  --name vizuara-llm --cookies-from edge
-course-merger tag      --ontology examples/ontology-llm.yaml  # ~$0.10/course
-course-merger cluster  --ontology examples/ontology-llm.yaml  # ~$0.30/run
-course-merger build
-course-merger serve    # http://localhost:4321
+video-to-notebook init --language en                                # or `--language zh` (default)
+video-to-notebook crawl "https://www.youtube.com/playlist?list=PLxxx" --name cs336
+video-to-notebook tag      --ontology examples/ontology-llm.yaml  # ~$0.10/course
+video-to-notebook cluster  --ontology examples/ontology-llm.yaml  # ~$0.30/run
+video-to-notebook build
+video-to-notebook serve    # http://localhost:4321
 ```
 
 Total cost for a 5-course corpus: **~$2-4** first run, **$0** on re-runs (idempotent).
@@ -138,7 +155,7 @@ Every LLM stage (`tag`, `cluster`, `curriculum`, `synthesize`, `explain`) has `-
 
 ```
                   ┌──────────────────────────────────────────────┐
-                  │           SQLite (.course-merger/db.sqlite)  │
+                  │       SQLite (.video-to-notebook/db.sqlite)  │
                   │  courses · lectures · chunks                 │
                   │  concepts · chunk_concepts · aliases         │
                   │  curriculum_chapters · concept_explanations  │
@@ -167,15 +184,26 @@ Each subcommand is **idempotent and resumable**:
 
 ```bash
 # 1. Python CLI (3.12+)
-pip install course-merger
-# or: uv tool install course-merger
+pip install video-to-notebook
+# or: uv tool install video-to-notebook
 
 # 2. External requirements
 brew install node yt-dlp       # Node 20+ for the HTML build; yt-dlp for crawling
 playwright install chromium    # only if running e2e tests
 ```
 
-For Bilibili crawling you also need a logged-in browser (`--cookies-from edge|chrome|firefox`).
+### Upgrading from `course-merger` (v1.x)?
+
+In **v2.0.0** the project was renamed from `course-merger` to `video-to-notebook`. Existing projects migrate in three commands — no re-crawl, no re-tag, the SQLite schema is unchanged:
+
+```bash
+# inside the project directory
+mv .course-merger .video-to-notebook       # rename the marker
+uv tool upgrade video-to-notebook          # or: pip install -U video-to-notebook
+video-to-notebook build                    # back to work
+```
+
+The `course-merger` binary still exists as a back-compat shim — it prints a one-line deprecation notice and forwards to `video-to-notebook`. Scheduled for removal in v3.0.0. See [`CHANGELOG.md`](CHANGELOG.md#200--2026-05-15) for the full rationale.
 
 ## 🤖 Drive it from your AI coding agent
 
@@ -188,15 +216,15 @@ Every LLM stage supports a **`--print-prompts` / `--apply-results`** two-phase f
 ### 🟠 Claude Code
 
 ```bash
-git clone https://github.com/chenlinzhuo/course-merger.git
-bash course-merger/skills/course-merger/scripts/install-locally.sh
+git clone https://github.com/chenlinzhuo/video-to-notebook.git
+bash video-to-notebook/skills/video-to-notebook/scripts/install-locally.sh
 ```
 
 Then in Claude Code:
 
 > Build me a study site from these courses: `<playlist1>` `<playlist2>` `<playlist3>` using `examples/ontology-llm.yaml`.
 
-Full skill manifest at [`skills/course-merger/SKILL.md`](skills/course-merger/SKILL.md). Claude Max users skip the Anthropic API key entirely — the in-session flow covers tag/cluster/curriculum/synthesize/explain.
+Full skill manifest at [`skills/video-to-notebook/SKILL.md`](skills/video-to-notebook/SKILL.md). Claude Max users skip the Anthropic API key entirely — the in-session flow covers tag/cluster/curriculum/synthesize/explain.
 
 </td>
 <td width="50%" valign="top">
@@ -204,16 +232,16 @@ Full skill manifest at [`skills/course-merger/SKILL.md`](skills/course-merger/SK
 ### 🔵 OpenAI Codex
 
 ```bash
-git clone https://github.com/chenlinzhuo/course-merger.git
+git clone https://github.com/chenlinzhuo/video-to-notebook.git
 cd my-study-site
-bash course-merger/skills/course-merger/scripts/install-codex.sh
+bash video-to-notebook/skills/video-to-notebook/scripts/install-codex.sh
 codex                  # Codex reads AGENTS.md
 ```
 
-Or install globally so Codex knows about course-merger from anywhere:
+Or install globally so Codex knows about video-to-notebook from anywhere:
 
 ```bash
-bash course-merger/skills/course-merger/scripts/install-codex.sh --global
+bash video-to-notebook/skills/video-to-notebook/scripts/install-codex.sh --global
 ```
 
 Codex reads [`AGENTS.md`](AGENTS.md) (Codex's equivalent of CLAUDE.md) and [`docs/AGENT_PROTOCOL.md`](docs/AGENT_PROTOCOL.md). Same in-session flow.
@@ -248,16 +276,16 @@ The textbook-generation stages (`curriculum`, `synthesize`, `explain`) currently
 agent says        "Crawl this playlist and tag using examples/ontology-llm.yaml."
 
 CLI loop:
-  course-merger init && course-merger crawl <url>
+  video-to-notebook init && video-to-notebook crawl <url>
   for batch in chunks_of(20):
-    course-merger tag --print-prompts --limit 20 > p.json
+    video-to-notebook tag --print-prompts --limit 20 > p.json
     agent reads p.json, writes r.json
-    course-merger tag --apply-results r.json
-  course-merger cluster --print-prompts > c.json
+    video-to-notebook tag --apply-results r.json
+  video-to-notebook cluster --print-prompts > c.json
   agent reads c.json, writes c-apply.json
-  course-merger cluster --apply-results c-apply.json
+  video-to-notebook cluster --apply-results c-apply.json
   same for curriculum / synthesize (per chapter) / explain (per concept)
-  course-merger build
+  video-to-notebook build
 ```
 
 ### Cost & speed trade-offs
@@ -277,40 +305,54 @@ After `tag` + `cluster`, synthesize the corpus into a merged textbook:
 
 ```bash
 # 1. Design the chapter sequence (in-session in Claude Code)
-course-merger curriculum --print-prompts > curr.json
+video-to-notebook curriculum --print-prompts > curr.json
 # Claude reads curr.json, designs the chapter order, writes curr-results.json
-course-merger curriculum --apply-results curr-results.json
+video-to-notebook curriculum --apply-results curr-results.json
 
-# 2. For each chapter:
-course-merger synthesize --chapter N --print-prompts > chN.json
-# Claude reads + writes /tmp/chN.html with anti-bias opening, SVG diagrams,
-# CSS animations, embedded source clip, LaTeX, takeaways
-course-merger synthesize --chapter N --apply-results apply-chN.json
+# 2. The agent asks you: batch mode or chapter-by-chapter?
+#    - 整本批量做: loops through all N chapters, applies as it goes, build once.
+#                 Best for re-runs once you trust the style.
+#    - 一章一章来: synthesizes chapter 1, builds, hands control back so you can
+#                 inspect /textbook/1/ and give feedback before chapter 2.
+#                 Best for the first run on a new corpus.
 
-# 3. Build & view
-course-merger build
-course-merger serve  # http://localhost:4321/textbook/
+# 3. For each chapter (whichever mode):
+video-to-notebook synthesize --chapter N --print-prompts > chN.json
+# Agent reads + writes /tmp/chN.html following the v3 style guide:
+#   - TL;DR callout at the top + 8–14 numbered sections (一二三四 …)
+#   - Step-by-step derivations with **Why**: annotations per line
+#   - All distinctive lecturer analogies preserved (don't collapse to one)
+#   - 3–5 callout boxes (info/note/warning/tip/quote) inline
+#   - Engineering details embedded as callouts, not deferred
+#   - Complete PyTorch skeleton when a model is introduced
+#   - 5–7 takeaways anchored to lecturer-given examples
+#   - Target body length: 5,000–8,000 中文字 per chapter
+video-to-notebook synthesize --chapter N --apply-results apply-chN.json
+
+# 4. Build & view
+video-to-notebook build
+video-to-notebook serve  # http://localhost:4321/textbook/
 ```
 
-Each chapter is a self-contained HTML fragment with inline SVG, CSS animations, embedded source-video iframes (timestamp-deep-linked), and LaTeX math (KaTeX-rendered).
+Each chapter is a self-contained HTML fragment with inline SVG, CSS animations, embedded source-video iframes (timestamp-deep-linked), LaTeX math (KaTeX-rendered), and colour-coded callout boxes. The v3 style guide (`src/video_to_notebook/synthesize/prompts.py`) enforces the source-fidelity + textbook-note-depth principles automatically — any agent driving the pipeline inherits them.
 
 ## 💡 Concept encyclopedia (v1.3+)
 
 Linear textbooks are great for first-time readers. The concept encyclopedia is for the reader looking up *one* idea in depth:
 
 ```bash
-course-merger explain --concept linear-algebra --print-prompts > la.json
+video-to-notebook explain --concept linear-algebra --print-prompts > la.json
 # Claude writes /tmp/la.html following the v2 style guide:
 #   - per-concept CSS namespace prefix (la-)
 #   - CSS-variable-only colors (works in light + dark + per-module accent)
 #   - 9 fixed sections in order
 #   - one of 3 interactive widget templates
-course-merger explain --concept linear-algebra --apply-results la-results.json
+video-to-notebook explain --concept linear-algebra --apply-results la-results.json
 
-course-merger build  # /concepts/<slug>/ now serves the rich explainer
+video-to-notebook build  # /concepts/<slug>/ now serves the rich explainer
 ```
 
-The v2 style guide in [`src/course_merger/explain/prompts.py`](src/course_merger/explain/prompts.py) enforces:
+The v2 style guide in [`src/video_to_notebook/explain/prompts.py`](src/video_to_notebook/explain/prompts.py) enforces:
 
 - **Anti-bias opener** every entry must begin by naming a common misunderstanding and correcting it
 - **One-invariant rule** every animation/interaction must make exactly ONE invariant visible
@@ -320,7 +362,7 @@ The v2 style guide in [`src/course_merger/explain/prompts.py`](src/course_merger
 
 ## 🎨 Site features
 
-The built site (`course-merger build && course-merger serve`) ships with:
+The built site (`video-to-notebook build && video-to-notebook serve`) ships with:
 
 | Feature | What it does |
 |---|---|
@@ -360,24 +402,23 @@ cp -r examples/frontier-notebook examples/my-corpus
 bash examples/my-corpus/build.sh
 ```
 
-The build script chains crawl/tag/cluster/build, reads `courses.toml`, and lands a working site at `examples/my-corpus/.course-merger-project/site/dist/`.
+The build script chains crawl/tag/cluster/build, reads `courses.toml`, and lands a working site at `examples/my-corpus/.video-to-notebook-project/site/dist/`.
 
 ## 🗺 Roadmap
 
-**Shipped:** v1.0 foundation · v1.1 in-session mode · v1.2 textbook generator · v1.3 concept encyclopedia + design-system polish · v1.4 multi-agent support (Codex + Cursor + Continue alongside Claude Code) (see [CHANGELOG.md](CHANGELOG.md)).
+**Shipped:** v1.0 foundation · v1.1 in-session mode · v1.2 textbook generator · v1.3 concept encyclopedia + design-system polish · v1.4 multi-agent support (Codex + Cursor + Continue alongside Claude Code) · v2.0 project renamed to `video-to-notebook`, source-fidelity + textbook-depth quality discipline, chapter chunk-selection regression fixed, full zh/en i18n on prompts + Astro UI, automatic template overlay-sync on every `build` (see [CHANGELOG.md](CHANGELOG.md)).
 
 **Deferred:**
 
-- [ ] **Whisper fallback** transcribe videos with no subtitles via mlx-whisper / Groq
-- [ ] **Coursera/edX/MIT-OCW adapters** more crawlers behind the `Crawler` Protocol
+- [ ] **Robust Bilibili support** — current crawler is YouTube-first; harden Bilibili playlist parsing, cookie refresh, P-multi (分P) handling, and CC-subtitle vs auto-caption discrimination so a B站 course works as smoothly as a YouTube one.
+- [ ] **No-subtitle video support (Whisper fallback)** — when `yt-dlp` returns no captions, transcribe locally via `mlx-whisper` (Apple Silicon) or Groq Whisper API, then feed the transcript into the same chunk pipeline. Unblocks lectures with auto-captions disabled and Bilibili videos missing CC.
 - [ ] **Live filter on compare view** client-side `?courses=cs336,gpu-mode` selection
 - [ ] **`review` CLI** human-in-the-loop dispatch for `ambiguous` cluster decisions
-- [ ] **Multi-language concept aliasing** dedicated Chinese ↔ English concept name pairs
-- [ ] **Automatic incremental rebuild** `init_db()` on every CLI command, `ensure_site_dir` template sync on each `build`
+- [ ] **Multi-language concept aliasing** dedicated Chinese ↔ English concept name pairs (current i18n covers UI + generated prose, not slug-level aliasing)
 
 ## 🏛 Architecture & design
 
-- Design spec: [`docs/specs/2026-05-09-course-merger-skill-design.md`](docs/specs/2026-05-09-course-merger-skill-design.md)
+- Design spec: [`docs/specs/2026-05-09-video-to-notebook-skill-design.md`](docs/specs/2026-05-09-video-to-notebook-skill-design.md)
 - Implementation plans (TDD-decomposed):
   - Plan 1: [Foundation + Crawl](docs/superpowers/plans/2026-05-09-plan-1-foundation-and-crawl.md)
   - Plan 2: [Tag + Cluster](docs/superpowers/plans/2026-05-09-plan-2-tag-and-cluster.md)
@@ -387,7 +428,7 @@ The build script chains crawl/tag/cluster/build, reads `courses.toml`, and lands
 
 ## ⚖️ Disclaimer
 
-`course-merger` is a **tool**. The user is responsible for ensuring they have the right to crawl, process, and redistribute any content fed through this pipeline. This includes YouTube/Bilibili Terms of Service governing programmatic content access, the original creator's license on the lecture content, and fair use / transformative use considerations in the user's jurisdiction.
+`video-to-notebook` is a **tool**. The user is responsible for ensuring they have the right to crawl, process, and redistribute any content fed through this pipeline. This includes YouTube Terms of Service governing programmatic content access, the original creator's license on the lecture content, and fair use / transformative use considerations in the user's jurisdiction.
 
 The tool's authors disclaim responsibility for content generated by users. **Personal study use is generally low risk. Public redistribution or commercial use of synthesized content may not be.** Consult the source materials' licenses before going beyond personal use.
 
@@ -406,6 +447,6 @@ See [CONTRIBUTING.md](CONTRIBUTING.md). PRs welcome — particularly new crawler
 Made with 🤖 + ☕ by [chenlinzhuo](https://github.com/chenlinzhuo).
 Built atop [Claude Code](https://claude.com/claude-code), [Astro](https://astro.build/), [yt-dlp](https://github.com/yt-dlp/yt-dlp), [Pagefind](https://pagefind.app/), [KaTeX](https://katex.org/).
 
-If `course-merger` saved you a weekend of YouTube binging, give it a ⭐ on GitHub.
+If `video-to-notebook` saved you a weekend of YouTube binging, give it a ⭐ on GitHub.
 
 </div>

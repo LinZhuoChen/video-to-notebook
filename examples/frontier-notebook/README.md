@@ -1,6 +1,6 @@
 # Frontier Notebook — World Models × Agents
 
-A curated `course-merger` demo project. Crawls 5 open courses, tags them with a 30-concept ontology, and produces an interactive knowledge map.
+A curated `video-to-notebook` demo project. Crawls 5 open courses, tags them with a 30-concept ontology, and produces an interactive knowledge map.
 
 This directory is **shipped as a template**: copy it, edit `courses.toml` and `ontology.yaml` for your own corpus, then run `build.sh`.
 
@@ -12,7 +12,7 @@ export ANTHROPIC_API_KEY=sk-ant-...
 bash examples/frontier-notebook/build.sh
 ```
 
-After ~30 min (depending on network + Claude latency), open `examples/frontier-notebook/.course-merger-project/site/dist/index.html` in a browser.
+After ~30 min (depending on network + Claude latency), open `examples/frontier-notebook/.video-to-notebook-project/site/dist/index.html` in a browser.
 
 ## Cost estimate
 
@@ -26,7 +26,7 @@ After ~30 min (depending on network + Claude latency), open `examples/frontier-n
 
 ## Customize for your corpus
 
-1. Edit `courses.toml` — replace the 5 YouTube URLs with your own playlists. For Bilibili, set `platform = "bilibili"` and pass `--cookies-from edge` to `course-merger crawl`.
+1. Edit `courses.toml` — replace the 5 YouTube URLs with your own playlists. For Bilibili, set `platform = "bilibili"` and pass `--cookies-from edge` to `video-to-notebook crawl`.
 2. Edit `ontology.yaml` — add seed concepts that match your domain. ~30 concepts is a good starting point; the cluster pass will discover more.
 3. Re-run `bash build.sh`.
 
