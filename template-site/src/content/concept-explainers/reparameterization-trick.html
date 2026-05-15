@@ -1,0 +1,62 @@
+<style>
+/* prefix: rt- */
+.rt-quickref{background:var(--surface-soft);border-left:3px solid var(--module-accent);padding:0.8rem 1rem;border-radius:0 4px 4px 0;margin:1rem 0;font-size:0.92rem;}
+.rt-quickref div{margin:0.3rem 0;}
+.rt-svg{display:block;margin:1.2rem auto;max-width:100%;height:auto;}
+.rt-pitfalls ol{padding-left:1.4rem;} .rt-pitfalls li{margin:0.5rem 0;}
+.rt-source{font-style:italic;color:var(--text-muted);border-left:2px solid var(--border);padding:0.2rem 0.8rem;margin:0.5rem 0;font-size:0.9rem;}
+</style>
+<article class="concept-entry">
+  <header class="concept-header">
+    <span class="concept-eyebrow">概念</span>
+    <h1>Reparameterization Trick</h1>
+    <p class="concept-tagline">— 把采样改写成"确定性变换 + 外部噪声"，让梯度能穿过去。</p>
+  </header>
+  <aside class="rt-quickref">
+    <div><strong>定义</strong> · $z \sim \mathcal{N}(\mu, \sigma^2) \Leftrightarrow z = \mu + \sigma\epsilon, \epsilon \sim \mathcal{N}(0, I)$。</div>
+    <div><strong>公式</strong> · 同上。$\mu, \sigma$ 由网络给（可导）；$\epsilon$ 外部采（无梯度）。</div>
+    <div><strong>易错</strong> · 数值技巧不改 z 分布，只让反向传播能进 μ, σ。</div>
+  </aside>
+  <section class="concept-intuition">
+    <p>VAE encoder 输出 $\mu, \sigma$ 后想从 $\mathcal{N}(\mu, \sigma^2)$ 采 z 然后反传梯度——但"采样"不可导，反传断了。重参数化把随机性挤到 $\epsilon$ 里：$z = \mu + \sigma\epsilon$。$\mu, \sigma$ 变成确定性函数，梯度畅通。</p>
+    <p>Vizuara L9 在解释这一技巧时强调"把不可导变可导"是 VAE 训练可行的关键。Diffusion 的跳步公式 $x_t = \sqrt{\bar\alpha_t}x_0 + \sqrt{1-\bar\alpha_t}\epsilon$ 也是同样的把戏。</p>
+  </section>
+  <section class="concept-deepdive">
+    <h2>梯度交换</h2>
+    <p>没有重参数化 $\nabla_\phi \mathbb{E}_{q_\phi}[f(z)]$ 不易算。重参数化后 $z = g_\phi(\epsilon)$，可交换：</p>
+    $$\nabla_\phi \mathbb{E}_\epsilon[f(g_\phi(\epsilon))] = \mathbb{E}_\epsilon[\nabla_\phi f(g_\phi(\epsilon))]$$
+    <svg class="rt-svg" viewBox="0 0 600 130" role="img" aria-label="重参数化前后">
+      <g font-family="ui-sans-serif" font-size="11" fill="var(--text)">
+        <rect x="20" y="30" width="260" height="80" rx="6" fill="var(--red-soft)" stroke="var(--red)"/>
+        <text x="150" y="55" text-anchor="middle" font-weight="600" fill="var(--red)">不重参</text>
+        <text x="35" y="75" font-size="10">μ, σ → 采样 → z</text>
+        <text x="35" y="92" font-size="10" fill="var(--red)">梯度断在采样</text>
+        <rect x="320" y="30" width="260" height="80" rx="6" fill="var(--module-accent-soft)" stroke="var(--module-accent)"/>
+        <text x="450" y="55" text-anchor="middle" font-weight="600" fill="var(--module-accent)">重参后</text>
+        <text x="335" y="75" font-size="10">ε ~ N（外部）；z = μ + σε</text>
+        <text x="335" y="92" font-size="10" fill="var(--module-accent)">梯度畅通</text>
+      </g>
+    </svg>
+  </section>
+  <section class="concept-interact"><p>双图对比——<strong>不变量</strong>是 z 的边缘分布始终是 $\mathcal{N}(\mu, \sigma^2)$。</p></section>
+  <section class="concept-example">
+    <h2>手算梯度</h2>
+    <p>$\mu = 2, \sigma = 1.5, \epsilon = 0.4 \Rightarrow z = 2.6$, $L = z^2 = 6.76$. $\partial L/\partial\mu = 2z \cdot 1 = 5.2$；$\partial L/\partial\sigma = 2z \cdot \epsilon = 2.08$。</p>
+  </section>
+  <section class="concept-pitfalls">
+    <h2>常见误区</h2>
+    <ol>
+      <li><strong>"仅 Gaussian 可"。</strong>反例：任何 location-scale 族都行（Laplace、uniform）。</li>
+      <li><strong>"加 ε 增噪声"。</strong>反例：随机性原就在；只是挪到外部让梯度可算。</li>
+      <li><strong>"梯度能传 ε"。</strong>反例：ε 不属于计算图，pytorch detach。</li>
+    </ol>
+  </section>
+  <section class="concept-seealso">
+    <h2>相关概念</h2>
+    <ul><li><a href="/concepts/vae-encoder/">VAE Encoder</a></li><li><a href="/concepts/variational-lower-bound/">ELBO</a></li></ul>
+  </section>
+  <section class="concept-sources">
+    <h2>来源</h2>
+    <ol><li><a href="https://www.youtube.com/watch?v=LqQNvuLqyfk&t=480s" target="_blank" rel="noopener">diffusion-principles-vizuara · L9 · VAE reparam · (8:00)</a></li></ol>
+  </section>
+</article>

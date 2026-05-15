@@ -1,0 +1,162 @@
+<style>
+  .ar-vs-diff svg { display: block; margin: 1.2rem auto; max-width: 100%; height: auto; }
+  .ar-vs-diff .clip-frame { max-width: 720px; margin: 1.4rem auto; }
+  .ar-vs-diff .clip-frame iframe { width: 100%; aspect-ratio: 16/9; border: 0; border-radius: 6px; }
+  .ar-vs-diff .clip-frame figcaption { color: var(--text-muted); font-size: 0.85rem; margin-top: 0.4rem; text-align: center; }
+  .ar-vs-diff .note { background: var(--surface-soft); border-left: 3px solid var(--accent); padding: 0.7rem 1rem; margin: 1rem 0; border-radius: 0 4px 4px 0; }
+  .ar-vs-diff .my-addition { background: #fff7d6; border-left: 3px solid var(--m4); padding: 0.7rem 1rem; margin: 1rem 0; border-radius: 0 4px 4px 0; font-size: 0.95rem; }
+  .ar-vs-diff .source-quote { font-style: italic; color: var(--text-muted); border-left: 2px solid var(--border); padding: 0.2rem 0.8rem; margin: 0.6rem 0; font-size: 0.92rem; }
+  .ar-vs-diff table { width: 100%; border-collapse: collapse; margin: 1.4rem 0; font-size: 0.92rem; }
+  .ar-vs-diff th, .ar-vs-diff td { border-bottom: 1px solid var(--border); padding: 0.6rem 0.8rem; text-align: left; vertical-align: top; }
+  .ar-vs-diff th { background: var(--surface-soft); font-weight: 600; }
+</style>
+
+<article class="ar-vs-diff">
+
+<h1>1. 为什么需要扩散？AR 和 Diffusion 的对比</h1>
+
+<p class="lead">这一节的"题眼"不是技术对比，而是 Vizuara 的 Dr. Raj Dandekar 在 Lecture 5 里反复追问的那个反直觉问题——<strong>「为什么只有文本一定要用自回归？图像 / 视频已经投降给 diffusion，为什么语言不行？」</strong>他借了 Andrej Karpathy 的话来锚定研究方向：好研究始于一个看起来"counterintuitive"的问题。这一章我们就钻这个"rabbit hole"。</p>
+
+<h2>1.1 讲师的开篇追问</h2>
+
+<blockquote class="source-quote">「研究者应该问的最好的问题，往往是反直觉的。如果你问『为什么 diffusion 只能用在图像上？我们脑子里是不是有什么偏见？』——你就会一路掉进 rabbit hole，最后可能找到一个新的研究问题、做出有影响力的发现。Karpathy 也在反复问这件事。」</blockquote>
+
+<p>Dr. Raj 还特地点名了 2024 年那篇打开"语言扩散"工业化大门的论文出处：<strong>Cornell University 的 MDLM 团队</strong>（Sahoo et al.），他们在 intro 里直接问<em>"why should images and video generation models have all the fun?"</em>——把这件事从隐性偏见变成了正式研究问题。</p>
+
+<h2>1.2 你以为的「生成」：AR 一字一字</h2>
+
+<p>讲师在 Lecture 6 走到白板前重新讲了一遍 ARM：</p>
+
+<blockquote class="source-quote">「我给模型 prompt `once upon a time`，让它续写。它会怎么做？<strong>它<em>不会</em>同时从所有方向生成 token，它一次只生成下一个</strong>，然后接着前面的输出再预测下一个，再下一个……one token at a time, 而下一个 token 永远依赖于前面所有的 token。」</blockquote>
+
+<p>形式化就是：</p>
+
+$$p(x_1, \dots, x_T) \;=\; \prod_{t=1}^{T} p(x_t \mid x_1, \dots, x_{t-1})$$
+
+<p>这套思路叫 <strong>autoregressive modeling (ARM)</strong>。它统治力的来源是工程优势——训练时 teacher forcing 一次算完所有位置的 loss、推理时 KV cache 让每步只算新 token。简单、可扩展。</p>
+
+<h2>1.3 AR 的具体短板：reversal curse + 推理慢</h2>
+
+<p>讲师给了两个非常具体的 AR 限制：</p>
+
+<h3>反转诅咒（Reversal Curse）</h3>
+
+<blockquote class="source-quote">「问模型『Who is Tom Cruise's mother?』——它能答 Mary Lee。但反过来问『Who is Mary Lee's son?』——它经常答不出来。<strong>这是 reversal reasoning，AR 模型天生很难做。</strong>因为训练时它学的是『前文 → 后文』的单向条件，反向那个方向它从来没显式地学过。」</blockquote>
+
+<h3>推理步数</h3>
+
+<blockquote class="source-quote">「生成同样长度的文本，diffusion 大概要 <strong>14 步</strong>，AR 要 <strong>75 步</strong>——diffusion 推理快得多。」</blockquote>
+
+<p>这两个例子讲师都没用花哨术语，但都是 AR 真正会撞墙的硬限制。</p>
+
+<h2>1.4 Diffusion 的"另一种姿势"</h2>
+
+<p>讲师在 Lecture 5 用了一个简洁的对比框架——<strong>都是在逼近真实语言分布 $p_{\text{data}}(\text{text})$，只是用不同的"路线"</strong>。</p>
+
+<blockquote class="source-quote">「图像我们曾这样想：把图拆成 pixels；扩散模型在 high-dim pixel 空间里学习『有意义的图』的概率分布，然后从中采样。<strong>那同样的事可以搬到文本：把文本拆成 token；扩散在 high-dim token 空间里学『有意义文本』的概率分布</strong>——『有意义』意思是 grammar 和 logic 都对，它们在 high-dim 里只占一小块小空间。」</blockquote>
+
+<svg viewBox="0 0 720 280" role="img" aria-label="AR vs Diffusion 范式对比">
+  <text x="120" y="22" font-size="14" font-weight="600" fill="#0a6e3a">Autoregressive (AR)</text>
+  <text x="490" y="22" font-size="14" font-weight="600" fill="#1d4ed8">Diffusion</text>
+
+  <g transform="translate(20, 40)" font-family="ui-monospace, monospace" font-size="13">
+    <text x="0" y="20">step 1</text>
+    <rect x="50" y="6" width="40" height="20" rx="3" fill="#0a6e3a"/><text x="56" y="21" fill="#fff">从</text>
+    <rect x="92" y="6" width="40" height="20" rx="3" fill="#e8e5db"/>
+    <rect x="134" y="6" width="40" height="20" rx="3" fill="#e8e5db"/>
+    <rect x="176" y="6" width="40" height="20" rx="3" fill="#e8e5db"/>
+    <rect x="218" y="6" width="40" height="20" rx="3" fill="#e8e5db"/>
+
+    <text x="0" y="58">step 2</text>
+    <rect x="50" y="44" width="40" height="20" rx="3" fill="#0a6e3a"/><text x="56" y="59" fill="#fff">从</text>
+    <rect x="92" y="44" width="40" height="20" rx="3" fill="#0a6e3a"/><text x="98" y="59" fill="#fff">前</text>
+    <rect x="134" y="44" width="40" height="20" rx="3" fill="#e8e5db"/>
+    <rect x="176" y="44" width="40" height="20" rx="3" fill="#e8e5db"/>
+    <rect x="218" y="44" width="40" height="20" rx="3" fill="#e8e5db"/>
+
+    <text x="0" y="100">…</text>
+
+    <text x="0" y="134">step 5</text>
+    <rect x="50" y="120" width="40" height="20" rx="3" fill="#0a6e3a"/><text x="56" y="135" fill="#fff">从</text>
+    <rect x="92" y="120" width="40" height="20" rx="3" fill="#0a6e3a"/><text x="98" y="135" fill="#fff">前</text>
+    <rect x="134" y="120" width="40" height="20" rx="3" fill="#0a6e3a"/><text x="140" y="135" fill="#fff">有</text>
+    <rect x="176" y="120" width="40" height="20" rx="3" fill="#0a6e3a"/><text x="182" y="135" fill="#fff">座</text>
+    <rect x="218" y="120" width="40" height="20" rx="3" fill="#0a6e3a"/><text x="224" y="135" fill="#fff">山</text>
+    <text x="0" y="178" font-size="11" fill="#6b6b6b">↑ 75 steps 才生成完，已生成的 token 不可改</text>
+  </g>
+
+  <line x1="370" y1="40" x2="370" y2="240" stroke="#d4d2c8" stroke-dasharray="3,3"/>
+
+  <g transform="translate(390, 40)" font-family="ui-monospace, monospace" font-size="13">
+    <text x="0" y="20">step 1</text>
+    <rect x="50" y="6" width="40" height="20" rx="3" fill="#cfd9eb"/><text x="62" y="21" fill="#6b6b6b">▒</text>
+    <rect x="92" y="6" width="40" height="20" rx="3" fill="#cfd9eb"/><text x="104" y="21" fill="#6b6b6b">▒</text>
+    <rect x="134" y="6" width="40" height="20" rx="3" fill="#cfd9eb"/><text x="146" y="21" fill="#6b6b6b">▒</text>
+    <rect x="176" y="6" width="40" height="20" rx="3" fill="#cfd9eb"/><text x="188" y="21" fill="#6b6b6b">▒</text>
+    <rect x="218" y="6" width="40" height="20" rx="3" fill="#cfd9eb"/><text x="230" y="21" fill="#6b6b6b">▒</text>
+
+    <text x="0" y="58">step 2</text>
+    <rect x="50" y="44" width="40" height="20" rx="3" fill="#9bb4d8"/><text x="58" y="59" fill="#fff">从</text>
+    <rect x="92" y="44" width="40" height="20" rx="3" fill="#cfd9eb"/><text x="104" y="59" fill="#6b6b6b">▒</text>
+    <rect x="134" y="44" width="40" height="20" rx="3" fill="#9bb4d8"/><text x="142" y="59" fill="#fff">有</text>
+    <rect x="176" y="44" width="40" height="20" rx="3" fill="#cfd9eb"/><text x="188" y="59" fill="#6b6b6b">▒</text>
+    <rect x="218" y="44" width="40" height="20" rx="3" fill="#9bb4d8"/><text x="226" y="59" fill="#fff">山</text>
+
+    <text x="0" y="100">…</text>
+
+    <text x="0" y="134">step 5</text>
+    <rect x="50" y="120" width="40" height="20" rx="3" fill="#1d4ed8"/><text x="58" y="135" fill="#fff">从</text>
+    <rect x="92" y="120" width="40" height="20" rx="3" fill="#1d4ed8"/><text x="100" y="135" fill="#fff">前</text>
+    <rect x="134" y="120" width="40" height="20" rx="3" fill="#1d4ed8"/><text x="142" y="135" fill="#fff">有</text>
+    <rect x="176" y="120" width="40" height="20" rx="3" fill="#1d4ed8"/><text x="184" y="135" fill="#fff">座</text>
+    <rect x="218" y="120" width="40" height="20" rx="3" fill="#1d4ed8"/><text x="226" y="135" fill="#fff">山</text>
+    <text x="0" y="178" font-size="11" fill="#6b6b6b">↑ 14 步同时精修；任意位置可重写</text>
+  </g>
+</svg>
+
+<h2>1.5 关键差异表</h2>
+
+<table>
+  <thead>
+    <tr><th></th><th>Autoregressive (AR)</th><th>Diffusion</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>预测目标</td><td>下一个 token</td><td>从噪声 / MASK 还原所有 token</td></tr>
+    <tr><td>推理步数（讲师举例）</td><td>~75 步生同样长文</td><td>~14 步</td></tr>
+    <tr><td>顺序约束</td><td>必须左 → 右</td><td>可任意顺序、可并行</td></tr>
+    <tr><td>infilling</td><td>不原生支持</td><td>原生支持</td></tr>
+    <tr><td>reversal reasoning</td><td>"Mary Lee 的儿子是谁？" 经常答不出</td><td>双向训练 → 更对称</td></tr>
+    <tr><td>错了能改</td><td>不能</td><td>可以——后续步骤会修正</td></tr>
+  </tbody>
+</table>
+
+<h2>1.6 讲师对学习态度的强调</h2>
+
+<p>这门 Vizuara 课贯穿的一个 ethos 是<strong>"from scratch"——从零开始</strong>。讲师在每一节都重申：</p>
+
+<blockquote class="source-quote">「我会展示我自己是怎么学的，包括我直接跟 Gemini 对话的过程。从零开始学某件事，你会知道自己的<em>知识缺口</em>在哪里——这是真正搞懂的方式。」</blockquote>
+
+<div class="my-addition">
+🟡 <strong>教材外补充（讲师本节没讲，后续章节展开）：</strong>
+<ul>
+  <li>图像生成早在 2020 后基本投降给 diffusion——Stable Diffusion、DALL·E 2/3、Imagen、SORA 全是 diffusion 系；PixelCNN 那种纯 AR 图像模型已经被淘汰。</li>
+  <li>语言扩散的真正突破要到 2024 年 MDLM / SEDD / LLaDA，到 2026 年 8B 规模才接近同尺寸 LLaMA。详见 <a href="/textbook/21/">第 21 章</a>。</li>
+  <li>本教材后续路线：Module 1 基础（VAE / ELBO）→ Module 2 DDPM → Module 3 Score → Module 4 Flow Matching → Module 5 采样 + Latent → Module 6 离散与语言扩散，回到 Karpathy 的那个问题。</li>
+</ul>
+</div>
+
+<figure class="clip-frame">
+  <iframe src="https://www.youtube.com/embed/HLet8XCXoKY?start=287" title="Vizuara L7: 14 vs 75 iterations 对比" allowfullscreen></iframe>
+  <figcaption>📺 Vizuara《Diffusion LM from Scratch》Lecture 6（4:47 处）—— 讲师并排展示 AR 75 步 vs Diffusion 14 步</figcaption>
+</figure>
+
+<div class="takeaways">
+  <strong>本章要记住的三件事（讲师亲口给的）</strong>
+  <ul>
+    <li>核心追问（Karpathy 也在问）：<strong>为什么只有文本必须 AR？</strong> 这是个"counterintuitive"问题，钻下去是一个 rabbit hole。</li>
+    <li>具体的 AR 短板：reversal curse（"Mary Lee 的儿子是谁？"）+ 推理慢（75 vs 14 步）。</li>
+    <li>Diffusion 视角：把文本视作 high-dim token space 里的概率分布；"有意义的文本"（grammar + logic 都对）只占一小块，diffusion 学的就是这块的分布。</li>
+  </ul>
+</div>
+
+</article>

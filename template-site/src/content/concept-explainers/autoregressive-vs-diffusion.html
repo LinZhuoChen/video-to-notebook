@@ -1,0 +1,55 @@
+<style>
+/* prefix: ad- */
+.ad-quickref{background:var(--surface-soft);border-left:3px solid var(--module-accent);padding:0.8rem 1rem;border-radius:0 4px 4px 0;margin:1rem 0;font-size:0.92rem;}
+.ad-quickref div{margin:0.3rem 0;}
+.ad-pitfalls ol{padding-left:1.4rem;} .ad-pitfalls li{margin:0.5rem 0;}
+.ad-source{font-style:italic;color:var(--text-muted);border-left:2px solid var(--border);padding:0.2rem 0.8rem;margin:0.5rem 0;font-size:0.9rem;}
+</style>
+<article class="concept-entry">
+  <header class="concept-header">
+    <span class="concept-eyebrow">概念</span>
+    <h1>AR vs Diffusion</h1>
+    <p class="concept-tagline">— 串行 next-token 预测 vs 并行迭代去噪：两种生成范式根本对比。</p>
+  </header>
+  <aside class="ad-quickref">
+    <div><strong>定义</strong> · 比较 AR (从左到右) 和 diffusion (所有 token 并行多步精修)。</div>
+    <div><strong>公式</strong> · AR: $p(x) = \prod p(x_t|x_{<t})$；Diff: $p(x) = \int p(x|z)p(z)dz$。</div>
+    <div><strong>易错</strong> · 不是"性能高低"——是<em>能干什么 / 不能干什么</em>的根本差异。</div>
+  </aside>
+  <section class="concept-intuition">
+    <p>Vizuara《Diffusion LM》课程的全部动机。Dr. Raj 反复引 Karpathy："counterintuitive question"。具体限制（讲师举例）：</p>
+    <div class="ad-source">「Who is Tom Cruise's mother? Mary Lee. 反过来：Who is Mary Lee's son? <strong>reversal reasoning</strong> 模型答不出。」「Diffusion 14 步 vs AR 75 步生同样长文。」—— Vizuara L7</div>
+  </section>
+  <section class="concept-deepdive">
+    <h2>核心对比表</h2>
+    <table style="width:100%; border-collapse:collapse; margin:1rem 0; font-size:0.9rem;">
+      <tr style="background:var(--surface-soft);"><th style="padding:0.4rem;"></th><th style="padding:0.4rem; text-align:left;">AR</th><th style="padding:0.4rem; text-align:left;">Diffusion</th></tr>
+      <tr style="border-top:1px solid var(--border);"><td style="padding:0.4rem;">推理步数</td><td style="padding:0.4rem;">= 序列长度 T</td><td style="padding:0.4rem;">= K ≪ T</td></tr>
+      <tr style="border-top:1px solid var(--border);"><td style="padding:0.4rem;">顺序约束</td><td style="padding:0.4rem;">左→右</td><td style="padding:0.4rem;">任意 / 并行</td></tr>
+      <tr style="border-top:1px solid var(--border);"><td style="padding:0.4rem;">infilling</td><td style="padding:0.4rem;">不原生</td><td style="padding:0.4rem;">原生</td></tr>
+      <tr style="border-top:1px solid var(--border);"><td style="padding:0.4rem;">reversal reasoning</td><td style="padding:0.4rem;">差</td><td style="padding:0.4rem;">双向训练 → 对称</td></tr>
+      <tr style="border-top:1px solid var(--border);"><td style="padding:0.4rem;">能改</td><td style="padding:0.4rem;">不能</td><td style="padding:0.4rem;">能 (re-mask)</td></tr>
+      <tr style="border-top:1px solid var(--border);"><td style="padding:0.4rem;">KV cache</td><td style="padding:0.4rem;">天然适配</td><td style="padding:0.4rem;">部分可</td></tr>
+      <tr style="border-top:1px solid var(--border);"><td style="padding:0.4rem;">RLHF 工具链</td><td style="padding:0.4rem;">成熟</td><td style="padding:0.4rem;">早期</td></tr>
+    </table>
+    <h2>历史脉络</h2>
+    <p>图像 2020 后投降给 diffusion（DALL·E 2/3、SD、SORA）；语言 ARM 仍统治直到 2024 LLaDA/MDLM/SEDD 开始挑战。详见 <a href="/textbook/21/">第 21 章</a>。</p>
+  </section>
+  <section class="concept-interact"><p>对比表——<strong>不变量</strong>是"step 数 × 每步并行度 = 总信息量"。</p></section>
+  <section class="concept-pitfalls">
+    <h2>常见误区</h2>
+    <ol>
+      <li><strong>"AR 适合语言"。</strong>反例：语言只是 token 序列；image 也能 tokenize 后 AR。范式选不是 modality 决定。</li>
+      <li><strong>"diff LM 必快"。</strong>反例：单 step forward 更贵 (full attention)；只是总 forward 少。</li>
+      <li><strong>"底层架构差远"。</strong>反例：现代 diff LM 直接用 LLaMA 架构、改 loss。</li>
+    </ol>
+  </section>
+  <section class="concept-seealso">
+    <h2>相关概念</h2>
+    <ul><li><a href="/concepts/diffusion-language-model/">Diffusion LM</a></li></ul>
+  </section>
+  <section class="concept-sources">
+    <h2>来源</h2>
+    <ol><li><a href="https://www.youtube.com/watch?v=HLet8XCXoKY&t=287s" target="_blank" rel="noopener">diffusion-lm-vizuara · L7 · 14 vs 75 iterations + reversal curse · (4:47)</a></li><li><a href="https://www.youtube.com/watch?v=3awVF05VUuM&t=2s" target="_blank" rel="noopener">diffusion-lm-vizuara · L6 · motivation 开篇 · (0:02)</a></li></ol>
+  </section>
+</article>

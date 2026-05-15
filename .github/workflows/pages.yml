@@ -38,10 +38,10 @@ jobs:
         working-directory: template-site
         run: npm ci
 
-      - name: Build Astro site (English)
+      - name: Build Astro site (zh — matches checked-in VAE demo content)
         working-directory: template-site
         env:
-          PUBLIC_LANGUAGE: en
+          PUBLIC_LANGUAGE: zh
           SITE_URL: https://${{ github.repository_owner }}.github.io
           BASE_PATH: /${{ github.event.repository.name }}/
         run: npm run build

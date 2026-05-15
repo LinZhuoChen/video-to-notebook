@@ -1,1 +1,33 @@
-{"schema_version":"1","explainers":[]}
+{
+  "schema_version": "1",
+  "explainers": [
+    {
+      "slug": "autoregressive-vs-diffusion",
+      "canonical_name": "AR vs Diffusion",
+      "html_fragment": "autoregressive-vs-diffusion.html",
+      "generated_at": "2026-05-14T08:56:05.292668+00:00",
+      "explainer": "claude-code-max:diffusion-textbook-v1"
+    },
+    {
+      "slug": "vae-encoder",
+      "canonical_name": "VAE Encoder",
+      "html_fragment": "vae-encoder.html",
+      "generated_at": "2026-05-14T08:30:00.000000+00:00",
+      "explainer": "claude-code-max:diffusion-textbook-v1"
+    },
+    {
+      "slug": "reparameterization-trick",
+      "canonical_name": "Reparameterization Trick",
+      "html_fragment": "reparameterization-trick.html",
+      "generated_at": "2026-05-14T08:31:00.000000+00:00",
+      "explainer": "claude-code-max:diffusion-textbook-v1"
+    },
+    {
+      "slug": "variational-lower-bound",
+      "canonical_name": "ELBO (Variational Lower Bound)",
+      "html_fragment": "variational-lower-bound.html",
+      "generated_at": "2026-05-14T08:32:00.000000+00:00",
+      "explainer": "claude-code-max:diffusion-textbook-v1"
+    }
+  ]
+}

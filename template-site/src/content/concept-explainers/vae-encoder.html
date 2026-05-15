@@ -1,0 +1,93 @@
+<style>
+/* prefix: ve- */
+.ve-quickref{background:var(--surface-soft);border-left:3px solid var(--module-accent);padding:0.8rem 1rem;border-radius:0 4px 4px 0;margin:1rem 0;font-size:0.92rem;}
+.ve-quickref div{margin:0.3rem 0;}
+.ve-svg{display:block;margin:1.2rem auto;max-width:100%;height:auto;}
+.ve-pitfalls ol{padding-left:1.4rem;} .ve-pitfalls li{margin:0.5rem 0;}
+.ve-source{font-style:italic;color:var(--text-muted);border-left:2px solid var(--border);padding:0.2rem 0.8rem;margin:0.5rem 0;font-size:0.9rem;}
+@keyframes ve-pulse{0%,100%{r:6;}50%{r:9;}}
+.ve-z-dot{animation:ve-pulse 2s ease-in-out infinite;}
+</style>
+
+<article class="concept-entry">
+  <header class="concept-header">
+    <span class="concept-eyebrow">概念</span>
+    <h1>VAE Encoder</h1>
+    <p class="concept-tagline">— 把 x 映成"区域 q(z|x)"而非单点；diffusion 的 latent space 祖宗。</p>
+  </header>
+
+  <aside class="ve-quickref">
+    <div><strong>定义</strong> · 网络输出 $\mu(x), \sigma(x)$ 参数化 $q(z|x) = \mathcal{N}(\mu(x), \sigma(x)^2)$。</div>
+    <div><strong>公式</strong> · loss = 重建 + $\beta \cdot D_{\mathrm{KL}}(q(z|x) \| \mathcal{N}(0, I))$。</div>
+    <div><strong>易错</strong> · 不是 autoencoder 的"加正则版"——目的是从先验采样新数据，不是压缩。</div>
+  </aside>
+
+  <section class="concept-intuition">
+    <p>Vizuara 的 Dr. Raj 在《Principles of Diffusion Models》Lecture 2 用一个特别朴实的比喻把 VAE 讲清楚——<strong>古董魔术机：两个旋钮（slantness + neatness）→ 输出 hello 字体</strong>。问的核心问题：班里 100 个学生写 hello，造一台机器，按一下按钮就吐一张新字体。这是 generative modeling 而不是 autoencoder。</p>
+    <div class="ve-source">「想象班里 100 个学生，每人写 hello。给我造一台机器——按一下吐一个『某学生写的 hello』。」—— Vizuara L9</div>
+    <p>训练里 encoder 对应：网络输入 $x$、输出 $\mu, \sigma$，从 Gaussian 采 $z$（reparameterization），送 decoder，算重建 + KL。</p>
+  </section>
+
+  <section class="concept-deepdive">
+    <h2>关键改动：输出分布、不是点</h2>
+    <p>普通 AE: encoder 是 $f: x \to z$。<strong>VAE encoder: $g: x \to (\mu, \sigma)$</strong>，输出一个分布 $q(z|x)$，然后<em>采样</em>。"采样" 让 KL 项有意义、让训练目标统一在 ELBO 下。</p>
+    <p>Dr. Raj 在 L9 chunk #14 把它叫 "secret recipe"——同一个学生的笔压 + 倾斜 + 速度 + 整洁度等隐藏因素，组合起来定义其字体。这些"隐藏因素"就是 latent variable $z$。</p>
+
+    <svg class="ve-svg" viewBox="0 0 600 200" role="img" aria-label="VAE encoder 输出分布">
+      <g font-family="ui-sans-serif" font-size="11" fill="var(--text)">
+        <rect x="20" y="70" width="80" height="60" rx="4" fill="var(--surface-soft)" stroke="var(--border)"/>
+        <text x="60" y="105" text-anchor="middle">x（hello）</text>
+        <path d="M 105 100 L 195 100" stroke="var(--text-muted)"/>
+        <rect x="200" y="50" width="80" height="40" rx="4" fill="var(--module-accent)"/>
+        <text x="240" y="75" text-anchor="middle" fill="var(--surface)">μ(x)</text>
+        <rect x="200" y="110" width="80" height="40" rx="4" fill="var(--module-accent)"/>
+        <text x="240" y="135" text-anchor="middle" fill="var(--surface)">σ(x)</text>
+        <path d="M 285 70 L 340 95" stroke="var(--text-muted)"/>
+        <path d="M 285 130 L 340 105" stroke="var(--text-muted)"/>
+        <circle cx="370" cy="100" r="20" fill="var(--blue)" class="ve-z-dot"/>
+        <text x="370" y="105" text-anchor="middle" fill="var(--surface)" font-size="10">z ~ N(μ, σ²)</text>
+        <text x="370" y="160" text-anchor="middle" font-size="10" fill="var(--text-muted)">z = μ + σε（reparam）</text>
+        <path d="M 395 100 L 460 100" stroke="var(--text-muted)"/>
+        <rect x="470" y="70" width="80" height="60" rx="4" fill="var(--surface-soft)" stroke="var(--border)"/>
+        <text x="510" y="105" text-anchor="middle">x̂</text>
+      </g>
+    </svg>
+
+    <h2>KL 项的作用</h2>
+    <p>把所有 $q(z|x)$ 整体拉向 $\mathcal{N}(0, I)$——让 z 空间"被填满"、连续无洞。这样从先验采的任意 z 都能 decode 出合理样本。这是 VAE 能"采样新数据"的关键。</p>
+  </section>
+
+  <section class="concept-interact">
+    <p>蓝色 z 点呼吸——表示它<em>每次 forward 都从 q(z|x) 重采</em>。<strong>不变量</strong>：edge distribution 是 $\mathcal{N}(\mu(x), \sigma(x)^2)$。</p>
+  </section>
+
+  <section class="concept-example">
+    <h2>手算重建 + KL</h2>
+    <p>设 $\mu = 0.5, \sigma = 1.2, x = 1, \epsilon = 0.1$。则 $z = 0.5 + 1.2 \cdot 0.1 = 0.62$。$\hat x = z$（简化 decoder），重建 = $(0.62 - 1)^2 = 0.144$。KL = $\frac{1}{2}(0.25 + 1.44 - 1 - \log 1.44) = \frac{1}{2}(0.69 - 0.365) = 0.16$。total = 0.304。</p>
+  </section>
+
+  <section class="concept-pitfalls">
+    <h2>常见误区</h2>
+    <ol>
+      <li><strong>"VAE 是加正则的 AE"。</strong>反例：重建质量通常比 AE 差（KL 是惩罚）；目的是采样不是压缩。</li>
+      <li><strong>"$\sigma$ 必须接近 1"。</strong>反例：纯白图可能 $\sigma \approx 0.1$，复杂图 $\sigma \approx 1.5$。KL 允许变化。</li>
+      <li><strong>"潜空间训完就是 $\mathcal{N}(0, I)$"。</strong>反例：$q(z) = \int q(z|x)p(x)dx$（aggregate posterior）才是；和先验有 gap，这是 VAE 生成质量瓶颈。</li>
+    </ol>
+  </section>
+
+  <section class="concept-seealso">
+    <h2>相关概念</h2>
+    <ul>
+      <li><a href="/concepts/variational-lower-bound/">Variational Lower Bound</a></li>
+      <li><a href="/concepts/reparameterization-trick/">Reparameterization Trick</a></li>
+    </ul>
+  </section>
+
+  <section class="concept-sources">
+    <h2>来源</h2>
+    <ol>
+      <li><a href="https://www.youtube.com/watch?v=LqQNvuLqyfk&t=139s" target="_blank" rel="noopener">diffusion-principles-vizuara · L9 · 「secret recipe / hello / 古董魔术机」 · (2:19)</a></li>
+      <li><a href="https://www.youtube.com/watch?v=LqQNvuLqyfk&t=1304s" target="_blank" rel="noopener">diffusion-principles-vizuara · L9 · 黄点 latent space 动画 · (21:44)</a></li>
+    </ol>
+  </section>
+</article>

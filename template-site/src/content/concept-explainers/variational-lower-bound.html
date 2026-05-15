@@ -1,0 +1,86 @@
+<style>
+/* prefix: vl- */
+.vl-quickref{background:var(--surface-soft);border-left:3px solid var(--module-accent);padding:0.8rem 1rem;border-radius:0 4px 4px 0;margin:1rem 0;font-size:0.92rem;}
+.vl-quickref div{margin:0.3rem 0;}
+.vl-pitfalls ol{padding-left:1.4rem;} .vl-pitfalls li{margin:0.5rem 0;}
+.vl-source{font-style:italic;color:var(--text-muted);border-left:2px solid var(--border);padding:0.2rem 0.8rem;margin:0.5rem 0;font-size:0.9rem;}
+.vl-svg{display:block;margin:1.2rem auto;max-width:100%;height:auto;}
+</style>
+
+<article class="concept-entry">
+  <header class="concept-header">
+    <span class="concept-eyebrow">概念</span>
+    <h1>Variational Lower Bound</h1>
+    <p class="concept-tagline">— ELBO；VAE / diffusion / flow matching 共同的训练目标。</p>
+  </header>
+
+  <aside class="vl-quickref">
+    <div><strong>定义</strong> · $\log p_\theta(x) \geq \mathbb{E}_{q(z|x)}[\log p(x, z) - \log q(z|x)] = \mathrm{ELBO}$。</div>
+    <div><strong>公式</strong> · 拆分：$\mathrm{ELBO} = \mathbb{E}[\log p(x|z)] - D_{\text{KL}}(q(z|x) \| p(z))$。</div>
+    <div><strong>易错</strong> · 最大化 ELBO 同时提升 $\log p(x)$ 和压紧 gap——两件事都好。</div>
+  </aside>
+
+  <section class="concept-intuition">
+    <p>Vizuara Dr. Raj 用"传送猫"作直觉：</p>
+    <div class="vl-source">「想算 p(x)——一只猫的概率。但 p(x) is intractable，因为算它要做积分。这就像把猫从地球传送到火星——你不可能把每个原子都传过去，太多了。所以找一个 L always ≤ p(x)，最大化 L，p(x) 也跟着顶上去。」—— Vizuara L8 #11-12</div>
+  </section>
+
+  <section class="concept-deepdive">
+    <h2>Jensen 推导</h2>
+    <p>$\log p(x) = \log \int p(x, z) dz = \log \int q(z|x) \frac{p(x, z)}{q(z|x)} dz$（Kelly "the greatest trick"）。Jensen ($\log$ 凹)：</p>
+    $$\log p(x) \geq \mathbb{E}_{q(z|x)}\!\left[\log \frac{p(x, z)}{q(z|x)}\right] = \mathrm{ELBO}$$
+    <p>gap = $D_{\text{KL}}(q \| p_\theta(\cdot|x))$。</p>
+
+    <h2>拆成 重建 − KL</h2>
+    $$\mathrm{ELBO} = \mathbb{E}_q[\log p(x|z)] - D_{\text{KL}}(q(z|x) \| p(z))$$
+    <p>VAE 损失就是 negative ELBO。</p>
+
+    <svg class="vl-svg" viewBox="0 0 500 180" role="img" aria-label="ELBO vs log p">
+      <g font-family="ui-sans-serif" font-size="11" fill="var(--text)">
+        <line x1="40" y1="150" x2="450" y2="150" stroke="var(--text-muted)"/>
+        <rect x="80" y="40" width="50" height="110" fill="var(--module-accent)"/>
+        <text x="105" y="170" text-anchor="middle">log p(x)</text>
+        <rect x="170" y="80" width="50" height="70" fill="var(--blue)"/>
+        <text x="195" y="170" text-anchor="middle">ELBO</text>
+        <path d="M 130 50 L 220 90" stroke="var(--red)" stroke-dasharray="3,3"/>
+        <text x="180" y="55" font-size="10" fill="var(--red)">gap = KL(q‖真后验)</text>
+        <text x="270" y="80" font-size="11">最大化 ELBO →</text>
+        <text x="270" y="100" font-size="11">log p 上升 + gap 缩小</text>
+      </g>
+    </svg>
+  </section>
+
+  <section class="concept-interact">
+    <p>蓝 ELBO 顶绿 log p——<strong>不变量</strong> ELBO ≤ log p；两者一起上升。</p>
+  </section>
+
+  <section class="concept-example">
+    <h2>简化算</h2>
+    <p>$p(x|z) = \mathcal{N}(z, 1), p(z) = \mathcal{N}(0, 1), q(z|x) = \mathcal{N}(0.5, 1), x=1$. 采 $z=0.5$. 重建 = $\log \mathcal{N}(1; 0.5, 1) \approx -1.04$；KL = $\frac{1}{2}(\mu^2) = 0.125$. ELBO ≈ $-1.17$.</p>
+  </section>
+
+  <section class="concept-pitfalls">
+    <h2>常见误区</h2>
+    <ol>
+      <li><strong>"ELBO = −loss"。</strong>反例：通常对，但实现里 loss = recon + β·KL，β 可调。</li>
+      <li><strong>"gap 固定"。</strong>反例：gap 随 q 变化，最大化 ELBO 间接逼近真后验。</li>
+      <li><strong>"扩散 ELBO 太多项不能用"。</strong>反例：DDPM 简化成 L_simple MSE。</li>
+    </ol>
+  </section>
+
+  <section class="concept-seealso">
+    <h2>相关概念</h2>
+    <ul>
+      <li><a href="/concepts/vae-encoder/">VAE Encoder</a></li>
+      <li><a href="/concepts/reparameterization-trick/">Reparameterization Trick</a></li>
+    </ul>
+  </section>
+
+  <section class="concept-sources">
+    <h2>来源</h2>
+    <ol>
+      <li><a href="https://www.youtube.com/watch?v=UNNUQ2WzU30&t=679s" target="_blank" rel="noopener">diffusion-principles-vizuara · L8 · "传送猫" ELBO 直觉 · (11:19)</a></li>
+      <li><a href="https://www.youtube.com/watch?v=H-RbhdiWzto&t=2150s" target="_blank" rel="noopener">cmu-10799-diffusion-flow · L3 · "greatest mathematical trick" · (35:50)</a></li>
+    </ol>
+  </section>
+</article>

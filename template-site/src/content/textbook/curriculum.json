@@ -1,1 +1,35 @@
-{"schema_version":"1","chapters":[]}
+{
+  "schema_version": "1",
+  "chapters": [
+    {
+      "order_idx": 1,
+      "module": "Module 1: 直觉与生成模型基础",
+      "title": "为什么需要扩散？AR 和 Diffusion 的对比",
+      "blurb": "从我们熟悉的 ChatGPT 出发，看为什么还要另一种生成范式。",
+      "primary_concept_slug": "autoregressive-vs-diffusion",
+      "related_concept_slugs": [],
+      "status": "synthesized",
+      "html_fragment": "1.html"
+    },
+    {
+      "order_idx": 2,
+      "module": "Module 1: 直觉与生成模型基础",
+      "title": "VAE：把数据压成「潜空间」再生成",
+      "blurb": "第一个真正能生成图片的概率模型，也是后面 latent diffusion 的祖宗。",
+      "primary_concept_slug": "vae-encoder",
+      "related_concept_slugs": ["reparameterization-trick"],
+      "status": "synthesized",
+      "html_fragment": "2.html"
+    },
+    {
+      "order_idx": 3,
+      "module": "Module 1: 直觉与生成模型基础",
+      "title": "ELBO：似然的下界",
+      "blurb": "为什么不能直接优化对数似然，要绕个弯。",
+      "primary_concept_slug": "variational-lower-bound",
+      "related_concept_slugs": [],
+      "status": "synthesized",
+      "html_fragment": "3.html"
+    }
+  ]
+}
