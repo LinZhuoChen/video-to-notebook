@@ -6,8 +6,9 @@ __pycache__/
 .uv/
 dist/
 build/
-# keep the source package — gitignore "build/" would swallow src/course_merger/build/
-!src/course_merger/build/
+# keep the source package — gitignore "build/" would swallow src/video_to_notebook/build/
+!src/video_to_notebook/build/
+!src/video_to_notebook/build/**
 
 # Node / Astro
 node_modules/
@@ -15,7 +16,8 @@ template-site/node_modules/
 template-site/.astro/
 template-site/dist/
 
-# Course-merger runtime state
+# video-to-notebook runtime state
+.video-to-notebook/
 .course-merger/
 site/dist/
 site/node_modules/
