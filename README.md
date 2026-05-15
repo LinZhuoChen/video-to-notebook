@@ -26,26 +26,7 @@ Point it at a few YouTube playlists on the same topic. Your coding agent does th
 
 ## ✨ What you get
 
-```
-Input:  ─────►  YouTube playlists (3+ courses on the same topic)
-                                  │
-                                  ▼
-                ┌─────────────────────────────────────────┐
-                │  📥  crawl   →   yt-dlp + subtitles      │
-                │  🏷️   tag     →   Claude Haiku (per chunk)│
-                │  🔗  cluster →   MiniLM + Claude Sonnet  │
-                │  📐  curriculum  →  in-session Claude    │
-                │  ✍️   synthesize  →  in-session Claude    │
-                │  💡  explain  →   in-session Claude      │
-                │  🎨  build   →   Astro 5 static site     │
-                └─────────────────────────────────────────┘
-                                  │
-                                  ▼
-Output: ─────►  📖 A merged textbook (chapters in pedagogical order)
-                💡 A concept encyclopedia (one rich page per concept)
-                🔎 Cross-course "compare" view + Pagefind search
-                🎬 Click-to-seek deep links into source videos
-```
+<img width="1672" height="941" alt="image" src="https://github.com/user-attachments/assets/1a0f48b5-6c89-438a-9436-51f7f85ea983" />
 
 ## 🧭 Design principles
 
@@ -152,25 +133,8 @@ Total cost for a 5-course corpus: **~$2-4** first run, **$0** on re-runs (idempo
 Every LLM stage (`tag`, `cluster`, `curriculum`, `synthesize`, `explain`) has `--print-prompts` / `--apply-results` flags. Drive the pipeline from inside **Claude Code**, **OpenAI Codex**, **Cursor**, **Continue**, or your own script — no separate API key needed. See [**§ Drive it from your AI coding agent**](#-drive-it-from-your-ai-coding-agent) below for setup.
 
 ## 🏗 How it works
+<img width="1672" height="941" alt="image" src="https://github.com/user-attachments/assets/40f5e8c0-cc4d-4b42-966a-2908393c2aa2" />
 
-```
-                  ┌──────────────────────────────────────────────┐
-                  │       SQLite (.video-to-notebook/db.sqlite)  │
-                  │  courses · lectures · chunks                 │
-                  │  concepts · chunk_concepts · aliases         │
-                  │  curriculum_chapters · concept_explanations  │
-                  └──────────────────────────────────────────────┘
-                          ↑              ↑              ↑
-   ┌──────────┐   crawl   │              │ tag          │ cluster   ┌──────────┐
-   │ yt-dlp   │──────────▶│              │ (Haiku)      │ (Sonnet)  │  build   │
-   │ subtitles│           │              │              │           │ (Astro)  │
-   └──────────┘           │              │              │           └────┬─────┘
-                          │              │              │                │
-                          │  ┌───────────┴──────────────┴─┐              ▼
-                          │  │  curriculum / synthesize /  │      ┌──────────┐
-                          │  │  explain (in-session Claude)│      │ dist/    │ → GitHub Pages
-                          │  └─────────────────────────────┘      └──────────┘
-```
 
 Each subcommand is **idempotent and resumable**:
 
