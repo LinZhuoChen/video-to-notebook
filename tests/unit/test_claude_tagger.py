@@ -5,18 +5,18 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from video_to_notebook.tag.claude_tagger import (
-    ClaudeTagger,
-    TagResult,
-    parse_tagger_response,
-)
-from video_to_notebook.tag.ontology import load_ontology
 from tests.fixtures.tagger_responses import (
     EMPTY,
     GOOD_TWO_TAGS,
     LOW_CONFIDENCE_FILTERED,
     MALFORMED,
 )
+from video_to_notebook.tag.claude_tagger import (
+    ClaudeTagger,
+    TagResult,
+    parse_tagger_response,
+)
+from video_to_notebook.tag.ontology import load_ontology
 
 
 def test_parse_tagger_response_splits_known_and_proposed(fixtures_dir: Path):

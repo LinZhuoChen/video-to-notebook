@@ -10,7 +10,6 @@ from typing import Any
 
 from video_to_notebook.db.session import connect
 from video_to_notebook.explain.prompts import (
-    EXPLAIN_STYLE_GUIDE,
     EXPLAINER_VERSION,
     get_explain_style_guide,
 )

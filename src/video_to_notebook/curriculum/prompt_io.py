@@ -6,9 +6,9 @@ from pathlib import Path
 from typing import Any
 
 from video_to_notebook.curriculum.prompts import (
-    CURRICULUM_INSTRUCTIONS,
     get_curriculum_instructions,
 )
+from video_to_notebook.db.session import connect
 
 
 def _get_language(conn) -> str:
@@ -16,7 +16,7 @@ def _get_language(conn) -> str:
         "SELECT value FROM build_meta WHERE key='language'"
     ).fetchone()
     return row[0] if row else "zh"
-from video_to_notebook.db.session import connect
+
 
 SCHEMA_VERSION = "1"
 DEFAULT_DESIGNER_ID = "claude-code-max:v1"

@@ -5,6 +5,12 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from tests.fixtures.review_responses import (
+    AMBIGUOUS_DECISION,
+    CREATE_DECISION,
+    MERGE_DECISION,
+    REJECT_DECISION,
+)
 from video_to_notebook.cluster.clusterer import Cluster
 from video_to_notebook.cluster.llm_review import (
     ReviewDecision,
@@ -12,12 +18,6 @@ from video_to_notebook.cluster.llm_review import (
     parse_review_response,
 )
 from video_to_notebook.tag.ontology import load_ontology
-from tests.fixtures.review_responses import (
-    AMBIGUOUS_DECISION,
-    CREATE_DECISION,
-    MERGE_DECISION,
-    REJECT_DECISION,
-)
 
 
 @pytest.fixture

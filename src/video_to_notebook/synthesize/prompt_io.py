@@ -4,14 +4,13 @@ from __future__ import annotations
 
 import json
 import shutil
-from collections import Counter, defaultdict
+from collections import defaultdict
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from video_to_notebook.db.session import connect
 from video_to_notebook.synthesize.prompts import (
-    SYNTHESIZE_STYLE_GUIDE,
     get_synthesize_style_guide,
 )
 
