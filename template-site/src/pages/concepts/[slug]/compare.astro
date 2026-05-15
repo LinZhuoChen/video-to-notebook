@@ -26,9 +26,10 @@ for (const lec of lectures) {
   occurrencesByCourse[lec.data.course_slug] ??= [];
   occurrencesByCourse[lec.data.course_slug].push(...hits);
 }
+const base = import.meta.env.BASE_URL;
 ---
 <Base title={`Compare: ${concept.data.canonical_name}`}>
-  <p><a href={`/concepts/${concept.slug}/`}>← back to concept</a></p>
+  <p><a href={`${base}concepts/${concept.slug}/`}>← back to concept</a></p>
   <h1>{concept.data.canonical_name} — across courses</h1>
   <CompareView occurrencesByCourse={occurrencesByCourse} />
 </Base>

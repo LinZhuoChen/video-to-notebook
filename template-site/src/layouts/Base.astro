@@ -7,13 +7,14 @@ interface Props {
 }
 const { title } = Astro.props;
 const htmlLang = currentLanguage === 'en' ? 'en' : 'zh-CN';
+const base = import.meta.env.BASE_URL; // e.g. '/video-to-notebook/' on Pages, '/' locally
 ---
 <!DOCTYPE html>
 <html lang={htmlLang}>
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <link rel="icon" type="image/svg+xml" href={`${base}favicon.svg`} />
   <title>{title} · video-to-notebook</title>
   <link rel="preconnect" href="https://rsms.me/" />
   <link rel="stylesheet" href="https://rsms.me/inter/inter.css" />
@@ -33,7 +34,7 @@ const htmlLang = currentLanguage === 'en' ? 'en' : 'zh-CN';
 </head>
 <body>
   <header class="site-header">
-    <a class="site-logo" href="/" aria-label="video-to-notebook home">
+    <a class="site-logo" href={base} aria-label="video-to-notebook home">
       <svg class="site-logo-glyph" viewBox="0 0 64 64" width="28" height="28"
            aria-hidden="true" focusable="false"
            fill="none" stroke="currentColor" stroke-width="2.8"
@@ -50,10 +51,10 @@ const htmlLang = currentLanguage === 'en' ? 'en' : 'zh-CN';
       <span class="site-logo-text">video<span class="site-logo-sep">-to-</span>notebook</span>
     </a>
     <nav class="site-nav" aria-label="main navigation">
-      <a href="/textbook/">{t.nav_textbook}</a>
-      <a href="/courses/">{t.nav_courses}</a>
-      <a href="/concepts/">{t.nav_concepts}</a>
-      <a href="/about/">{t.nav_about}</a>
+      <a href={`${base}textbook/`}>{t.nav_textbook}</a>
+      <a href={`${base}courses/`}>{t.nav_courses}</a>
+      <a href={`${base}concepts/`}>{t.nav_concepts}</a>
+      <a href={`${base}about/`}>{t.nav_about}</a>
     </nav>
     <div class="site-actions">
       <div id="pagefind-search" class="site-search"></div>
@@ -71,11 +72,11 @@ const htmlLang = currentLanguage === 'en' ? 'en' : 'zh-CN';
     <aside class="mobile-drawer-panel">
       <button class="mobile-drawer-close" data-drawer-close aria-label="close">×</button>
       <nav class="mobile-drawer-nav" aria-label="mobile navigation">
-        <a href="/">{t.nav_home}</a>
-        <a href="/textbook/">{t.nav_textbook}</a>
-        <a href="/courses/">{t.nav_courses}</a>
-        <a href="/concepts/">{t.nav_concepts}</a>
-        <a href="/about/">{t.nav_about}</a>
+        <a href={base}>{t.nav_home}</a>
+        <a href={`${base}textbook/`}>{t.nav_textbook}</a>
+        <a href={`${base}courses/`}>{t.nav_courses}</a>
+        <a href={`${base}concepts/`}>{t.nav_concepts}</a>
+        <a href={`${base}about/`}>{t.nav_about}</a>
       </nav>
       <div class="mobile-drawer-slot" id="mobile-drawer-slot"></div>
     </aside>

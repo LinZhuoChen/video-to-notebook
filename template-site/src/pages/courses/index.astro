@@ -5,13 +5,14 @@ import { getCollection } from 'astro:content';
 const courses = (await getCollection('course')).sort(
   (a, b) => a.data.title.localeCompare(b.data.title),
 );
+const base = import.meta.env.BASE_URL;
 ---
 <Base title="Courses">
   <h1>All Courses</h1>
   <ul class="course-grid">
     {courses.map(c => (
       <li>
-        <a href={`/courses/${c.slug}/`}>
+        <a href={`${base}courses/${c.slug}/`}>
           <strong>{c.data.title}</strong>
         </a>
         <span class="meta">{c.data.platform} · {c.data.lecture_count} lectures</span>

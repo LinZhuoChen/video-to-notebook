@@ -540,7 +540,7 @@ z = mu + std * eps              # 重参数化采样</code></pre>
 
 <h3>12.5 这个 trick 在 DDPM 里也用</h3>
 
-<p>后续 DDPM 里<strong>每一步去噪</strong>的随机采样都依赖重参数化技巧。这个 trick 不是 VAE 独有的——它是<em>所有"含随机变量的可微生成模型"的通用工具</em>。详见 <a href="/concepts/reparameterization-trick/">概念页：重参数化技巧</a>。</p>
+<p>后续 DDPM 里<strong>每一步去噪</strong>的随机采样都依赖重参数化技巧。这个 trick 不是 VAE 独有的——它是<em>所有"含随机变量的可微生成模型"的通用工具</em>。详见 <a href="/video-to-notebook/concepts/reparameterization-trick/">概念页：重参数化技巧</a>。</p>
 
 <h2>十三、VAE 的损失函数（实战）</h2>
 
@@ -628,8 +628,8 @@ def vae_loss(x_recon, x, mu, log_var):
 🟡 <strong>教材外补充（讲师本讲没展开）：</strong>
 <ul>
   <li><strong>β-VAE</strong>：把 loss 改成 $\text{recon} + \beta \cdot \text{KL}$，$\beta > 1$ 强迫 disentangled latent。Higgins et al. 2017 的工作。</li>
-  <li><strong>Latent Diffusion</strong>（Stable Diffusion）= 冻结 VAE 作为 latent space 提供者 + 在 latent 上做 diffusion。详见 <a href="/textbook/18/">第 18 章</a>。</li>
-  <li><strong>VAE → DDPM 的桥梁</strong>：DDPM 把 VAE 的"1 步 latent"扩成"T 步 latent"，每步都是 Gaussian。下一章 <a href="/textbook/3/">ELBO</a> 把这一推广讲清。</li>
+  <li><strong>Latent Diffusion</strong>（Stable Diffusion）= 冻结 VAE 作为 latent space 提供者 + 在 latent 上做 diffusion。</li>
+  <li><strong>VAE → DDPM 的桥梁</strong>：DDPM 把 VAE 的"1 步 latent"扩成"T 步 latent"，每步都是 Gaussian。</li>
 </ul>
 </div>
 

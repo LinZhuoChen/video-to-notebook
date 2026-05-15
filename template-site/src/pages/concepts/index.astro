@@ -58,6 +58,7 @@ for (const it of items) {
 const explainedItems = items.filter(i => i._explained);
 const explainedSectionTitle = currentLanguage === 'en' ? 'Explained' : '已详解';
 const explainedSuffix = currentLanguage === 'en' ? 'with illustrated entries' : '个已配图文详解';
+const base = import.meta.env.BASE_URL;
 ---
 <Base title={t.concepts_encyclopedia}>
   <div class="cx-page">
@@ -76,7 +77,7 @@ const explainedSuffix = currentLanguage === 'en' ? 'with illustrated entries' : 
         <h2 class="cx-section-title">{explainedSectionTitle}</h2>
         <div class="cx-featured-grid">
           {explainedItems.map(c => (
-            <a class="cx-card" href={`/concepts/${c.slug}/`} data-module-idx={c._mIdx || 1}>
+            <a class="cx-card" href={`${base}concepts/${c.slug}/`} data-module-idx={c._mIdx || 1}>
               <span class="cx-card-badge">已详解</span>
               <h3 class="cx-card-title">{c.data.canonical_name}</h3>
               {c.data.description && <p class="cx-card-desc">{c.data.description}</p>}
@@ -97,7 +98,7 @@ const explainedSuffix = currentLanguage === 'en' ? 'with illustrated entries' : 
         <ul class="cx-list">
           {lst.map(c => (
             <li class:list={['cx-item', c._explained ? 'explained' : 'planned']}>
-              <a href={`/concepts/${c.slug}/`}>
+              <a href={`${base}concepts/${c.slug}/`}>
                 <span class="cx-item-name">{c.data.canonical_name}</span>
                 {c._explained && <span class="cx-item-dot" aria-hidden="true"></span>}
                 <span class="cx-item-count">{c.data.occurrence_count}</span>

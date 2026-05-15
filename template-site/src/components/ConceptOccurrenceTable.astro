@@ -15,6 +15,7 @@ const { occurrences } = Astro.props;
 
 const grouped: Record<string, Occurrence[]> = {};
 for (const o of occurrences) (grouped[o.course_slug] ??= []).push(o);
+const base = import.meta.env.BASE_URL;
 ---
 <table class="occurrences">
   <thead>
@@ -25,9 +26,9 @@ for (const o of occurrences) (grouped[o.course_slug] ??= []).push(o);
   <tbody>
     {Object.entries(grouped).map(([course, items]) => items.map(o => (
       <tr>
-        <td><a href={`/courses/${course}/`}><code>{course}</code></a></td>
+        <td><a href={`${base}courses/${course}/`}><code>{course}</code></a></td>
         <td>
-          <a href={`/courses/${course}/${o.lecture_idx}/`}>
+          <a href={`${base}courses/${course}/${o.lecture_idx}/`}>
             L{o.lecture_idx}: {o.lecture_title}
           </a>
         </td>

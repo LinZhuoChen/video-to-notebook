@@ -11,15 +11,16 @@ interface Props {
 }
 const { occurrencesByCourse } = Astro.props;
 const courses = Object.keys(occurrencesByCourse);
+const base = import.meta.env.BASE_URL;
 ---
 <div class="compare-grid" style={`grid-template-columns: repeat(${courses.length}, 1fr);`}>
   {courses.map(course => (
     <div class="compare-col">
-      <h3><a href={`/courses/${course}/`}><code>{course}</code></a></h3>
+      <h3><a href={`${base}courses/${course}/`}><code>{course}</code></a></h3>
       <ol>
         {occurrencesByCourse[course].map(o => (
           <li>
-            <a href={`/courses/${course}/${o.lecture_idx}/`}>
+            <a href={`${base}courses/${course}/${o.lecture_idx}/`}>
               <strong>L{o.lecture_idx}</strong> @ {Math.floor(o.start_sec)}s
             </a>
             <p>{o.text}</p>

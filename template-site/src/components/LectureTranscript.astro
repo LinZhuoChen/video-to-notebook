@@ -10,6 +10,7 @@ interface Props {
   chunks: Chunk[];
 }
 const { chunks } = Astro.props;
+const base = import.meta.env.BASE_URL;
 ---
 <ol class="transcript">
   {chunks.map(c => (
@@ -23,7 +24,7 @@ const { chunks } = Astro.props;
       {c.concept_slugs.length > 0 && (
         <ul class="tags">
           {c.concept_slugs.map(s => (
-            <li><a href={`/concepts/${s}/`}><code>{s}</code></a></li>
+            <li><a href={`${base}concepts/${s}/`}><code>{s}</code></a></li>
           ))}
         </ul>
       )}

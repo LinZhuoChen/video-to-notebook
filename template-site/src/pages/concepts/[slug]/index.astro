@@ -77,11 +77,12 @@ const occurrences = lectures.flatMap(l =>
 );
 
 const courseSlugsForCompare = Array.from(new Set(occurrences.map(o => o.course_slug)));
+const base = import.meta.env.BASE_URL;
 ---
 <Base title={concept.data.canonical_name}>
   <div class="cd-page" data-module-idx={mIdx}>
     <nav class="cd-breadcrumb" aria-label={t.concept_breadcrumb_aria}>
-      <a href="/concepts/">{t.concept_breadcrumb_index}</a>
+      <a href={`${base}concepts/`}>{t.concept_breadcrumb_index}</a>
       <span class="cd-sep">›</span>
       {module && <><span class="cd-module-name">{module}</span><span class="cd-sep">›</span></>}
       <span class="cd-here">{concept.data.canonical_name}</span>
@@ -132,7 +133,7 @@ const courseSlugsForCompare = Array.from(new Set(occurrences.map(o => o.course_s
           <dd>{occurrences.length}</dd>
         </dl>
         {courseSlugsForCompare.length > 1 && (
-          <a class="cd-compare" href={`/concepts/${concept.slug}/compare/?courses=${courseSlugsForCompare.join(',')}`}>
+          <a class="cd-compare" href={`${base}concepts/${concept.slug}/compare/?courses=${courseSlugsForCompare.join(',')}`}>
             {t.concept_compare_link(courseSlugsForCompare.length)}
           </a>
         )}

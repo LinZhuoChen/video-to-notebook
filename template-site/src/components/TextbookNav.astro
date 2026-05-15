@@ -11,6 +11,7 @@ interface Props {
   current: number;
 }
 const { current } = Astro.props;
+const base = import.meta.env.BASE_URL;
 
 let chapters: ChapterMeta[] = [];
 try {
@@ -31,7 +32,7 @@ const done = chapters.filter(c => c.status === 'synthesized').length;
 ---
 <aside class="textbook-nav">
   <div class="nav-header">
-    <a class="nav-title" href="/textbook/">{t.nav_textbook}</a>
+    <a class="nav-title" href={`${base}textbook/`}>{t.nav_textbook}</a>
     <div class="nav-progress">
       <div class="nav-progress-track">
         <div class="nav-progress-fill" style={`width: ${total ? (done * 100 / total) : 0}%`}></div>
@@ -55,7 +56,7 @@ const done = chapters.filter(c => c.status === 'synthesized').length;
           ]}>
             <span class="nav-chapter-num">{ch.order_idx}</span>
             {ch.status === 'synthesized' ? (
-              <a class="nav-chapter-link" href={`/textbook/${ch.order_idx}/`}>{ch.title}</a>
+              <a class="nav-chapter-link" href={`${base}textbook/${ch.order_idx}/`}>{ch.title}</a>
             ) : (
               <span class="nav-chapter-text">{ch.title}</span>
             )}

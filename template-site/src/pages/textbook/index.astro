@@ -18,6 +18,7 @@ for (const ch of chapters) {
 
 const total = chapters.length;
 const done = chapters.filter(c => c.status === 'synthesized').length;
+const base = import.meta.env.BASE_URL;
 ---
 <Base title={t.textbook_toc}>
   <div class="toc-page">
@@ -51,7 +52,7 @@ const done = chapters.filter(c => c.status === 'synthesized').length;
               <div class="toc-chapter-num">{ch.order_idx}</div>
               <div class="toc-chapter-body">
                 {ch.status === 'synthesized' ? (
-                  <a class="toc-chapter-link" href={`/textbook/${ch.order_idx}/`}>
+                  <a class="toc-chapter-link" href={`${base}textbook/${ch.order_idx}/`}>
                     <h3 class="toc-chapter-title">{ch.title}</h3>
                     <p class="toc-chapter-blurb">{ch.blurb}</p>
                   </a>
