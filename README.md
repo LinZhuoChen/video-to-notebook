@@ -107,7 +107,11 @@ No React, no Vue. Astro + 200 lines of vanilla JS. The whole concept page weighs
 
 ## 🚀 Quickstart
 
-### Option A — with an Anthropic API key
+### Option A — no API key, drive from an AI agent
+
+Every LLM stage (`tag`, `cluster`, `curriculum`, `synthesize`, `explain`) has `--print-prompts` / `--apply-results` flags. Drive the pipeline from inside **Claude Code**, **OpenAI Codex**, **Cursor**, **Continue**, or your own script — no separate API key needed. See [**§ Drive it from your AI coding agent**](#-drive-it-from-your-ai-coding-agent) below for setup.
+
+### Option B — with an Anthropic API key
 
 ```bash
 # Install the CLI (Python 3.12+)
@@ -127,10 +131,6 @@ video-to-notebook serve    # http://localhost:4321
 ```
 
 Total cost for a 5-course corpus: **~$2-4** first run, **$0** on re-runs (idempotent).
-
-### Option B — no API key, drive from an AI agent
-
-Every LLM stage (`tag`, `cluster`, `curriculum`, `synthesize`, `explain`) has `--print-prompts` / `--apply-results` flags. Drive the pipeline from inside **Claude Code**, **OpenAI Codex**, **Cursor**, **Continue**, or your own script — no separate API key needed. See [**§ Drive it from your AI coding agent**](#-drive-it-from-your-ai-coding-agent) below for setup.
 
 ## 🏗 How it works
 <img width="1672" height="941" alt="image" src="https://github.com/user-attachments/assets/40f5e8c0-cc4d-4b42-966a-2908393c2aa2" />
