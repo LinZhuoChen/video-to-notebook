@@ -15,18 +15,30 @@ jobs:
         uses: astral-sh/setup-uv@v3
         with:
           version: "latest"
+          enable-cache: true
 
-      - name: Set up Python
+      - name: Set up Python 3.12 via uv
         run: uv python install 3.12
 
+      - name: Create venv
+        run: uv venv --python 3.12 .venv
+
       - name: Install dependencies
-        run: uv pip install --system -e ".[dev]"
+        run: |
+          source .venv/bin/activate
+          uv pip install -e ".[dev]"
 
       - name: Lint
-        run: ruff check .
+        run: |
+          source .venv/bin/activate
+          ruff check .
 
       - name: Type check
-        run: pyright src tests
+        run: |
+          source .venv/bin/activate
+          pyright src tests
 
       - name: Test
-        run: pytest -v --tb=short -m "not e2e"
+        run: |
+          source .venv/bin/activate
+          pytest -v --tb=short -m "not e2e"

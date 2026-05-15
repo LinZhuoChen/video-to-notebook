@@ -1,12 +1,17 @@
 name: Deploy demo to GitHub Pages
 
+# v2.0.0: deploys an empty Astro shell — site chrome, navigation, dark mode,
+# KaTeX, Pagefind index of the about page. Chapters and concept pages surface
+# their empty states. To deploy a populated demo, run the pipeline locally
+# (`bash examples/frontier-notebook/build.sh`) and commit the generated
+# `template-site/src/content/textbook/*.html` + curriculum.json + concept
+# explainer manifest + fragments, then push — the workflow will pick them up.
+
 on:
   push:
     branches: [main]
     paths:
-      - 'examples/frontier-notebook/**'
       - 'template-site/**'
-      - 'src/video_to_notebook/**'
       - '.github/workflows/pages.yml'
   workflow_dispatch:
 
@@ -25,40 +30,29 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@v3
-        with:
-          version: "latest"
-
-      - name: Set up Python
-        run: uv python install 3.12
-
-      - name: Install video-to-notebook
-        run: uv pip install --system -e ".[dev]"
-
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
           node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: template-site/package-lock.json
 
-      - name: Restore corpus cache
-        id: cache-corpus
-        uses: actions/cache@v4
-        with:
-          path: examples/frontier-notebook/.video-to-notebook-project/.video-to-notebook
-          key: corpus-${{ hashFiles('examples/frontier-notebook/courses.toml', 'examples/frontier-notebook/ontology.yaml') }}-v1
+      - name: Install template-site deps
+        working-directory: template-site
+        run: npm ci
 
-      - name: Build the demo
+      - name: Build Astro site (English)
+        working-directory: template-site
         env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          PUBLIC_LANGUAGE: en
           SITE_URL: https://${{ github.repository_owner }}.github.io
           BASE_PATH: /${{ github.event.repository.name }}/
-        run: bash examples/frontier-notebook/build.sh
+        run: npm run build
 
       - name: Upload pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: examples/frontier-notebook/.video-to-notebook-project/site/dist
+          path: template-site/dist
 
       - name: Deploy to GitHub Pages
         id: deployment
