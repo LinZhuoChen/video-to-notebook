@@ -42,11 +42,26 @@ def ensure_site_dir(project_root: Path) -> Path:
 
     # Overlay-sync: copy each file from template into site, overwriting
     # existing copies but never deleting user-added files. Skip the heavy
-    # dirs the template ships without.
+    # dirs the template ships without; also skip the project-generated
+    # content subtrees so `serve` / `build` don't clobber synthesized
+    # chapters or explanations with the bundled demo content.
+    _PROJECT_OWNED_PREFIXES = (
+        Path("src") / "content" / "textbook",
+        Path("src") / "content" / "concept-explainer",
+    )
+
     for root, dirs, files in src.walk() if hasattr(src, "walk") else _walk(src):
         rel = root.relative_to(src)
         # Skip well-known transient dirs.
         if any(part in {"node_modules", "dist", ".astro"} for part in rel.parts):
+            dirs[:] = []
+            continue
+        # Skip project-owned content subtrees on overlay-sync so user data
+        # (curriculum.json, N.html, etc.) is never overwritten by demo files.
+        if any(
+            rel == prefix or prefix in rel.parents
+            for prefix in _PROJECT_OWNED_PREFIXES
+        ):
             dirs[:] = []
             continue
         dst_dir = site / rel
