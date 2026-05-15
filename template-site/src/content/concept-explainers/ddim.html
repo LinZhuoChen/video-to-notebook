@@ -1,0 +1,62 @@
+<style>
+/* prefix: di- */
+.di-quickref{background:var(--surface-soft);border-left:3px solid var(--module-accent);padding:0.8rem 1rem;border-radius:0 4px 4px 0;margin:1rem 0;font-size:0.92rem;}
+.di-quickref div{margin:0.3rem 0;}
+.di-svg{display:block;margin:1.2rem auto;max-width:100%;height:auto;}
+.di-pitfalls ol{padding-left:1.4rem;} .di-pitfalls li{margin:0.5rem 0;}
+.di-source{font-style:italic;color:var(--text-muted);border-left:2px solid var(--border);padding:0.2rem 0.8rem;margin:0.5rem 0;font-size:0.9rem;}
+</style>
+<article class="concept-entry">
+  <header class="concept-header">
+    <span class="concept-eyebrow">概念</span>
+    <h1>DDIM</h1>
+    <p class="concept-tagline">— 同一 DDPM 网络，换确定性采样器；50 步出图、可 image inversion。</p>
+  </header>
+  <aside class="di-quickref">
+    <div><strong>定义</strong> · non-Markovian 反向链，$\sigma_t = 0$ 时完全确定。</div>
+    <div><strong>公式</strong> · $x_{t-1} = \sqrt{\bar\alpha_{t-1}}\hat x_0 + \sqrt{1-\bar\alpha_{t-1}}\hat\epsilon$（$\sigma_t = 0$）。</div>
+    <div><strong>易错</strong> · DDIM <em>不重训</em>，只换 sampler。</div>
+  </aside>
+  <section class="concept-intuition">
+    <p>CMU L7 chunk #0 直接回顾：</p>
+    <div class="di-source">「Last time we learned DDIM which is like a fast sampling technique. We go from time t to t-10 instead of t-1.」—— CMU L6</div>
+    <p>关键洞察 (Song et al. 2020)：同一个 $\epsilon_\theta$，反向过程未必是 DDPM 的 Markov 链。存在一族 non-Markovian 反向链，marginal 分布都一致。$\sigma_t = 0$ 给 DDIM。</p>
+  </section>
+  <section class="concept-deepdive">
+    <h2>跳步可行原因</h2>
+    <p>当 $\sigma_t = 0$ 时反向 step 退化为 PF-ODE 的 Euler 离散化。<strong>跳步 = ODE solver 用粗时间网格</strong>——50 步质量仍够用。</p>
+    <h2>副产品：双射 → 编辑</h2>
+    <p>确定性意味着 $x_T \leftrightarrow x_0$ 双射。两个能力：</p>
+    <ul>
+      <li><strong>Image inversion</strong>：给真实图反向跑得 $x_T$，改 prompt 再 forward → 编辑（SDEdit、ControlNet）。</li>
+      <li><strong>Latent interpolation</strong>：两个 $x_T$ slerp，图像平滑插值。</li>
+    </ul>
+    <svg class="di-svg" viewBox="0 0 500 120" role="img" aria-label="DDPM vs DDIM">
+      <g font-family="ui-sans-serif" font-size="11">
+        <text x="0" y="35" font-weight="600" fill="var(--blue)">DDPM:</text>
+        <rect x="60" y="25" width="400" height="14" fill="var(--blue)" opacity="0.7"/>
+        <text x="260" y="35" text-anchor="middle" fill="var(--surface)" font-size="10">1000 forwards</text>
+        <text x="0" y="80" font-weight="600" fill="var(--module-accent)">DDIM:</text>
+        <rect x="60" y="70" width="50" height="14" fill="var(--module-accent)"/>
+        <text x="85" y="80" text-anchor="middle" fill="var(--surface)" font-size="10">50</text>
+      </g>
+    </svg>
+  </section>
+  <section class="concept-interact"><p>两 bar 对比——<strong>不变量</strong>是<em>同一</em> $\epsilon_\theta$，仅 sampler 不同。</p></section>
+  <section class="concept-pitfalls">
+    <h2>常见误区</h2>
+    <ol>
+      <li><strong>"DDIM 要重训"。</strong>反例：SD 训用 DDPM loss、推理用 DDIM。</li>
+      <li><strong>"步数越少越差"。</strong>反例：50 步质量平台；20 步质量降不多。</li>
+      <li><strong>"DDIM = PF-ODE"。</strong>反例：DDIM 是 PF-ODE 一阶离散化；DPM-Solver 高阶。</li>
+    </ol>
+  </section>
+  <section class="concept-seealso">
+    <h2>相关概念</h2>
+    <ul><li><a href="/video-to-notebook/concepts/latent-diffusion/">Latent Diffusion</a></li><li><a href="/video-to-notebook/concepts/video-diffusion/">Video Diffusion</a></li><li><a href="/video-to-notebook/concepts/classifier-guidance/">Classifier Guidance</a></li><li><a href="/video-to-notebook/concepts/classifier-free-guidance/">CFG</a></li></ul>
+  </section>
+  <section class="concept-sources">
+    <h2>来源</h2>
+    <ol><li><a href="https://www.youtube.com/watch?v=lPipzIG6rkc&t=3s" target="_blank" rel="noopener">cmu-10799-diffusion-flow · L6 · DDIM 回顾 · (0:03)</a></li></ol>
+  </section>
+</article>

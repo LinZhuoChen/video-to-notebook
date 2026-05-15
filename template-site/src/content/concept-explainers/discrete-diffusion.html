@@ -1,0 +1,58 @@
+<style>
+/* prefix: dd- */
+.dd-quickref{background:var(--surface-soft);border-left:3px solid var(--module-accent);padding:0.8rem 1rem;border-radius:0 4px 4px 0;margin:1rem 0;font-size:0.92rem;}
+.dd-quickref div{margin:0.3rem 0;}
+.dd-svg{display:block;margin:1.2rem auto;max-width:100%;height:auto;}
+.dd-pitfalls ol{padding-left:1.4rem;} .dd-pitfalls li{margin:0.5rem 0;}
+.dd-source{font-style:italic;color:var(--text-muted);border-left:2px solid var(--border);padding:0.2rem 0.8rem;margin:0.5rem 0;font-size:0.9rem;}
+</style>
+<article class="concept-entry">
+  <header class="concept-header">
+    <span class="concept-eyebrow">概念</span>
+    <h1>Discrete Diffusion</h1>
+    <p class="concept-tagline">— 用转移矩阵 Q_t 在 token 上"加噪"；语言扩散的母体。</p>
+  </header>
+  <aside class="dd-quickref">
+    <div><strong>定义</strong> · $q(x_t = j | x_{t-1} = i) = [Q_t]_{ij}$。$Q_t$ 选择决定"噪声"含义。</div>
+    <div><strong>公式</strong> · D3PM (Austin et al. 2021) 统一框架。</div>
+    <div><strong>易错</strong> · 不能给 token id 加 Gaussian——4.7 不对应任何 token。</div>
+  </aside>
+  <section class="concept-intuition">
+    <p>CMU L12 开场就把它和连续扩散分开：</p>
+    <div class="dd-source">「So far what we have learned is mostly on the <strong>continuous</strong> side. ... But we have other important modalities, right? For example, molecules or DNA. ... The people from Anthropic claim to me that ICML 2024 has this paper.」—— CMU L11 #2-3</div>
+  </section>
+  <section class="concept-deepdive">
+    <h2>D3PM 框架</h2>
+    <table style="width:100%; border-collapse:collapse; margin:1rem 0; font-size:0.9rem;">
+      <tr style="background:var(--surface-soft);"><th style="padding:0.4rem; text-align:left;">$Q_t$</th><th style="padding:0.4rem; text-align:left;">语义</th><th style="padding:0.4rem; text-align:left;">用例</th></tr>
+      <tr style="border-top:1px solid var(--border);"><td style="padding:0.4rem;">Uniform</td><td style="padding:0.4rem;">小概率换任意 token</td><td style="padding:0.4rem;">D3PM uniform</td></tr>
+      <tr style="border-top:1px solid var(--border);"><td style="padding:0.4rem;"><strong>Absorbing</strong></td><td style="padding:0.4rem;">换 [MASK]</td><td style="padding:0.4rem;">MDLM, LLaDA, SEDD</td></tr>
+      <tr style="border-top:1px solid var(--border);"><td style="padding:0.4rem;">Gaussian-id</td><td style="padding:0.4rem;">附近 id（少用）</td><td style="padding:0.4rem;">—</td></tr>
+    </table>
+    <h2>Absorbing 胜出</h2>
+    <p>语言任务上 absorbing 一骑绝尘——MASK = "this position is undecided" 和 BERT MLM 对齐，可直接复用 transformer。</p>
+    <svg class="dd-svg" viewBox="0 0 500 100" role="img" aria-label="absorbing 加噪">
+      <text x="20" y="30" font-family="ui-mono, monospace">从 前 有 座 山</text>
+      <text x="200" y="30" font-size="14">→</text>
+      <text x="240" y="30" font-family="ui-mono, monospace">从 [M] 有 [M] 山</text>
+      <text x="20" y="70" font-family="ui-mono, monospace">→ ... → [M] [M] [M] [M] [M]</text>
+    </svg>
+  </section>
+  <section class="concept-interact"><p>token 序列逐步 mask——<strong>不变量</strong>是"mask 一旦加入不会变回"（吸收态）。</p></section>
+  <section class="concept-pitfalls">
+    <h2>常见误区</h2>
+    <ol>
+      <li><strong>"= 连续扩散的离散版"。</strong>反例：数学骨架不同——连续 = SDE+score；离散 = CTMC+ratio。</li>
+      <li><strong>"Q_t 必须固定"。</strong>反例：可随 t 变（schedule）。</li>
+      <li><strong>"discrete = categorical only"。</strong>反例：MaskGIT 在 VQ 图像 token 上做 absorbing。</li>
+    </ol>
+  </section>
+  <section class="concept-seealso">
+    <h2>相关概念</h2>
+    <ul><li><a href="/video-to-notebook/concepts/flow-matching/">Flow Matching</a></li><li><a href="/video-to-notebook/concepts/rectified-flow/">Rectified Flow</a></li><li><a href="/video-to-notebook/concepts/masked-diffusion/">Masked Diffusion</a></li><li><a href="/video-to-notebook/concepts/score-entropy-discrete-diffusion/">SEDD</a></li></ul>
+  </section>
+  <section class="concept-sources">
+    <h2>来源</h2>
+    <ol><li><a href="https://www.youtube.com/watch?v=mXEjZblUBPs&t=2s" target="_blank" rel="noopener">cmu-10799-diffusion-flow · L11 · 离散扩散开篇 · (0:02)</a></li></ol>
+  </section>
+</article>

@@ -1,0 +1,113 @@
+<style>
+  .fwd-ch svg { display: block; margin: 1.2rem auto; max-width: 100%; height: auto; }
+  .fwd-ch .clip-frame { max-width: 720px; margin: 1.4rem auto; }
+  .fwd-ch .clip-frame iframe { width: 100%; aspect-ratio: 16/9; border: 0; border-radius: 6px; }
+  .fwd-ch .clip-frame figcaption { color: var(--text-muted); font-size: 0.85rem; margin-top: 0.4rem; text-align: center; }
+  .fwd-ch .note { background: var(--surface-soft); border-left: 3px solid var(--accent); padding: 0.7rem 1rem; margin: 1rem 0; border-radius: 0 4px 4px 0; }
+  .fwd-ch .my-addition { background: #fff7d6; border-left: 3px solid var(--m4); padding: 0.7rem 1rem; margin: 1rem 0; border-radius: 0 4px 4px 0; font-size: 0.95rem; }
+  .fwd-ch .source-quote { font-style: italic; color: var(--text-muted); border-left: 2px solid var(--border); padding: 0.2rem 0.8rem; margin: 0.6rem 0; font-size: 0.92rem; }
+</style>
+
+<article class="fwd-ch">
+
+<h1>4. 前向扩散：把数据慢慢推向噪声</h1>
+
+<p class="lead">"前向扩散"听起来像个训练步骤——其实<strong>它完全不需要训练</strong>。Vizuara 的 Dr. Raj 在 Lecture 3 用一个 Batman 海报变噪声的画面把这件事讲透：encoder 在 VAE 里把图压成 latent，在 diffusion 里它被<em>"repurposed as a diffuser"</em>——重新利用，目标是把任意图打成纯噪声。这一章把他的画面 + 数学骨架都摆出来。</p>
+
+<h2>4.1 讲师的切入：从 VAE encoder 到 diffuser</h2>
+
+<blockquote class="source-quote">「VAE 的 encoder 把图压成 latent。如果我们把它<strong>repurpose</strong>——让它的工作不再是『压到 latent』，而是『破坏掉结构、变成噪声』——那它就变成了一个 <em>diffuser</em>。我们看 Batman 的海报，慢慢加噪声，最后看到的是一片噪声，没人能猜出来这原本是 Batman。它<em>可能来自互联网上任意一张图</em>。」</blockquote>
+
+<p>这就是前向扩散的核心直觉——<strong>把任意数据样本"漂洗"成跟数据无关的纯噪声</strong>。一旦能做到这一点，反向（噪声 → 数据）就有了起点。</p>
+
+<h2>4.2 一步加噪：Pixel 0.5 的例子</h2>
+
+<p>Dr. Raj 拿一张 28×28 = 784 像素的图举例。假设第一个像素值是 0.5：</p>
+
+<blockquote class="source-quote">「我们对这个像素加一点高斯噪声——结果它的值不再是 0.5，可能大于 0.5 也可能小于 0.5。这就是『加噪声』的含义：从一个均值是原值、标准差是 $\beta_1$ 的高斯分布里采一个新值。<strong>对图里 784 个像素都做同样的事</strong>，整张图就被向噪声推了一小步。」</blockquote>
+
+<p>形式化：</p>
+
+$$q(x_t \mid x_{t-1}) = \mathcal{N}\!\big(x_t;\ \sqrt{1-\beta_t}\, x_{t-1},\ \beta_t I\big)$$
+
+<p>$\beta_t$ 是每步的方差，叫 <a href="/video-to-notebook/textbook/5/">noise schedule</a>。常用 $T = 1000$ 步。</p>
+
+<h2>4.3 多步累积：4 个"diffuser"叠起来</h2>
+
+<p>Dr. Raj 画图时用了 4 个 diffuser 串起来表示前向过程：</p>
+
+<blockquote class="source-quote">「第一步加点噪声，第二步再加，到第三第四步——slowly and steadily, 结构就 disappear 了。」</blockquote>
+
+<svg viewBox="0 0 600 160" role="img" aria-label="前向过程：Batman → 噪声">
+  <g font-family="ui-sans-serif" font-size="11" fill="var(--text)">
+    <rect x="20" y="40" width="80" height="60" rx="4" fill="var(--module-accent)"/>
+    <text x="60" y="75" text-anchor="middle" fill="var(--surface)">x₀ (Batman)</text>
+
+    <text x="115" y="75" font-size="18">→</text>
+
+    <rect x="135" y="40" width="80" height="60" rx="4" fill="var(--module-accent)" opacity="0.7"/>
+    <text x="175" y="75" text-anchor="middle" fill="var(--surface)">x₂₅₀</text>
+
+    <text x="230" y="75" font-size="18">→</text>
+
+    <rect x="250" y="40" width="80" height="60" rx="4" fill="var(--module-accent)" opacity="0.5"/>
+    <text x="290" y="75" text-anchor="middle" fill="var(--surface)">x₅₀₀</text>
+
+    <text x="345" y="75" font-size="18">→</text>
+
+    <rect x="365" y="40" width="80" height="60" rx="4" fill="var(--module-accent)" opacity="0.3"/>
+    <text x="405" y="75" text-anchor="middle">x₇₅₀</text>
+
+    <text x="460" y="75" font-size="18">→</text>
+
+    <rect x="480" y="40" width="80" height="60" rx="4" fill="var(--border)"/>
+    <text x="520" y="75" text-anchor="middle">x_T (噪声)</text>
+
+    <text x="300" y="135" text-anchor="middle" font-size="11" fill="var(--text-muted)">每个箭头 = 一个 "diffuser"；累积 T 步 → 纯 N(0, I)</text>
+  </g>
+</svg>
+
+<h2>4.4 跳步公式：训练快的根本</h2>
+
+<p>关键工程性质：<strong>给定 $x_0$，任意 $t$ 步后的 $x_t$ 可以一次性采</strong>，不必逐步跑。证明用 Gaussian 链的累积：</p>
+
+$$q(x_t \mid x_0) = \mathcal{N}\!\big(\sqrt{\bar\alpha_t}\, x_0,\ (1-\bar\alpha_t) I\big), \quad \bar\alpha_t = \prod_{s=1}^t (1-\beta_s)$$
+
+<p>用 reparameterization：</p>
+
+$$x_t = \sqrt{\bar\alpha_t}\, x_0 + \sqrt{1-\bar\alpha_t}\, \epsilon, \quad \epsilon \sim \mathcal{N}(0, I)$$
+
+<div class="note">
+🛠️ <strong>训练时这个公式做什么</strong>：每个 batch，随机采 $t$、采 $\epsilon$，<strong>一次乘加</strong>合成 $x_t$，让网络从 $x_t$ 估 $\epsilon$。<strong>不需要真的把 1000 步跑完</strong>。这是 DDPM 训练快的根本。
+</div>
+
+<h2>4.5 信噪比视角</h2>
+
+<p>把 $x_t = \sqrt{\bar\alpha_t}\, x_0 + \sqrt{1-\bar\alpha_t}\, \epsilon$ 拆成"信号 + 噪声"：</p>
+
+<ul>
+  <li>信号权重：$\sqrt{\bar\alpha_t}$，从 1 降到 0</li>
+  <li>噪声权重：$\sqrt{1-\bar\alpha_t}$，从 0 升到 1</li>
+</ul>
+
+<p>信噪比 $\mathrm{SNR}(t) = \bar\alpha_t / (1-\bar\alpha_t)$ 单调下降。下一章的 <a href="/video-to-notebook/textbook/5/">noise schedule</a> 控制的就是这条曲线的形状。</p>
+
+<div class="my-addition">
+🟡 <strong>教材外补充：</strong>"diffuser" 这个比喻 Dr. Raj 是从物理扩散（particle 在房间里运动）借来的——他在 chunk #19 提到 "particles which are created, they are moving through space"。原始 DDPM 论文 (Ho et al. 2020) 也是从 non-equilibrium thermodynamics（Sohl-Dickstein 2015）借来的概念。Dr. Raj 还在 chunk #16 提到这篇 DDPM 论文当时已有 32,000 引用。
+</div>
+
+<figure class="clip-frame">
+  <iframe src="https://www.youtube.com/embed/UNNUQ2WzU30?start=1498" title="Vizuara L8: Batman → 噪声" allowfullscreen></iframe>
+  <figcaption>📺 Vizuara《Principles of Diffusion Models》Lecture 3（24:58 处）—— Batman 海报变噪声</figcaption>
+</figure>
+
+<div class="takeaways">
+  <strong>本章要记住的三件事（讲师亲口给的）</strong>
+  <ul>
+    <li>前向扩散 = encoder "repurposed as a diffuser"：把任意数据漂洗成噪声。<strong>零参数、不需要训练</strong>。</li>
+    <li>单步加噪 = 对每个像素从 $\mathcal{N}(\sqrt{1-\beta_t}\cdot\text{原值}, \beta_t)$ 重采。所有 784 像素独立做。</li>
+    <li>跳步公式 $x_t = \sqrt{\bar\alpha_t}\, x_0 + \sqrt{1-\bar\alpha_t}\, \epsilon$ 是训练快的秘密——一次乘加跳到任意 t。</li>
+  </ul>
+</div>
+
+</article>

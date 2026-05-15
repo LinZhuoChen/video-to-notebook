@@ -1,0 +1,86 @@
+<style>
+  .cfg-ch svg { display: block; margin: 1.2rem auto; max-width: 100%; height: auto; }
+  .cfg-ch .clip-frame { max-width: 720px; margin: 1.4rem auto; }
+  .cfg-ch .clip-frame iframe { width: 100%; aspect-ratio: 16/9; border: 0; border-radius: 6px; }
+  .cfg-ch .clip-frame figcaption { color: var(--text-muted); font-size: 0.85rem; margin-top: 0.4rem; text-align: center; }
+  .cfg-ch .my-addition { background: #fff7d6; border-left: 3px solid var(--m4); padding: 0.7rem 1rem; margin: 1rem 0; border-radius: 0 4px 4px 0; font-size: 0.95rem; }
+  .cfg-ch .source-quote { font-style: italic; color: var(--text-muted); border-left: 2px solid var(--border); padding: 0.2rem 0.8rem; margin: 0.6rem 0; font-size: 0.92rem; }
+</style>
+
+<article class="cfg-ch">
+
+<h1>17. Classifier-Free Guidance</h1>
+
+<p class="lead">CMU L7 chunk #4-9 走出一条从"unconditional diffusion → conditional generation → 不用 classifier"的递进。讲师在 chunk #8 用 "dark hair or different hair" 当具体例子讨论条件嵌入。<strong>CFG 的核心：训练时随机 drop 条件、采样时混合 conditional + unconditional 预测</strong>——所有现代 T2I 模型的 prompt-following 基石。</p>
+
+<h2>17.1 先看老式 classifier guidance</h2>
+
+<p>Dhariwal & Nichol 2021 ("Diffusion Beats GANs")：</p>
+
+$$\nabla \log p(x|y) = \nabla \log p(x) + w \cdot \nabla \log p(y|x)$$
+
+<p>第二项要训一个 noise-robust classifier $p_\phi(y|x_t)$ —— 工程上很丑。</p>
+
+<h2>17.2 CFG：把 classifier 去掉</h2>
+
+<p>Ho & Salimans 2022：让<strong>同一个</strong> diffusion 网络支持 conditional 和 unconditional 两种 mode（训练时 10% 概率 drop label/text）。采样时：</p>
+
+$$\hat\epsilon = (1+w)\,\epsilon_\theta(x, t, y) - w\,\epsilon_\theta(x, t, \varnothing)$$
+
+<p>第二项 $\epsilon(x, y) - \epsilon(x, \varnothing) \propto \nabla \log p(y|x)$ —— <strong>隐式实现 classifier guidance，无需额外模型</strong>。</p>
+
+<svg viewBox="0 0 600 200" role="img" aria-label="CFG 向量加法">
+  <g font-family="ui-sans-serif" font-size="11" fill="var(--text)">
+    <line x1="50" y1="170" x2="550" y2="170" stroke="var(--text-muted)"/>
+
+    <g transform="translate(100, 170)">
+      <line x1="0" y1="0" x2="50" y2="-50" stroke="var(--blue)" stroke-width="2"/>
+      <text x="60" y="-40" fill="var(--blue)" font-size="10">ε(x, ∅)</text>
+    </g>
+
+    <g transform="translate(300, 170)">
+      <line x1="0" y1="0" x2="50" y2="-80" stroke="var(--module-accent)" stroke-width="2"/>
+      <text x="60" y="-70" fill="var(--module-accent)" font-size="10">ε(x, y)</text>
+    </g>
+
+    <g transform="translate(500, 170)">
+      <line x1="0" y1="0" x2="40" y2="-130" stroke="var(--red)" stroke-width="3"/>
+      <text x="-50" y="-120" fill="var(--red)" font-size="10" font-weight="600">CFG (w=2)</text>
+    </g>
+
+    <text x="300" y="30" text-anchor="middle" font-size="11">把 conditional 那边「拉长」</text>
+  </g>
+</svg>
+
+<h2>17.3 CFG scale 取舍</h2>
+
+<table style="width:100%; border-collapse:collapse; margin:1rem 0; font-size:0.92rem;">
+  <tr style="background:var(--surface-soft);"><th style="padding:0.5rem; text-align:left;">w</th><th style="padding:0.5rem; text-align:left;">现象</th></tr>
+  <tr style="border-top:1px solid var(--border);"><td style="padding:0.5rem;">0</td><td style="padding:0.5rem;">prompt 几乎无效</td></tr>
+  <tr style="border-top:1px solid var(--border);"><td style="padding:0.5rem;"><strong>5-10</strong></td><td style="padding:0.5rem;">SD 默认；质量 + fidelity 平衡</td></tr>
+  <tr style="border-top:1px solid var(--border);"><td style="padding:0.5rem;">15+</td><td style="padding:0.5rem;">过饱和、形状崩坏</td></tr>
+</table>
+
+<div class="my-addition">
+🟡 <strong>教材外补充：</strong>
+<ul>
+  <li>CFG 让每 step 要 forward<em>两次</em>（带 prompt + 不带）。SD 50 步 = 100 次 backbone forward。这就是 SDXL Turbo / Flux Schnell 做 "CFG distillation" 的动机。</li>
+  <li>SD3 paper 明确说 "flow matching + CFG 都必要"——CFG 是 sampling-time trick，与训练 loss 正交。</li>
+</ul>
+</div>
+
+<figure class="clip-frame">
+  <iframe src="https://www.youtube.com/embed/lPipzIG6rkc?start=215" title="CMU L7: 从 unconditional 到 CFG" allowfullscreen></iframe>
+  <figcaption>📺 CMU 10799 Lecture 7（3:35 处）—— conditional generation 的引入</figcaption>
+</figure>
+
+<div class="takeaways">
+  <strong>本章要记住的三件事</strong>
+  <ul>
+    <li>CFG = 训练时 drop label + 采样时混 conditional/unconditional。无需额外 classifier。</li>
+    <li>隐式实现 classifier guidance，所有现代 T2I 都用它。</li>
+    <li>w 是质量-多样性旋钮；SD 默认 5-10；过大会饱和崩坏。</li>
+  </ul>
+</div>
+
+</article>

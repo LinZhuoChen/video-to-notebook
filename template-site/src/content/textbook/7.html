@@ -1,0 +1,117 @@
+<style>
+  .ddpm-ch svg { display: block; margin: 1.2rem auto; max-width: 100%; height: auto; }
+  .ddpm-ch .clip-frame { max-width: 720px; margin: 1.4rem auto; }
+  .ddpm-ch .clip-frame iframe { width: 100%; aspect-ratio: 16/9; border: 0; border-radius: 6px; }
+  .ddpm-ch .clip-frame figcaption { color: var(--text-muted); font-size: 0.85rem; margin-top: 0.4rem; text-align: center; }
+  .ddpm-ch .note { background: var(--surface-soft); border-left: 3px solid var(--accent); padding: 0.7rem 1rem; margin: 1rem 0; border-radius: 0 4px 4px 0; }
+  .ddpm-ch .my-addition { background: #fff7d6; border-left: 3px solid var(--m4); padding: 0.7rem 1rem; margin: 1rem 0; border-radius: 0 4px 4px 0; font-size: 0.95rem; }
+  .ddpm-ch .source-quote { font-style: italic; color: var(--text-muted); border-left: 2px solid var(--border); padding: 0.2rem 0.8rem; margin: 0.6rem 0; font-size: 0.92rem; }
+  .ddpm-ch pre.algo { background: #1f1f1f; color: #f6f4ee; padding: 1rem; border-radius: 6px; font-size: 0.85rem; line-height: 1.5; overflow-x: auto; }
+</style>
+
+<article class="ddpm-ch">
+
+<h1>7. DDPM 全貌</h1>
+
+<p class="lead">Vizuara《Principles of Diffusion Models》Lecture 3 讲 DDPM 理论，Lecture 4 讲 DDPM Practical——butterflies 数据集 + 完整代码。讲师开场原话："The last lecture focused on theory. Now we'll take a practical example and see how DDPM is applied." 这一章把两讲拼起来，再加 DDPM 原论文（Ho et al. 2020，32k 引用）的 $L_{\text{simple}}$ 简化。</p>
+
+<h2>7.1 三件套（讲师的拼图）</h2>
+
+<ol>
+  <li><strong>前向过程</strong> $q(x_t|x_{t-1})$：零参数 Gaussian 链。每步：$x_t = \sqrt{1-\beta_t}\, x_{t-1} + \sqrt{\beta_t}\, \epsilon$。Dr. Raj 用 <em>α² + β² = 1</em> 的约束保证方差守恒。</li>
+  <li><strong>神经网络</strong> $\epsilon_\theta(x_t, t)$：通常是 U-Net 或 DiT。输入污染过的 $x_t$ 和时间 $t$，输出对噪声的估计。</li>
+  <li><strong>反向采样</strong>：从 $x_T \sim \mathcal{N}(0, I)$ 开始，每步从 $p_\theta(x_{t-1}|x_t)$ 采，迭代 T 次回到数据。</li>
+</ol>
+
+<h2>7.2 关键魔法：$L_{\text{simple}}$</h2>
+
+<p>朴素 ELBO 展开是 $T$ 项 KL——Kelly 老师当场说过 "<em>This chain of chaos is elegant in theory but doesn't work well, it's too complicated</em>"。Ho et al. 2020 做了两步简化：</p>
+
+<ol>
+  <li>把网络重参数化为<strong>预测噪声 $\hat\epsilon$</strong>（而不是预测均值 $\mu$）。两者等价。</li>
+  <li><strong>丢掉</strong> $t$ 相关系数。论文实测发现丢掉后采样质量反而更好。</li>
+</ol>
+
+<div class="note" style="font-size: 1.05rem;">
+$$\boxed{\;L_{\text{simple}} = \mathbb{E}_{x_0, t, \epsilon}\!\left[\|\epsilon - \epsilon_\theta(\sqrt{\bar\alpha_t} x_0 + \sqrt{1-\bar\alpha_t}\epsilon,\ t)\|^2\right]\;}$$
+</div>
+
+<p>用大白话：<strong>"给一张污染过的图，让网络猜出加进去的噪声"</strong>。就是 regression。</p>
+
+<h2>7.3 训练代码（讲师 Vizuara L7 的实现思路）</h2>
+
+<pre class="algo">
+for x0 in dataloader:                                  # butterflies, 32x32
+    t = torch.randint(1, T+1, (x0.shape[0],))          # 每张图独立 t
+    eps = torch.randn_like(x0)                         # 独立噪声
+    alpha_bar = alphas_cumprod[t]                      # 查 schedule
+    x_t = sqrt(alpha_bar) * x0 + sqrt(1-alpha_bar) * eps  # 一次性合成
+    eps_hat = model(x_t, t)                            # 一次 forward
+    loss = F.mse_loss(eps_hat, eps)                    # MSE
+    loss.backward(); optimizer.step()
+</pre>
+
+<p>三行核心算法。<strong>不需要把 1000 步真的跑出来</strong>——靠 <a href="/video-to-notebook/textbook/4/">第 4 章</a> 的跳步公式。</p>
+
+<h2>7.4 采样：T 步反向迭代</h2>
+
+<pre class="algo">
+x = torch.randn(shape)                                  # x_T ~ N(0, I)
+for t in reversed(range(1, T+1)):
+    eps_hat = model(x, t)
+    mu = (x - beta_t / sqrt(1-alpha_bar_t) * eps_hat) / sqrt(alpha_t)
+    z = torch.randn_like(x) if t > 1 else 0
+    x = mu + sqrt(beta_t) * z                            # x_{t-1}
+return x                                                # x_0
+</pre>
+
+<p>这就是 <strong>ancestral sampler</strong>——慢，因为 T = 1000 次 forward。<a href="/video-to-notebook/concepts/ddim/">DDIM</a>、DPM-Solver 等都是为了把它压到 20-50 步。</p>
+
+<svg viewBox="0 0 600 200" role="img" aria-label="DDPM 训练 / 采样全貌">
+  <g font-family="ui-sans-serif" font-size="11" fill="var(--text)">
+    <rect x="20" y="30" width="270" height="150" rx="6" fill="var(--module-accent-soft)" stroke="var(--module-accent)"/>
+    <text x="155" y="50" text-anchor="middle" font-weight="600" fill="var(--module-accent)">训练循环（每 batch）</text>
+    <text x="35" y="75" font-size="11">① 采 x₀, t, ε</text>
+    <text x="35" y="95" font-size="11">② 合成 x_t = √α̅·x₀ + √(1−α̅)·ε</text>
+    <text x="35" y="115" font-size="11">③ ε̂ = ε_θ(x_t, t)</text>
+    <text x="35" y="135" font-size="11">④ loss = ‖ε − ε̂‖²</text>
+    <text x="35" y="160" font-size="10" fill="var(--text-muted)">3 行 PyTorch。</text>
+
+    <rect x="310" y="30" width="270" height="150" rx="6" fill="var(--blue-soft)" stroke="var(--blue)"/>
+    <text x="445" y="50" text-anchor="middle" font-weight="600" fill="var(--blue)">采样循环（一张图）</text>
+    <text x="325" y="75" font-size="11">① x_T ~ N(0, I)</text>
+    <text x="325" y="95" font-size="11">② for t = T..1:</text>
+    <text x="335" y="115" font-size="10" fill="var(--text-muted)">　ε̂ = ε_θ(x_t, t)</text>
+    <text x="335" y="132" font-size="10" fill="var(--text-muted)">　mu = (...)；采 z ~ N</text>
+    <text x="335" y="149" font-size="10" fill="var(--text-muted)">　x_{t-1} = mu + √β̃·z</text>
+    <text x="325" y="172" font-size="11">③ 返回 x₀</text>
+  </g>
+</svg>
+
+<h2>7.5 历史 + 引用规模</h2>
+
+<p>Dr. Raj 特地点名："这篇 DDPM 论文（Ho et al. 2020）有 <strong>32,000 引用</strong>，是 diffusion 工业化最重要的一篇。在它之前 diffusion 概念早就有（Sohl-Dickstein 2015），但没人证明它能产生 realistic images——是 Ho et al. 把它做出来的。"</p>
+
+<div class="my-addition">
+🟡 <strong>教材外补充：</strong>
+<ul>
+  <li>为什么 $\epsilon$-prediction 比 $x_0$-prediction 稳：目标量 $\epsilon \sim \mathcal{N}(0, I)$ 对所有 $t$ 同尺度；$x_0$ 在 $t$ 大时几乎要从纯噪声"凭空猜"，梯度乱跳。详见 <a href="/video-to-notebook/concepts/epsilon-prediction/">概念页</a>。</li>
+  <li>FID 数字（CIFAR-10 32×32）：DDPM 3.17；同期 GAN ~5；Improved DDPM 2.94；EDM 1.9。10 天 V100×8 训完。</li>
+</ul>
+</div>
+
+<figure class="clip-frame">
+  <iframe src="https://www.youtube.com/embed/oWzbgwzn2QY?start=70" title="Vizuara L7: DDPM Practical（butterflies）" allowfullscreen></iframe>
+  <figcaption>📺 Vizuara《Principles of Diffusion Models》Lecture 4（1:10 处）—— DDPM 在 butterflies 上完整代码</figcaption>
+</figure>
+
+<div class="takeaways">
+  <strong>本章要记住的三件事（讲师亲口给的）</strong>
+  <ul>
+    <li>DDPM = 前向（写死）+ U-Net（预测噪声）+ 反向迭代采样。<strong>α² + β² = 1 保证方差守恒</strong>。</li>
+    <li>$L_{\text{simple}}$ = ELBO 经过"ε-参数化 + 丢系数"得到的极简 MSE on noise。</li>
+    <li>Vizuara L4 用 butterflies (32×32) 完整跑了一遍代码；Ho et al. 2020 已有 32k 引用，是 diffusion 工业化的起点。</li>
+  </ul>
+</div>
+
+</article>

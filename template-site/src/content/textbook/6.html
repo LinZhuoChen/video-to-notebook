@@ -1,0 +1,102 @@
+<style>
+  .rev-ch svg { display: block; margin: 1.2rem auto; max-width: 100%; height: auto; }
+  .rev-ch .clip-frame { max-width: 720px; margin: 1.4rem auto; }
+  .rev-ch .clip-frame iframe { width: 100%; aspect-ratio: 16/9; border: 0; border-radius: 6px; }
+  .rev-ch .clip-frame figcaption { color: var(--text-muted); font-size: 0.85rem; margin-top: 0.4rem; text-align: center; }
+  .rev-ch .note { background: var(--surface-soft); border-left: 3px solid var(--m5); padding: 0.7rem 1rem; margin: 1rem 0; border-radius: 0 4px 4px 0; }
+  .rev-ch .my-addition { background: #fff7d6; border-left: 3px solid var(--m4); padding: 0.7rem 1rem; margin: 1rem 0; border-radius: 0 4px 4px 0; font-size: 0.95rem; }
+  .rev-ch .source-quote { font-style: italic; color: var(--text-muted); border-left: 2px solid var(--border); padding: 0.2rem 0.8rem; margin: 0.6rem 0; font-size: 0.92rem; }
+</style>
+
+<article class="rev-ch">
+
+<h1>6. 反向去噪：从噪声里恢复数据</h1>
+
+<p class="lead">直觉以为"反向过程就是前向倒着跑"。<strong>Dr. Raj 在 Lecture 3 直接拷问这个想法</strong>：「既然前向是 mean × α + 加 β 噪声，那反向不就是 upscale 回 α、再减掉 β 噪声？」——讲师然后告诉你为什么不行，引出真正的反向：一连串可学的 decoder + ELBO 训练。</p>
+
+<h2>6.1 Naive 想法：把前向逆运算</h2>
+
+<blockquote class="source-quote">「The first intuition is — 反向不就是把前向那步反过来？前向是 mean × α + β·噪声。那为什么反向不能就是 upscale by α、remove β noise from each pixel？」</blockquote>
+
+<p>问题：<strong>"β·噪声"那一项是随机采的，反向时你不知道当时具体采了什么 ε</strong>。前向丢失了信息。所以你不能解析地反算出 $x_{t-1}$；只能<em>用模型估计期望</em>。</p>
+
+<h2>6.2 真正的反向：一连串可学的 decoder</h2>
+
+<blockquote class="source-quote">「This is not like a one-time denoising step like we did for VAE. There are a series of decoders here with trainable parameters. <strong>The essence of DDPM lies in the ability to reverse the controlled diffusion</strong>.」</blockquote>
+
+<p>形式化：反向也是 Markov 链，每一步参数化为条件 Gaussian：</p>
+
+$$p_\theta(x_{t-1} \mid x_t) = \mathcal{N}\!\big(x_{t-1};\ \mu_\theta(x_t, t),\ \Sigma_t\big)$$
+
+<p>方差通常固定（用 $\beta_t I$ 或 $\tilde\beta_t I$）；<strong>真正要学的只有均值 $\mu_\theta$</strong>。</p>
+
+<svg viewBox="0 0 600 180" role="img" aria-label="反向：一连串 trainable decoder">
+  <g font-family="ui-sans-serif" font-size="11" fill="var(--text)">
+    <rect x="20" y="60" width="60" height="60" rx="4" fill="var(--border)"/>
+    <text x="50" y="95" text-anchor="middle">x_T</text>
+
+    <path d="M 85 90 L 115 90" stroke="var(--red)" marker-end="url(#rev-ar)"/>
+    <text x="100" y="80" text-anchor="middle" font-size="9" fill="var(--red)">p_θ</text>
+
+    <rect x="120" y="60" width="60" height="60" rx="4" fill="var(--module-accent)" opacity="0.4"/>
+    <text x="150" y="95" text-anchor="middle">x_{T-1}</text>
+
+    <text x="190" y="95" font-size="14">…</text>
+
+    <rect x="220" y="60" width="60" height="60" rx="4" fill="var(--module-accent)" opacity="0.7"/>
+    <text x="250" y="95" text-anchor="middle">x_2</text>
+
+    <path d="M 285 90 L 315 90" stroke="var(--red)" marker-end="url(#rev-ar)"/>
+
+    <rect x="320" y="60" width="60" height="60" rx="4" fill="var(--module-accent)" opacity="0.85"/>
+    <text x="350" y="95" text-anchor="middle">x_1</text>
+
+    <path d="M 385 90 L 415 90" stroke="var(--red)" marker-end="url(#rev-ar)"/>
+
+    <rect x="420" y="60" width="60" height="60" rx="4" fill="var(--module-accent)"/>
+    <text x="450" y="95" text-anchor="middle" fill="var(--surface)">x_0</text>
+
+    <text x="300" y="150" text-anchor="middle" font-size="11" fill="var(--text-muted)">每个红箭头 = 神经网络 forward 一次（共享参数 θ）</text>
+    <defs><marker id="rev-ar" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--red)"/></marker></defs>
+  </g>
+</svg>
+
+<h2>6.3 训练目标：让 $p_\theta(x_{t-1}|x_t)$ 接近 $q(x_{t-1}|x_t, x_0)$</h2>
+
+<p>$q(x_{t-1}|x_t)$ 没有解析解（要积分掉 $x_0$）。<strong>但偷看 $x_0$ 就有</strong>：$q(x_{t-1}|x_t, x_0) = \mathcal{N}(\tilde\mu_t, \tilde\beta_t I)$。$\tilde\mu_t$ 是 $x_t, x_0$ 的线性组合（闭式）。</p>
+
+<p>训练目标——让模型 $\mu_\theta(x_t, t)$ 逼近真实后验均值 $\tilde\mu_t(x_t, x_0)$。Dr. Raj 在 chunk #59-60：</p>
+
+<blockquote class="source-quote">「This is the KL divergence between two probabilities. <strong>Our prediction should match... as close as possible</strong>. Our neural network will predict 'how do we actually go from x_2 to x_1'.」</blockquote>
+
+<h2>6.4 ELBO 视角</h2>
+
+<p>把整个反向链的 log likelihood 拆开（<a href="/video-to-notebook/textbook/3/">第 3 章</a>给出 ELBO 推导）：</p>
+
+$$\log p_\theta(x_0) \;\geq\; \sum_{t=1}^T -\mathbb{E}_q[D_{\mathrm{KL}}(q(x_{t-1}|x_t, x_0) \| p_\theta(x_{t-1}|x_t))] + \text{const}$$
+
+<p>每一步是一个 KL 项，全部加起来 = total loss。下一章 (<a href="/video-to-notebook/textbook/7/">DDPM 全貌</a>) 会看到这堆 KL 怎么被简化成"预测噪声的 MSE"。</p>
+
+<div class="my-addition">
+🟡 <strong>教材外补充：</strong>
+<ul>
+  <li>方差 $\Sigma_t$ 默认固定，但 Improved DDPM 让它也可学，FID 从 3.17 降到 2.94。这是 Vizuara 没展开的工程优化。</li>
+  <li>采样时用 ancestral sampler 就是 $T$ 次 forward；<a href="/video-to-notebook/concepts/ddim/">DDIM</a>、<a href="/video-to-notebook/concepts/consistency-models/">Consistency Models</a> 等都在压步数。</li>
+</ul>
+</div>
+
+<figure class="clip-frame">
+  <iframe src="https://www.youtube.com/embed/UNNUQ2WzU30?start=3211" title="Vizuara L8: 反向去噪 + KL 目标" allowfullscreen></iframe>
+  <figcaption>📺 Vizuara《Principles of Diffusion Models》Lecture 3（53:31 处）—— 反向 + 训练目标</figcaption>
+</figure>
+
+<div class="takeaways">
+  <strong>本章要记住的三件事（讲师亲口给的）</strong>
+  <ul>
+    <li>"naïve 反向 = 前向的逆运算" 不行——因为前向加的噪声丢失了，反向只能<em>估期望</em>。</li>
+    <li>反向是 a series of decoders with trainable parameters；每一步参数化为条件 Gaussian，均值由网络给出。</li>
+    <li>训练目标：让 $p_\theta(x_{t-1}|x_t)$ 通过 KL 逼近真实后验 $q(x_{t-1}|x_t, x_0)$——这是 ELBO 拆开后的每个组成项。</li>
+  </ul>
+</div>
+
+</article>

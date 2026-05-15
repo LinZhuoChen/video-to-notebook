@@ -1,0 +1,65 @@
+<style>
+/* prefix: se- */
+.se-quickref{background:var(--surface-soft);border-left:3px solid var(--module-accent);padding:0.8rem 1rem;border-radius:0 4px 4px 0;margin:1rem 0;font-size:0.92rem;}
+.se-quickref div{margin:0.3rem 0;}
+.se-pitfalls ol{padding-left:1.4rem;} .se-pitfalls li{margin:0.5rem 0;}
+.se-source{font-style:italic;color:var(--text-muted);border-left:2px solid var(--border);padding:0.2rem 0.8rem;margin:0.5rem 0;font-size:0.9rem;}
+.se-svg{display:block;margin:1.2rem auto;max-width:100%;height:auto;}
+</style>
+<article class="concept-entry">
+  <header class="concept-header">
+    <span class="concept-eyebrow">概念</span>
+    <h1>Score-Entropy Discrete Diffusion</h1>
+    <p class="concept-tagline">— SEDD：用相邻状态的概率比率（concrete score）+ score-entropy loss 训语言扩散。</p>
+  </header>
+  <aside class="se-quickref">
+    <div><strong>定义</strong> · concrete score $s(x, y) = p_t(y)/p_t(x)$，相邻状态比率。</div>
+    <div><strong>公式</strong> · score-entropy loss（KL-like），不需要 $p_t$ 本身。</div>
+    <div><strong>易错</strong> · 不是 MDLM 别名——理论起点不同，absorbing case 等价。</div>
+  </aside>
+  <section class="concept-intuition">
+    <p>CMU L12 chunk #7：</p>
+    <div class="se-source">「Flow matching is pretty much the same thing, but instead of learning the score function directly, [SEDD] learns 概率比率 the discrete equivalent.」—— CMU L11 #7</div>
+    <p>Lou & Ermon 2024 把 score-based 视角搬到离散——这是第一个在 perplexity 上能和 GPT-2 medium 接近的 diffusion LM。</p>
+  </section>
+  <section class="concept-deepdive">
+    <h2>concrete score</h2>
+    <p>连续：score = $\nabla \log p$ —— 需要梯度。离散没有。<strong>替代：相邻状态的概率比率</strong>：</p>
+    $$s(x, y) := \frac{p_t(y)}{p_t(x)} \quad \text{对每对相邻 } (x, y)$$
+    <p>"相邻" = $Q_t$ 允许的转移（absorbing 下 = 仅替换一个位置的 token）。</p>
+    <h2>Score-entropy loss</h2>
+    <p>KL-like 散度让模型 $s_\theta$ 学到 ground-truth ratio。<strong>关键</strong>：只用已知 $Q_t$，不需要 $p_t$ 本身——工程可行。</p>
+    <svg class="se-svg" viewBox="0 0 500 130" role="img" aria-label="concrete score">
+      <circle cx="120" cy="70" r="25" fill="var(--blue)"/>
+      <text x="120" y="75" text-anchor="middle" fill="var(--surface)">x</text>
+      <text x="120" y="115" text-anchor="middle" font-size="10">p(x)=0.3</text>
+      <circle cx="290" cy="50" r="22" fill="var(--module-accent)"/>
+      <text x="290" y="55" text-anchor="middle" fill="var(--surface)">y₁</text>
+      <text x="290" y="25" text-anchor="middle" font-size="10">p=0.15</text>
+      <circle cx="380" cy="90" r="22" fill="var(--module-accent)"/>
+      <text x="380" y="95" text-anchor="middle" fill="var(--surface)">y₂</text>
+      <text x="380" y="120" text-anchor="middle" font-size="10">p=0.6</text>
+      <path d="M 145 65 L 270 52" stroke="var(--red)" stroke-dasharray="3,3"/>
+      <text x="200" y="45" font-size="10" fill="var(--red)">s=0.5</text>
+      <path d="M 145 75 L 360 88" stroke="var(--red)" stroke-dasharray="3,3"/>
+      <text x="220" y="92" font-size="10" fill="var(--red)">s=2.0</text>
+    </svg>
+  </section>
+  <section class="concept-interact"><p>双邻居 + 比率——<strong>不变量</strong>是 ratio 是相对的，不是绝对概率。</p></section>
+  <section class="concept-pitfalls">
+    <h2>常见误区</h2>
+    <ol>
+      <li><strong>"SEDD = MDLM 别名"。</strong>反例：理论不同（score matching vs ELBO）；absorbing 下等价。</li>
+      <li><strong>"网络直接输出 ratio"。</strong>反例：架构上要专门支持 ratio 参数化。</li>
+      <li><strong>"必超 ARM"。</strong>反例：SEDD-medium ≈ GPT-2 medium；尚未超越。</li>
+    </ol>
+  </section>
+  <section class="concept-seealso">
+    <h2>相关概念</h2>
+    <ul><li><a href="/video-to-notebook/concepts/discrete-diffusion/">Discrete Diffusion</a></li><li><a href="/video-to-notebook/concepts/masked-diffusion/">Masked Diffusion</a></li></ul>
+  </section>
+  <section class="concept-sources">
+    <h2>来源</h2>
+    <ol><li><a href="https://www.youtube.com/watch?v=mXEjZblUBPs&t=379s" target="_blank" rel="noopener">cmu-10799-diffusion-flow · L11 · concrete score · (6:19)</a></li></ol>
+  </section>
+</article>

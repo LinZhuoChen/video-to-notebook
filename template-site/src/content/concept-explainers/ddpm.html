@@ -1,0 +1,106 @@
+<style>
+/* prefix: ddpm- */
+.ddpm-quickref{background:var(--surface-soft);border-left:3px solid var(--module-accent);padding:0.8rem 1rem;border-radius:0 4px 4px 0;margin:1rem 0;font-size:0.92rem;}
+.ddpm-quickref div{margin:0.3rem 0;}
+.ddpm-svg{display:block;margin:1.2rem auto;max-width:100%;height:auto;}
+.ddpm-pitfalls ol{padding-left:1.4rem;} .ddpm-pitfalls li{margin:0.5rem 0;}
+.ddpm-source{font-style:italic;color:var(--text-muted);border-left:2px solid var(--border);padding:0.2rem 0.8rem;margin:0.5rem 0;font-size:0.9rem;}
+@keyframes ddpm-noise{0%{opacity:1;}100%{opacity:0.2;}}
+.ddpm-cell{animation:ddpm-noise 4s ease-in-out infinite alternate;}
+</style>
+
+<article class="concept-entry">
+  <header class="concept-header">
+    <span class="concept-eyebrow">概念</span>
+    <h1>DDPM</h1>
+    <p class="concept-tagline">— 用一个 U-Net 预测每步加进去的噪声，反向迭代即可生成。32k 引用的里程碑论文。</p>
+  </header>
+
+  <aside class="ddpm-quickref">
+    <div><strong>定义</strong> · Denoising Diffusion Probabilistic Model (Ho et al. 2020)，离散时间 Gaussian 扩散。</div>
+    <div><strong>公式</strong> · $L_{\text{simple}} = \mathbb{E}_{x_0, t, \epsilon}[\|\epsilon - \epsilon_\theta(x_t, t)\|^2]$</div>
+    <div><strong>易错</strong> · 反向过程不是「前向倒过来跑」——必须神经网络学的条件分布。</div>
+  </aside>
+
+  <section class="concept-intuition">
+    <p>Vizuara 的 Dr. Raj 在 L8 用<strong>"Batman 海报 → 噪声"</strong>把前向直觉讲透——encoder "repurposed as a diffuser"，慢慢加噪声、结构 disappear，最后 no one 能猜出原图。L7 进入实战："The last lecture focused on theory, now we'll take a practical example"——butterflies 32×32 数据集，完整代码跑通。</p>
+    <div class="ddpm-source">「This paper（Ho et al. 2020）has 32,000 citations, an incredibly popular paper. Diffusion existed before but no one had proven it could generate realistic images.」—— Vizuara L8</div>
+    <p>训练里 DDPM 对应：合成 $x_t$ → 网络 forward → MSE on noise。Sampling：从 $\mathcal{N}(0, I)$ 开始迭代 T 步。</p>
+  </section>
+
+  <section class="concept-deepdive">
+    <h2>三件套</h2>
+    <ol>
+      <li><strong>前向</strong>：$q(x_t|x_{t-1}) = \mathcal{N}(\sqrt{1-\beta_t}x_{t-1}, \beta_t I)$，零参数。Vizuara 强调 $\alpha^2 + \beta^2 = 1$ 保证方差守恒。</li>
+      <li><strong>网络</strong> $\epsilon_\theta(x_t, t)$：U-Net 或 DiT，输入 $(x_t, t)$，输出噪声估计。</li>
+      <li><strong>反向</strong>：从 $x_T \sim \mathcal{N}(0, I)$ 起，迭代 T 步用 $p_\theta(x_{t-1}|x_t)$ 采样。</li>
+    </ol>
+
+    <h2>$L_{\text{simple}}$ 的来源</h2>
+    <p>朴素 ELBO 是 T 项 KL，Kelly (CMU L3) 当场说 "this chain of chaos is elegant in theory but doesn't work well"。Ho et al. 简化两步：(1) 把网络改成预测 $\epsilon$，(2) 丢掉 t 相关系数。剩下的就是 MSE。</p>
+
+    <svg class="ddpm-svg" viewBox="0 0 600 130" role="img" aria-label="DDPM 前向 / 反向">
+      <g font-family="ui-sans-serif" font-size="11" fill="var(--text)">
+        <rect x="20" y="50" width="60" height="50" rx="3" fill="var(--module-accent)"/>
+        <text x="50" y="80" text-anchor="middle" fill="var(--surface)">x₀</text>
+        <rect x="100" y="50" width="60" height="50" rx="3" fill="var(--module-accent)" opacity="0.7" class="ddpm-cell"/>
+        <text x="130" y="80" text-anchor="middle" fill="var(--surface)">x_{t}</text>
+        <rect x="180" y="50" width="60" height="50" rx="3" fill="var(--module-accent)" opacity="0.3"/>
+        <text x="210" y="80" text-anchor="middle">x_T</text>
+
+        <path d="M 85 75 L 95 75" stroke="var(--text-muted)" marker-end="url(#ddpm-ar)"/>
+        <path d="M 165 75 L 175 75" stroke="var(--text-muted)" marker-end="url(#ddpm-ar)"/>
+        <text x="130" y="35" text-anchor="middle" font-size="10" fill="var(--text-muted)">前向 q（零参数）</text>
+
+        <path d="M 175 110 L 165 110" stroke="var(--red)" marker-end="url(#ddpm-ar2)"/>
+        <path d="M 95 110 L 85 110" stroke="var(--red)" marker-end="url(#ddpm-ar2)"/>
+        <text x="130" y="125" text-anchor="middle" font-size="10" fill="var(--red)">反向 p_θ（要学）</text>
+
+        <text x="270" y="60" font-size="11">关键：跳步</text>
+        <text x="270" y="80" font-size="11">$x_t = \sqrt{\bar\alpha_t} x_0 + \sqrt{1-\bar\alpha_t}\epsilon$</text>
+        <text x="270" y="100" font-size="10" fill="var(--text-muted)">一次合成任意 t，训练不必跑 T 次</text>
+
+        <defs>
+          <marker id="ddpm-ar" markerWidth="5" markerHeight="5" refX="4" refY="2.5" orient="auto"><path d="M0,0 L5,2.5 L0,5 Z" fill="var(--text-muted)"/></marker>
+          <marker id="ddpm-ar2" markerWidth="5" markerHeight="5" refX="4" refY="2.5" orient="auto"><path d="M0,0 L5,2.5 L0,5 Z" fill="var(--red)"/></marker>
+        </defs>
+      </g>
+    </svg>
+  </section>
+
+  <section class="concept-interact">
+    <p>动画方块从清晰到模糊呼吸 ——<strong>不变量</strong>是 $\sqrt{\bar\alpha_t}\, x_0 + \sqrt{1-\bar\alpha_t}\, \epsilon$ 任意 t 都成立。</p>
+  </section>
+
+  <section class="concept-example">
+    <h2>手算一步 forward</h2>
+    <p>设 $\bar\alpha_2 = 0.64$，$x_0 = 2, \epsilon = 1$。$x_2 = \sqrt{0.64}\cdot 2 + \sqrt{0.36}\cdot 1 = 0.8\cdot 2 + 0.6\cdot 1 = 2.2$。</p>
+  </section>
+
+  <section class="concept-pitfalls">
+    <h2>常见误区</h2>
+    <ol>
+      <li><strong>"反向 = 前向倒过来"。</strong>反例：前向加的 $\epsilon$ 是随机的，丢失了；反向只能估期望。$q(x_{t-1}|x_t)$ 无解析解。</li>
+      <li><strong>"T = 1000 是必要的"。</strong>反例：DDIM 50 步、CM 4 步都能产高质量样本。T 大只是数学方便。</li>
+      <li><strong>"$\epsilon$-prediction 和 $x_0$-prediction 是不同模型"。</strong>反例：通过 Tweedie 互转。</li>
+    </ol>
+  </section>
+
+  <section class="concept-seealso">
+    <h2>相关概念</h2>
+    <ul>
+      <li><a href="/video-to-notebook/concepts/forward-process/">Forward Diffusion Process</a></li>
+      <li><a href="/video-to-notebook/concepts/reverse-process/">Reverse Diffusion Process</a></li>
+      <li><a href="/video-to-notebook/concepts/epsilon-prediction/">Epsilon Prediction</a></li>
+      <li><a href="/video-to-notebook/concepts/simple-loss-objective/">Simple Loss</a></li>
+    </ul>
+  </section>
+
+  <section class="concept-sources">
+    <h2>来源</h2>
+    <ol>
+      <li><a href="https://www.youtube.com/watch?v=UNNUQ2WzU30&t=995s" target="_blank" rel="noopener">diffusion-principles-vizuara · L8 · DDPM 论文 32k 引用 · (16:35)</a></li>
+      <li><a href="https://www.youtube.com/watch?v=oWzbgwzn2QY&t=70s" target="_blank" rel="noopener">diffusion-principles-vizuara · L7 · butterflies 代码 · (1:10)</a></li>
+    </ol>
+  </section>
+</article>

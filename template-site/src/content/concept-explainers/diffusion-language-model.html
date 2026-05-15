@@ -1,0 +1,69 @@
+<style>
+/* prefix: dl- */
+.dl-quickref{background:var(--surface-soft);border-left:3px solid var(--module-accent);padding:0.8rem 1rem;border-radius:0 4px 4px 0;margin:1rem 0;font-size:0.92rem;}
+.dl-quickref div{margin:0.3rem 0;}
+.dl-svg{display:block;margin:1.2rem auto;max-width:100%;height:auto;}
+.dl-pitfalls ol{padding-left:1.4rem;} .dl-pitfalls li{margin:0.5rem 0;}
+.dl-source{font-style:italic;color:var(--text-muted);border-left:2px solid var(--border);padding:0.2rem 0.8rem;margin:0.5rem 0;font-size:0.9rem;}
+</style>
+<article class="concept-entry">
+  <header class="concept-header">
+    <span class="concept-eyebrow">概念</span>
+    <h1>Diffusion Language Model</h1>
+    <p class="concept-tagline">— 用扩散范式取代自回归做语言生成；LLaDA / DiffuLLaMA / SEDD 是代表。</p>
+  </header>
+  <aside class="dl-quickref">
+    <div><strong>定义</strong> · LM 解码器是离散扩散过程；并行预测被 mask 的 token。</div>
+    <div><strong>公式</strong> · 训练用 MDLM 加权 CE 或 SEDD score-entropy。</div>
+    <div><strong>易错</strong> · 同规模 PPL 略输 ARM；真正卖点是 infilling + 并行解码 + self-correction。</div>
+  </aside>
+  <section class="concept-intuition">
+    <p>Vizuara《Diffusion LM from Scratch》整个课程围绕这个概念。Dr. Raj 在 L1 直接致敬 Karpathy：</p>
+    <div class="dl-source">「Karpathy 反复问 — why isn't diffusion the default option for language?」—— Vizuara L2</div>
+    <p>Vizuara 在 L17 给出 Colab 实操："H100 GPU is much faster. If you don't have Colab Pro, start with T4 - budget mode runs only 2,000 steps."</p>
+  </section>
+  <section class="concept-deepdive">
+    <h2>2026 现状</h2>
+    <table style="width:100%; border-collapse:collapse; margin:1rem 0; font-size:0.9rem;">
+      <tr style="background:var(--surface-soft);"><th style="padding:0.4rem; text-align:left;">模型</th><th style="padding:0.4rem; text-align:left;">参数</th><th style="padding:0.4rem; text-align:left;">vs ARM</th></tr>
+      <tr style="border-top:1px solid var(--border);"><td style="padding:0.4rem;">SEDD-medium</td><td style="padding:0.4rem;">~400M</td><td style="padding:0.4rem;">≈ GPT-2 medium PPL</td></tr>
+      <tr style="border-top:1px solid var(--border);"><td style="padding:0.4rem;">MDLM</td><td style="padding:0.4rem;">~170M</td><td style="padding:0.4rem;">略低于 GPT-2 small</td></tr>
+      <tr style="border-top:1px solid var(--border);"><td style="padding:0.4rem;">DiffuLLaMA</td><td style="padding:0.4rem;">7B</td><td style="padding:0.4rem;">~ LLaMA 7B × 1.5</td></tr>
+      <tr style="border-top:1px solid var(--border);"><td style="padding:0.4rem;"><strong>LLaDA</strong></td><td style="padding:0.4rem;">8B</td><td style="padding:0.4rem;">某些 benchmark 追平 LLaMA-3 8B</td></tr>
+    </table>
+    <h2>真正卖点（不是 PPL）</h2>
+    <ol>
+      <li><strong>原生 infilling</strong>：填中间和填首尾同一算法。</li>
+      <li><strong>任意顺序生成</strong>：先 confidence 高的填。</li>
+      <li><strong>并行解码</strong>：每 step 预测所有 mask 位置（throughput 5-10x）。</li>
+      <li><strong>Self-correction</strong>：填错可 re-mask 再填。</li>
+    </ol>
+    <svg class="dl-svg" viewBox="0 0 500 110" role="img" aria-label="throughput 对比">
+      <g font-family="ui-sans-serif" font-size="11">
+        <text x="0" y="30" font-weight="600" fill="var(--blue)">ARM:</text>
+        <rect x="60" y="20" width="400" height="14" fill="var(--blue)" opacity="0.7"/>
+        <text x="260" y="30" text-anchor="middle" fill="var(--surface)" font-size="10">1000 forwards</text>
+        <text x="0" y="75" font-weight="600" fill="var(--module-accent)">Diff LM:</text>
+        <rect x="60" y="65" width="50" height="14" fill="var(--module-accent)"/>
+        <text x="85" y="75" text-anchor="middle" fill="var(--surface)" font-size="10">~50</text>
+      </g>
+    </svg>
+  </section>
+  <section class="concept-interact"><p>两 bar——<strong>不变量</strong>是 diffusion LM 的 forward 次数与序列长度<em>解耦</em>。</p></section>
+  <section class="concept-pitfalls">
+    <h2>常见误区</h2>
+    <ol>
+      <li><strong>"已追上 ARM"。</strong>反例：仍输 PPL；LLaDA 某些 benchmark 追平不等于整体 SOTA。</li>
+      <li><strong>"必然 SOTA"。</strong>反例：scaling 验证未现；可能像 Bayesian NN 一样长期"理论优雅但工业小众"。</li>
+      <li><strong>"训练快"。</strong>反例：每 batch 要采 mask + forward + 加权 CE——单 step 比 ARM 慢一点。</li>
+    </ol>
+  </section>
+  <section class="concept-seealso">
+    <h2>相关概念</h2>
+    <ul><li><a href="/video-to-notebook/concepts/masked-diffusion/">Masked Diffusion</a></li><li><a href="/video-to-notebook/concepts/ddpm/">DDPM</a></li><li><a href="/video-to-notebook/concepts/parallel-decoding/">Parallel Decoding</a></li><li><a href="/video-to-notebook/concepts/noise-schedule/">Noise Schedule</a></li></ul>
+  </section>
+  <section class="concept-sources">
+    <h2>来源</h2>
+    <ol><li><a href="https://www.youtube.com/watch?v=RqT8j_Bj8SA&t=4s" target="_blank" rel="noopener">diffusion-lm-vizuara · L2 · Intro to Diffusion LM · (0:04)</a></li><li><a href="https://www.youtube.com/watch?v=Q5xUMQVF1U0&t=2s" target="_blank" rel="noopener">diffusion-lm-vizuara · L17 · Colab 实操 · (0:02)</a></li></ol>
+  </section>
+</article>

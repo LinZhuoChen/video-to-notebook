@@ -16,7 +16,7 @@ Point it at a few YouTube playlists on the same topic. Your coding agent does th
 [![Built for Claude Code](https://img.shields.io/badge/built_for-Claude_Code-D97757?logo=anthropic&logoColor=white)](https://claude.com/claude-code)
 [![Built for OpenAI Codex](https://img.shields.io/badge/built_for-OpenAI_Codex-10A37F?logo=openai&logoColor=white)](https://github.com/openai/codex)
 
-[**Live demo: VAE chapter**](https://linzhuochen.github.io/video-to-notebook/textbook/1/) · [**Quickstart**](#-quickstart) · [**How it works**](#-how-it-works) · [**Use with Claude Code / Codex / any agent**](#-drive-it-from-your-ai-coding-agent) · [**Roadmap**](#-roadmap)
+[**Live demo: VAE chapter**](https://linzhuochen.github.io/video-to-notebook/textbook/2/) · [**Quickstart**](#-quickstart) · [**How it works**](#-how-it-works) · [**Use with Claude Code / Codex / any agent**](#-drive-it-from-your-ai-coding-agent) · [**Roadmap**](#-roadmap)
 
 ---
 

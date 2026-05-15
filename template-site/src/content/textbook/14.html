@@ -1,0 +1,76 @@
+<style>
+  .rf-ch svg { display: block; margin: 1.2rem auto; max-width: 100%; height: auto; }
+  .rf-ch .clip-frame { max-width: 720px; margin: 1.4rem auto; }
+  .rf-ch .clip-frame iframe { width: 100%; aspect-ratio: 16/9; border: 0; border-radius: 6px; }
+  .rf-ch .clip-frame figcaption { color: var(--text-muted); font-size: 0.85rem; margin-top: 0.4rem; text-align: center; }
+  .rf-ch .my-addition { background: #fff7d6; border-left: 3px solid var(--m4); padding: 0.7rem 1rem; margin: 1rem 0; border-radius: 0 4px 4px 0; font-size: 0.95rem; }
+  .rf-ch .source-quote { font-style: italic; color: var(--text-muted); border-left: 2px solid var(--border); padding: 0.2rem 0.8rem; margin: 0.6rem 0; font-size: 0.92rem; }
+</style>
+
+<article class="rf-ch">
+
+<h1>14. Rectified Flow：把轨迹拉直</h1>
+
+<p class="lead">CMU L10 整堂课主题是 distillation / consistency / flow maps。讲师在 chunk #1-3 提出："Suppose we already have a pre-trained diffusion model. <strong>Train a new model such that one step replaces what used to take multiple steps</strong>." Rectified Flow 走的是一种递归式蒸馏——把"上一轮模型的轨迹"作为下一轮的训练数据。</p>
+
+<h2>14.1 为什么直线 FM 训完轨迹仍然弯</h2>
+
+<p>FM 训的是<strong>条件</strong>速度 $x_1 - x_0$。模型实际拟合的是<strong>期望</strong>速度 $\mathbb{E}[x_1 - x_0 | x_t]$。两个不同的 $(x_0, x_1)$ pair 经过同一 $x_t$ 时，期望速度会"平均"——结果学到的速度场让轨迹弯曲。</p>
+
+<h2>14.2 Reflow 算法</h2>
+
+<ol>
+  <li>普通 FM 训出 $v_\theta^{(1)}$。</li>
+  <li><strong>Reflow</strong>：用 $v_\theta^{(1)}$ 从大量 $x_0 \sim \mathcal{N}$ 采得 $\hat x_1$。$(x_0, \hat x_1)$ 成为新数据对。</li>
+  <li>用 FM 损失在<em>无歧义新对</em>上训 $v_\theta^{(2)}$ —— 同一 $x_0$ 对应唯一 $\hat x_1$，FM 学到直线速度。</li>
+  <li>重复 1-2 轮。轨迹越来越直。</li>
+</ol>
+
+<svg viewBox="0 0 600 200" role="img" aria-label="弯 vs 拉直">
+  <g font-family="ui-sans-serif" font-size="11" fill="var(--text)">
+    <text x="150" y="20" text-anchor="middle" font-weight="600">第 1 轮 FM：曲</text>
+    <text x="450" y="20" text-anchor="middle" font-weight="600">Reflow 后：直</text>
+
+    <g transform="translate(30, 40)">
+      <circle cx="20" cy="140" r="6" fill="var(--blue)"/>
+      <path d="M 26 140 Q 80 60 160 100 Q 220 130 270 50" stroke="var(--red)" fill="none" stroke-width="1.5"/>
+      <circle cx="270" cy="50" r="6" fill="var(--module-accent)"/>
+    </g>
+
+    <g transform="translate(330, 40)">
+      <circle cx="20" cy="140" r="6" fill="var(--blue)"/>
+      <path d="M 26 140 L 270 50" stroke="var(--module-accent)" stroke-width="2"/>
+      <circle cx="270" cy="50" r="6" fill="var(--module-accent)"/>
+    </g>
+  </g>
+</svg>
+
+<h2>14.3 训直后：一步采样</h2>
+
+$$\hat x_1 = x_0 + v_\theta^{(k)}(x_0, 0)$$
+
+<p>InstaFlow、SD3-Turbo、Hyper-SD 都基于这个思路。SD3 paper 明确说用了 2-3 轮 reflow。</p>
+
+<h2>14.4 v-prediction 推荐</h2>
+
+<p>CMU 讲师在 chunk #6 顺手说："This is the paper that tells you you should do <strong>v prediction</strong> — v prediction is the best parameterization." 因为 v 在 t 两端都不退化，distillation 数值稳。详见 <a href="/video-to-notebook/concepts/v-prediction/">v-prediction 概念页</a>。</p>
+
+<div class="my-addition">
+🟡 <strong>教材外补充：</strong>Reflow 把模型生成的数据当真——会有一点 distribution shift。但 2-3 轮足够拉直，再多边际递减。
+</div>
+
+<figure class="clip-frame">
+  <iframe src="https://www.youtube.com/embed/L9nsCHHMv-c?start=120" title="CMU L10: Rectified Flow & reflow" allowfullscreen></iframe>
+  <figcaption>📺 CMU 10799 Lecture 10（2:00 处）—— Rectified flow reflow 思想</figcaption>
+</figure>
+
+<div class="takeaways">
+  <strong>本章要记住的三件事</strong>
+  <ul>
+    <li>FM 不保证采样轨迹直；reflow（用上轮采样结果重训）显式拉直。</li>
+    <li>训直后能一步采样：$\hat x_1 = x_0 + v(x_0, 0)$。SD3、InstaFlow 都基于此。</li>
+    <li>v-prediction 是 distillation / few-step 的推荐参数化。</li>
+  </ul>
+</div>
+
+</article>

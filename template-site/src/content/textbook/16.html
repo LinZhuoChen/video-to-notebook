@@ -1,0 +1,74 @@
+<style>
+  .ddim-ch svg { display: block; margin: 1.2rem auto; max-width: 100%; height: auto; }
+  .ddim-ch .clip-frame { max-width: 720px; margin: 1.4rem auto; }
+  .ddim-ch .clip-frame iframe { width: 100%; aspect-ratio: 16/9; border: 0; border-radius: 6px; }
+  .ddim-ch .clip-frame figcaption { color: var(--text-muted); font-size: 0.85rem; margin-top: 0.4rem; text-align: center; }
+  .ddim-ch .my-addition { background: #fff7d6; border-left: 3px solid var(--m4); padding: 0.7rem 1rem; margin: 1rem 0; border-radius: 0 4px 4px 0; font-size: 0.95rem; }
+  .ddim-ch .source-quote { font-style: italic; color: var(--text-muted); border-left: 2px solid var(--border); padding: 0.2rem 0.8rem; margin: 0.6rem 0; font-size: 0.92rem; }
+</style>
+
+<article class="ddim-ch">
+
+<h1>16. DDIM：去掉随机性的采样器</h1>
+
+<p class="lead">CMU L7 开场（Lecture 7 - Guidance）讲师回顾："Last time we learned DDIM which is like a fast sampling technique"——把它视作 DDPM 的"加速器"。<strong>DDIM 不重训模型，只换采样器</strong>，把 1000 步压到 50 步、还能 image inversion。这一章按"同一网络 / 不同 sampler"的角度讲清楚。</p>
+
+<h2>16.1 关键洞察</h2>
+
+<p>Song et al. 2020 证明：同一个训好的 $\epsilon_\theta$，反向过程未必是 DDPM 的 Markov 链。存在一族 non-Markovian 反向链，<strong>它们的 marginal 分布都和 DDPM 一致</strong>。Generalized step：</p>
+
+$$x_{t-1} = \sqrt{\bar\alpha_{t-1}}\hat x_0 + \sqrt{1-\bar\alpha_{t-1}-\sigma_t^2}\hat\epsilon + \sigma_t z$$
+
+<ul>
+  <li>$\sigma_t = \sqrt{\tilde\beta_t}$ → DDPM ancestral（最大随机）</li>
+  <li>$\sigma_t = 0$ → <strong>DDIM</strong>（完全确定）</li>
+</ul>
+
+<h2>16.2 跳步可行的原因</h2>
+
+<p>当 $\sigma_t = 0$，反向 step 是 PF-ODE 的一阶 Euler 离散化。<strong>跳步 = 用粗时间网格做 ODE 积分</strong>。ODE 在粗网格上仍能积分得不错——这是 50 步质量不掉的几何原因。</p>
+
+<svg viewBox="0 0 600 160" role="img" aria-label="DDPM 1000 步 vs DDIM 50 步">
+  <g font-family="ui-sans-serif" font-size="11" fill="var(--text)">
+    <g transform="translate(40, 30)">
+      <text x="0" y="14" font-weight="600" fill="var(--blue)">DDPM ancestral</text>
+      <rect x="100" y="0" width="500" height="14" fill="var(--blue)" opacity="0.7"/>
+      <text x="350" y="11" text-anchor="middle" fill="var(--surface)" font-size="10">1000 次 forward</text>
+    </g>
+
+    <g transform="translate(40, 80)">
+      <text x="0" y="14" font-weight="600" fill="var(--module-accent)">DDIM (η=0)</text>
+      <rect x="100" y="0" width="50" height="14" fill="var(--module-accent)"/>
+      <text x="160" y="11" fill="var(--text-muted)" font-size="11">50 次 forward · 同一个 $\epsilon_\theta$</text>
+    </g>
+  </g>
+</svg>
+
+<h2>16.3 副产品：确定性 + 双射</h2>
+
+<p>DDIM 是确定性 → $x_T \leftrightarrow x_0$ 双射（数值精度内）。两个能力：</p>
+
+<ul>
+  <li><strong>Image inversion</strong>：给真实图反向跑得 $x_T$，改 prompt 再 forward → 做编辑（SDEdit、ControlNet 都靠这个）。</li>
+  <li><strong>Latent interpolation</strong>：两个 $x_T$ 做 slerp，对应图像平滑插值。</li>
+</ul>
+
+<div class="my-addition">
+🟡 <strong>教材外补充：</strong>DDIM 是 PF-ODE 的<em>一阶</em>离散化。DPM-Solver、Heun（EDM 默认）是高阶离散化，质量更好。SD 默认 sampler（DPM++ 2M、Karras）都是这条线的衍生。
+</div>
+
+<figure class="clip-frame">
+  <iframe src="https://www.youtube.com/embed/lPipzIG6rkc?start=3" title="CMU L7: DDIM 回顾" allowfullscreen></iframe>
+  <figcaption>📺 CMU 10799 Lecture 7（开篇）—— DDIM as fast sampling technique</figcaption>
+</figure>
+
+<div class="takeaways">
+  <strong>本章要记住的三件事</strong>
+  <ul>
+    <li>DDIM 不重训，只换 sampler——把 DDPM ancestral 换成 PF-ODE 的 Euler 离散化。</li>
+    <li>跳步 = 粗时间网格 ODE。50 步质量已够用。</li>
+    <li>确定性 + 双射 = image inversion + latent interpolation 的基础。</li>
+  </ul>
+</div>
+
+</article>

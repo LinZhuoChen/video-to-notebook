@@ -1,0 +1,58 @@
+<style>
+/* prefix: cg- */
+.cg-quickref{background:var(--surface-soft);border-left:3px solid var(--module-accent);padding:0.8rem 1rem;border-radius:0 4px 4px 0;margin:1rem 0;font-size:0.92rem;}
+.cg-quickref div{margin:0.3rem 0;}
+.cg-svg{display:block;margin:1.2rem auto;max-width:100%;height:auto;}
+.cg-pitfalls ol{padding-left:1.4rem;} .cg-pitfalls li{margin:0.5rem 0;}
+.cg-source{font-style:italic;color:var(--text-muted);border-left:2px solid var(--border);padding:0.2rem 0.8rem;margin:0.5rem 0;font-size:0.9rem;}
+</style>
+<article class="concept-entry">
+  <header class="concept-header">
+    <span class="concept-eyebrow">概念</span>
+    <h1>Classifier Guidance</h1>
+    <p class="concept-tagline">— 用独立分类器梯度引导扩散采样；CFG 的前身。</p>
+  </header>
+  <aside class="cg-quickref">
+    <div><strong>定义</strong> · $\nabla \log p(x|y) = \nabla \log p(x) + w \nabla \log p(y|x)$。</div>
+    <div><strong>公式</strong> · 采样时 $\hat\epsilon = \epsilon_\theta - w \sqrt{1-\bar\alpha_t}\nabla p_\phi(y|x_t)$。</div>
+    <div><strong>易错</strong> · 需 noise-robust classifier；工程笨重，CFG 已取代它。</div>
+  </aside>
+  <section class="concept-intuition">
+    <p>Dhariwal & Nichol 2021 (Diffusion Beats GANs) 第一次让 diffusion 在 ImageNet 上击败 GANs，靠的就是这个 trick。CMU L7 chunk #6-9 讨论"embed the condition"时回顾了 classifier guidance 作为 CFG 的对照。</p>
+  </section>
+  <section class="concept-deepdive">
+    <h2>数学</h2>
+    <p>$p(x|y) \propto p(x) p(y|x)$。对 $\log$ 取 $\nabla_x$ →</p>
+    $$\nabla_x \log p(x|y) = \nabla_x \log p(x) + w \nabla_x \log p(y|x)$$
+    <p>第一项 = unconditional score（diffusion 网络）；第二项 = classifier 对 $x$ 梯度。两者相加 = conditional score。</p>
+    <svg class="cg-svg" viewBox="0 0 500 130" role="img" aria-label="data flow">
+      <g font-family="ui-sans-serif" font-size="11" fill="var(--text)">
+        <rect x="40" y="20" width="140" height="40" rx="4" fill="var(--module-accent-soft)" stroke="var(--module-accent)"/>
+        <text x="110" y="45" text-anchor="middle">∇log p(y|x)</text>
+        <rect x="40" y="70" width="140" height="40" rx="4" fill="var(--blue-soft)" stroke="var(--blue)"/>
+        <text x="110" y="95" text-anchor="middle">ε_θ(x, t)</text>
+        <path d="M 185 90 L 280 90" stroke="var(--text-muted)" marker-end="url(#cg-ar)"/>
+        <rect x="290" y="70" width="170" height="40" rx="4" fill="var(--red-soft)" stroke="var(--red)"/>
+        <text x="375" y="95" text-anchor="middle" fill="var(--red)">混合 score → 反向 SDE</text>
+        <defs><marker id="cg-ar" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--text-muted)"/></marker></defs>
+      </g>
+    </svg>
+  </section>
+  <section class="concept-interact"><p>两输入 → 单输出 score——<strong>不变量</strong>是 classifier 梯度<em>加</em>到 unconditional score 上。</p></section>
+  <section class="concept-pitfalls">
+    <h2>常见误区</h2>
+    <ol>
+      <li><strong>"classifier guidance = CFG"。</strong>反例：classifier guidance 需独立 noise-robust classifier；CFG 不需。</li>
+      <li><strong>"任意 pretrained classifier 行"。</strong>反例：要在 noisy 数据上重训。</li>
+      <li><strong>"已死"。</strong>反例：CLIP-guided / VLM-guided diffusion 是现代形态，可控生成场景仍活。</li>
+    </ol>
+  </section>
+  <section class="concept-seealso">
+    <h2>相关概念</h2>
+    <ul><li><a href="/video-to-notebook/concepts/classifier-free-guidance/">CFG</a></li><li><a href="/video-to-notebook/concepts/ddim/">DDIM</a></li><li><a href="/video-to-notebook/concepts/ddpm/">DDPM</a></li><li><a href="/video-to-notebook/concepts/image-generation/">Image Generation</a></li></ul>
+  </section>
+  <section class="concept-sources">
+    <h2>来源</h2>
+    <ol><li><a href="https://www.youtube.com/watch?v=lPipzIG6rkc&t=100s" target="_blank" rel="noopener">cmu-10799-diffusion-flow · L6 · classifier guidance 推导 · (1:40)</a></li></ol>
+  </section>
+</article>

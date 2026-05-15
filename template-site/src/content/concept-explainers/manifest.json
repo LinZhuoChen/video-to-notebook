@@ -9,24 +9,227 @@
       "explainer": "claude-code-max:diffusion-textbook-v1"
     },
     {
-      "slug": "vae-encoder",
-      "canonical_name": "VAE Encoder",
-      "html_fragment": "vae-encoder.html",
-      "generated_at": "2026-05-14T08:30:00.000000+00:00",
+      "slug": "classifier-guidance",
+      "canonical_name": "Classifier Guidance",
+      "html_fragment": "classifier-guidance.html",
+      "generated_at": "2026-05-14T08:50:30.026510+00:00",
+      "explainer": "claude-code-max:diffusion-textbook-v1"
+    },
+    {
+      "slug": "classifier-free-guidance",
+      "canonical_name": "Classifier-Free Guidance",
+      "html_fragment": "classifier-free-guidance.html",
+      "generated_at": "2026-05-14T08:49:39.878080+00:00",
+      "explainer": "claude-code-max:diffusion-textbook-v1"
+    },
+    {
+      "slug": "consistency-models",
+      "canonical_name": "Consistency Models",
+      "html_fragment": "consistency-models.html",
+      "generated_at": "2026-05-14T08:48:18.612529+00:00",
+      "explainer": "claude-code-max:diffusion-textbook-v1"
+    },
+    {
+      "slug": "continuous-normalizing-flow",
+      "canonical_name": "Continuous Normalizing Flow",
+      "html_fragment": "continuous-normalizing-flow.html",
+      "generated_at": "2026-05-14T08:47:01.595076+00:00",
+      "explainer": "claude-code-max:diffusion-textbook-v1"
+    },
+    {
+      "slug": "ddim",
+      "canonical_name": "DDIM",
+      "html_fragment": "ddim.html",
+      "generated_at": "2026-05-14T08:48:58.781916+00:00",
+      "explainer": "claude-code-max:diffusion-textbook-v1"
+    },
+    {
+      "slug": "ddpm",
+      "canonical_name": "DDPM",
+      "html_fragment": "ddpm.html",
+      "generated_at": "2026-05-14T08:34:54.725695+00:00",
+      "explainer": "claude-code-max:diffusion-textbook-v1"
+    },
+    {
+      "slug": "diffusion-language-model",
+      "canonical_name": "Diffusion Language Model",
+      "html_fragment": "diffusion-language-model.html",
+      "generated_at": "2026-05-14T08:55:22.909985+00:00",
+      "explainer": "claude-code-max:diffusion-textbook-v1"
+    },
+    {
+      "slug": "discrete-diffusion",
+      "canonical_name": "Discrete Diffusion",
+      "html_fragment": "discrete-diffusion.html",
+      "generated_at": "2026-05-14T08:53:17.864036+00:00",
+      "explainer": "claude-code-max:diffusion-textbook-v1"
+    },
+    {
+      "slug": "epsilon-prediction",
+      "canonical_name": "Epsilon Prediction",
+      "html_fragment": "epsilon-prediction.html",
+      "generated_at": "2026-05-14T08:38:13.783283+00:00",
+      "explainer": "claude-code-max:diffusion-textbook-v1"
+    },
+    {
+      "slug": "flow-matching",
+      "canonical_name": "Flow Matching",
+      "html_fragment": "flow-matching.html",
+      "generated_at": "2026-05-14T08:45:46.517409+00:00",
+      "explainer": "claude-code-max:diffusion-textbook-v1"
+    },
+    {
+      "slug": "forward-process",
+      "canonical_name": "Forward Diffusion Process",
+      "html_fragment": "forward-process.html",
+      "generated_at": "2026-05-14T08:35:51.993489+00:00",
+      "explainer": "claude-code-max:diffusion-textbook-v1"
+    },
+    {
+      "slug": "image-generation",
+      "canonical_name": "Image Generation",
+      "html_fragment": "image-generation.html",
+      "generated_at": "2026-05-14T08:52:33.236636+00:00",
+      "explainer": "claude-code-max:diffusion-textbook-v1"
+    },
+    {
+      "slug": "langevin-dynamics",
+      "canonical_name": "Langevin Dynamics",
+      "html_fragment": "langevin-dynamics.html",
+      "generated_at": "2026-05-14T08:43:12.818300+00:00",
+      "explainer": "claude-code-max:diffusion-textbook-v1"
+    },
+    {
+      "slug": "latent-diffusion",
+      "canonical_name": "Latent Diffusion",
+      "html_fragment": "latent-diffusion.html",
+      "generated_at": "2026-05-14T08:51:14.965500+00:00",
+      "explainer": "claude-code-max:diffusion-textbook-v1"
+    },
+    {
+      "slug": "masked-diffusion",
+      "canonical_name": "Masked Diffusion",
+      "html_fragment": "masked-diffusion.html",
+      "generated_at": "2026-05-14T08:53:59.664856+00:00",
+      "explainer": "claude-code-max:diffusion-textbook-v1"
+    },
+    {
+      "slug": "noise-schedule",
+      "canonical_name": "Noise Schedule",
+      "html_fragment": "noise-schedule.html",
+      "generated_at": "2026-05-14T08:37:24.343168+00:00",
+      "explainer": "claude-code-max:diffusion-textbook-v1"
+    },
+    {
+      "slug": "parallel-decoding",
+      "canonical_name": "Parallel Decoding",
+      "html_fragment": "parallel-decoding.html",
+      "generated_at": "2026-05-14T08:56:45.071242+00:00",
+      "explainer": "claude-code-max:diffusion-textbook-v1"
+    },
+    {
+      "slug": "probability-flow-ode",
+      "canonical_name": "Probability Flow ODE",
+      "html_fragment": "probability-flow-ode.html",
+      "generated_at": "2026-05-14T08:45:05.155240+00:00",
+      "explainer": "claude-code-max:diffusion-textbook-v1"
+    },
+    {
+      "slug": "rectified-flow",
+      "canonical_name": "Rectified Flow",
+      "html_fragment": "rectified-flow.html",
+      "generated_at": "2026-05-14T08:47:39.592792+00:00",
       "explainer": "claude-code-max:diffusion-textbook-v1"
     },
     {
       "slug": "reparameterization-trick",
       "canonical_name": "Reparameterization Trick",
       "html_fragment": "reparameterization-trick.html",
-      "generated_at": "2026-05-14T08:31:00.000000+00:00",
+      "generated_at": "2026-05-14T08:41:06.774186+00:00",
+      "explainer": "claude-code-max:diffusion-textbook-v1"
+    },
+    {
+      "slug": "reverse-process",
+      "canonical_name": "Reverse Diffusion Process",
+      "html_fragment": "reverse-process.html",
+      "generated_at": "2026-05-14T08:36:37.886927+00:00",
+      "explainer": "claude-code-max:diffusion-textbook-v1"
+    },
+    {
+      "slug": "sde-formulation",
+      "canonical_name": "SDE Formulation",
+      "html_fragment": "sde-formulation.html",
+      "generated_at": "2026-05-14T08:44:27.808029+00:00",
+      "explainer": "claude-code-max:diffusion-textbook-v1"
+    },
+    {
+      "slug": "score-function",
+      "canonical_name": "Score Function",
+      "html_fragment": "score-function.html",
+      "generated_at": "2026-05-14T08:41:47.705555+00:00",
+      "explainer": "claude-code-max:diffusion-textbook-v1"
+    },
+    {
+      "slug": "score-matching",
+      "canonical_name": "Score Matching",
+      "html_fragment": "score-matching.html",
+      "generated_at": "2026-05-14T08:42:30.739407+00:00",
+      "explainer": "claude-code-max:diffusion-textbook-v1"
+    },
+    {
+      "slug": "score-entropy-discrete-diffusion",
+      "canonical_name": "Score-Entropy Discrete Diffusion",
+      "html_fragment": "score-entropy-discrete-diffusion.html",
+      "generated_at": "2026-05-14T08:54:39.144874+00:00",
+      "explainer": "claude-code-max:diffusion-textbook-v1"
+    },
+    {
+      "slug": "simple-loss-objective",
+      "canonical_name": "Simple Loss",
+      "html_fragment": "simple-loss-objective.html",
+      "generated_at": "2026-05-14T08:38:55.240768+00:00",
+      "explainer": "claude-code-max:diffusion-textbook-v1"
+    },
+    {
+      "slug": "tweedies-formula",
+      "canonical_name": "Tweedie's Formula",
+      "html_fragment": "tweedies-formula.html",
+      "generated_at": "2026-05-14T08:43:49.681702+00:00",
+      "explainer": "claude-code-max:diffusion-textbook-v1"
+    },
+    {
+      "slug": "vae-encoder",
+      "canonical_name": "VAE Encoder",
+      "html_fragment": "vae-encoder.html",
+      "generated_at": "2026-05-14T08:33:50.779115+00:00",
       "explainer": "claude-code-max:diffusion-textbook-v1"
     },
     {
       "slug": "variational-lower-bound",
-      "canonical_name": "ELBO (Variational Lower Bound)",
+      "canonical_name": "Variational Lower Bound",
       "html_fragment": "variational-lower-bound.html",
-      "generated_at": "2026-05-14T08:32:00.000000+00:00",
+      "generated_at": "2026-05-14T08:40:23.822265+00:00",
+      "explainer": "claude-code-max:diffusion-textbook-v1"
+    },
+    {
+      "slug": "velocity-field",
+      "canonical_name": "Velocity Field",
+      "html_fragment": "velocity-field.html",
+      "generated_at": "2026-05-14T08:46:22.304225+00:00",
+      "explainer": "claude-code-max:diffusion-textbook-v1"
+    },
+    {
+      "slug": "video-diffusion",
+      "canonical_name": "Video Diffusion",
+      "html_fragment": "video-diffusion.html",
+      "generated_at": "2026-05-14T08:51:55.591523+00:00",
+      "explainer": "claude-code-max:diffusion-textbook-v1"
+    },
+    {
+      "slug": "v-prediction",
+      "canonical_name": "v-Prediction",
+      "html_fragment": "v-prediction.html",
+      "generated_at": "2026-05-14T08:39:38.768852+00:00",
       "explainer": "claude-code-max:diffusion-textbook-v1"
     }
   ]

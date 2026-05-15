@@ -1,0 +1,101 @@
+<style>
+  .sde-ch svg { display: block; margin: 1.2rem auto; max-width: 100%; height: auto; }
+  .sde-ch .clip-frame { max-width: 720px; margin: 1.4rem auto; }
+  .sde-ch .clip-frame iframe { width: 100%; aspect-ratio: 16/9; border: 0; border-radius: 6px; }
+  .sde-ch .clip-frame figcaption { color: var(--text-muted); font-size: 0.85rem; margin-top: 0.4rem; text-align: center; }
+  .sde-ch .my-addition { background: #fff7d6; border-left: 3px solid var(--m4); padding: 0.7rem 1rem; margin: 1rem 0; border-radius: 0 4px 4px 0; font-size: 0.95rem; }
+  .sde-ch .source-quote { font-style: italic; color: var(--text-muted); border-left: 2px solid var(--border); padding: 0.2rem 0.8rem; margin: 0.6rem 0; font-size: 0.92rem; }
+</style>
+
+<article class="sde-ch">
+
+<h1>11. SDE 框架与 Probability Flow ODE</h1>
+
+<p class="lead">Vizuara Lecture 8（"Diffusion Models: A Physical Intuition (SDE Framework)"）开场用的不是数学，而是<strong>"a dye diffusing in a glass of water"——一滴墨水在水里扩散</strong>。讲师用这个画面把 SDE / 反向 SDE / 不可逆性都讲清楚了。这一章把他的物理直觉 + Song et al. 2021 的数学统一摆出来。</p>
+
+<h2>11.1 物理画面：墨水扩散</h2>
+
+<blockquote class="source-quote">「我画了一滴墨水在一杯水里扩散。问题是：能不能<strong>反向</strong>把扩散倒回去？看到水里墨水扩散开，能不能恢复它原来的形状？<br>直觉告诉你：can't be done. 粒子是 unpredictable, very random, moving up and down—就像 random walk。Reversing time is even out of context. 但<em>但</em>——physics 和 AI 在这里相遇——这其实是一个 well-known physical property（指 Anderson 1982 的反向 SDE 定理），就这点是 diffusion model 的核心。」</blockquote>
+
+<h2>11.2 SDE 三件套</h2>
+
+$$dx = f(x, t)\, dt + g(t)\, dW$$
+
+<ul>
+  <li>$f(x, t)$：漂移项（deterministic）</li>
+  <li>$g(t)$：扩散系数</li>
+  <li>$dW$：Brownian motion 微分</li>
+</ul>
+
+<p>两大常用：</p>
+<ul>
+  <li><strong>VP-SDE</strong>：$dx = -\frac{1}{2}\beta(t)x\, dt + \sqrt{\beta(t)}\, dW$ — 连续版 DDPM</li>
+  <li><strong>VE-SDE</strong>：$dx = \sqrt{d[\sigma^2(t)]/dt}\, dW$ — 连续版 NCSN</li>
+</ul>
+
+<h2>11.3 Anderson 反向 SDE</h2>
+
+<p>关键定理：每个前向 SDE 都对应一个反向 SDE，<strong>score 出现在反向漂移项里</strong>：</p>
+
+$$dx = [f(x, t) - g(t)^2 \nabla_x \log p_t(x)]\, dt + g(t)\, d\bar W$$
+
+<p>所以训一个 score 网络 → 可以反向跑任意前向 SDE。这是把 DDPM / NCSN 统一为同一框架的关键。</p>
+
+<h2>11.4 Probability Flow ODE：去随机化</h2>
+
+<p>Song et al. 2021 证明：同一 marginal $p_t$ 可由确定性 ODE 给出：</p>
+
+$$dx = \big[f(x, t) - \tfrac{1}{2}g(t)^2\, s_\theta(x, t)\big]\, dt$$
+
+<p>系数从 $g^2$ 变 $\frac{1}{2}g^2$，丢掉噪声项。<strong>给定 $x_T$，PF-ODE 跑出唯一 $x_0$</strong>。两个超能力：</p>
+
+<ol>
+  <li><strong>用任意 ODE solver 少步采样</strong>（DDIM、DPM-Solver、Heun）—— 50 步代替 1000 步。</li>
+  <li><strong>精确 likelihood</strong>（change-of-variables on ODE）—— SDE 给不了。</li>
+</ol>
+
+<svg viewBox="0 0 600 200" role="img" aria-label="SDE / 反向 SDE / PF-ODE">
+  <g font-family="ui-sans-serif" font-size="10" fill="var(--text)">
+    <rect x="20" y="40" width="170" height="120" rx="6" fill="var(--module-accent-soft)" stroke="var(--module-accent)"/>
+    <text x="105" y="60" text-anchor="middle" font-weight="600" fill="var(--module-accent)">前向 SDE</text>
+    <text x="105" y="85" text-anchor="middle">$dx = f\,dt + g\,dW$</text>
+    <text x="105" y="115" text-anchor="middle" font-size="10" fill="var(--text-muted)">墨水扩散</text>
+    <text x="105" y="140" text-anchor="middle" font-size="10" fill="var(--text-muted)">VP / VE / sub-VP</text>
+
+    <rect x="215" y="40" width="170" height="120" rx="6" fill="var(--blue-soft)" stroke="var(--blue)"/>
+    <text x="300" y="60" text-anchor="middle" font-weight="600" fill="var(--blue)">反向 SDE</text>
+    <text x="300" y="85" text-anchor="middle">$dx = [f - g²s]dt + gd\bar W$</text>
+    <text x="300" y="115" text-anchor="middle" font-size="10" fill="var(--text-muted)">"逆转墨水"——</text>
+    <text x="300" y="135" text-anchor="middle" font-size="10" fill="var(--text-muted)">需要 score</text>
+
+    <rect x="410" y="40" width="170" height="120" rx="6" fill="var(--surface-soft)" stroke="var(--red)"/>
+    <text x="495" y="60" text-anchor="middle" font-weight="600" fill="var(--red)">PF-ODE</text>
+    <text x="495" y="85" text-anchor="middle">$dx = [f - ½g²s]dt$</text>
+    <text x="495" y="115" text-anchor="middle" font-size="10" fill="var(--text-muted)">确定性，可重复</text>
+    <text x="495" y="135" text-anchor="middle" font-size="10" fill="var(--text-muted)">→ DDIM / DPM-Solver</text>
+  </g>
+</svg>
+
+<div class="my-addition">
+🟡 <strong>教材外补充：</strong>
+<ul>
+  <li>Anderson 1982 的反向 SDE 定理来自统计物理；Song 2021 把它带回 ML 是关键。</li>
+  <li>EDM (Karras 2022) 用纯 σ 参数化进一步统一 VP/VE/sub-VP，是现代 SOTA 的清洁基底。</li>
+</ul>
+</div>
+
+<figure class="clip-frame">
+  <iframe src="https://www.youtube.com/embed/57EFSTxL_5o?start=193" title="Vizuara L8: 墨水扩散 → SDE" allowfullscreen></iframe>
+  <figcaption>📺 Vizuara《Principles of Diffusion Models》Lecture 8（3:13 处）—— "dye diffusing in a glass of water"</figcaption>
+</figure>
+
+<div class="takeaways">
+  <strong>本章要记住的三件事（讲师亲口给的）</strong>
+  <ul>
+    <li>核心物理画面：<strong>墨水在水里扩散，能不能反着跑？</strong>——这是 SDE 的直觉来源。</li>
+    <li>SDE 三件套 $(f, g, dW)$ + score → 反向 SDE 把 DDPM/NCSN 统一。</li>
+    <li>Probability Flow ODE 去随机化、保 marginal 不变；让 50 步采样 + 精确 likelihood 成为可能。</li>
+  </ul>
+</div>
+
+</article>

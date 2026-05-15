@@ -1,0 +1,62 @@
+<style>
+/* prefix: pd- */
+.pd-quickref{background:var(--surface-soft);border-left:3px solid var(--module-accent);padding:0.8rem 1rem;border-radius:0 4px 4px 0;margin:1rem 0;font-size:0.92rem;}
+.pd-quickref div{margin:0.3rem 0;}
+.pd-pitfalls ol{padding-left:1.4rem;} .pd-pitfalls li{margin:0.5rem 0;}
+.pd-source{font-style:italic;color:var(--text-muted);border-left:2px solid var(--border);padding:0.2rem 0.8rem;margin:0.5rem 0;font-size:0.9rem;}
+.pd-svg{display:block;margin:1.2rem auto;max-width:100%;height:auto;}
+</style>
+<article class="concept-entry">
+  <header class="concept-header">
+    <span class="concept-eyebrow">概念</span>
+    <h1>Parallel Decoding</h1>
+    <p class="concept-tagline">— 一次 forward 产出多个 token；diffusion LM / speculative / Jacobi 都是其形式。</p>
+  </header>
+  <aside class="pd-quickref">
+    <div><strong>定义</strong> · 每次模型 forward 同时预测多个 token。</div>
+    <div><strong>公式</strong> · throughput ≈ (forward 数减少 × KV cache 节省)。</div>
+    <div><strong>易错</strong> · ≠ 一定快——单 forward 更贵；总开销看权衡。</div>
+  </aside>
+  <section class="concept-intuition">
+    <p>Vizuara《Diffusion LM》Lecture 2 直接说："Diffusion LLM Inference Pipeline 的核心就是<strong>并行预测所有 mask 位置</strong>"。但并行解码不只 diffusion——speculative decoding（小 draft 模型 + 大模型验证）和 Jacobi decoding 也是。</p>
+  </section>
+  <section class="concept-deepdive">
+    <h2>三种主流策略</h2>
+    <table style="width:100%; border-collapse:collapse; margin:1rem 0; font-size:0.9rem;">
+      <tr style="background:var(--surface-soft);"><th style="padding:0.4rem; text-align:left;">策略</th><th style="padding:0.4rem; text-align:left;">需要</th></tr>
+      <tr style="border-top:1px solid var(--border);"><td style="padding:0.4rem;"><strong>Diffusion LM</strong></td><td style="padding:0.4rem;">MDLM/SEDD 训练</td></tr>
+      <tr style="border-top:1px solid var(--border);"><td style="padding:0.4rem;"><strong>Speculative</strong></td><td style="padding:0.4rem;">两个对齐模型</td></tr>
+      <tr style="border-top:1px solid var(--border);"><td style="padding:0.4rem;"><strong>Jacobi/Lookahead</strong></td><td style="padding:0.4rem;">普通 ARM</td></tr>
+    </table>
+    <svg class="pd-svg" viewBox="0 0 500 140" role="img" aria-label="并行解码对比">
+      <g font-family="ui-sans-serif" font-size="11">
+        <text x="0" y="25" font-weight="600" fill="var(--blue)">AR:</text>
+        <rect x="40" y="15" width="25" height="14" fill="var(--blue)"/>
+        <text x="80" y="25" fill="var(--text-muted)" font-size="10">forward 1: +1 token</text>
+        <text x="0" y="65" font-weight="600" fill="var(--module-accent)">Diffusion:</text>
+        <rect x="80" y="55" width="100" height="14" fill="var(--module-accent)"/>
+        <text x="200" y="65" fill="var(--text-muted)" font-size="10">forward 1: +20 token</text>
+        <text x="0" y="105" font-weight="600" fill="var(--red)">Speculative:</text>
+        <rect x="90" y="95" width="70" height="14" fill="var(--red)" opacity="0.7"/>
+        <text x="180" y="105" fill="var(--text-muted)" font-size="10">draft 3 → verify 1 forward</text>
+      </g>
+    </svg>
+  </section>
+  <section class="concept-interact"><p>三策略 bar——<strong>不变量</strong>是"每次 forward 想多产 token"，区别在如何实现。</p></section>
+  <section class="concept-pitfalls">
+    <h2>常见误区</h2>
+    <ol>
+      <li><strong>"并行 = diffusion LM"。</strong>反例：speculative + ARM 也并行。</li>
+      <li><strong>"必然快"。</strong>反例：长 context + 大模型时 diffusion 的 full attention forward 比 KV-cache forward 贵。实测 throughput ~5x，不是 50x。</li>
+      <li><strong>"会丢质量"。</strong>反例：speculative 数学 exact（验证拒绝错误候选）；diff LM 多步精修能恢复。</li>
+    </ol>
+  </section>
+  <section class="concept-seealso">
+    <h2>相关概念</h2>
+    <ul><li><a href="/video-to-notebook/concepts/diffusion-language-model/">Diffusion LM</a></li></ul>
+  </section>
+  <section class="concept-sources">
+    <h2>来源</h2>
+    <ol><li><a href="https://www.youtube.com/watch?v=Hyb7c4PCmwk&t=524s" target="_blank" rel="noopener">diffusion-lm-vizuara · L3 · Diffusion LLM Journey · (8:44)</a></li></ol>
+  </section>
+</article>

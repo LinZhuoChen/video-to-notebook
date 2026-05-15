@@ -1,0 +1,91 @@
+<style>
+  .mdm-ch svg { display: block; margin: 1.2rem auto; max-width: 100%; height: auto; }
+  .mdm-ch .clip-frame { max-width: 720px; margin: 1.4rem auto; }
+  .mdm-ch .clip-frame iframe { width: 100%; aspect-ratio: 16/9; border: 0; border-radius: 6px; }
+  .mdm-ch .clip-frame figcaption { color: var(--text-muted); font-size: 0.85rem; margin-top: 0.4rem; text-align: center; }
+  .mdm-ch .my-addition { background: #fff7d6; border-left: 3px solid var(--m4); padding: 0.7rem 1rem; margin: 1rem 0; border-radius: 0 4px 4px 0; font-size: 0.95rem; }
+  .mdm-ch .source-quote { font-style: italic; color: var(--text-muted); border-left: 2px solid var(--border); padding: 0.2rem 0.8rem; margin: 0.6rem 0; font-size: 0.92rem; }
+</style>
+
+<article class="mdm-ch">
+
+<h1>20. Masked Diffusion 与 SEDD</h1>
+
+<p class="lead">2024 出现两个能打的语言扩散公式：MDLM (Sahoo et al., Cornell；ch1 也提到他们)、SEDD (Lou & Ermon)。CMU L12 后半段比较两条路。<strong>MDLM 是"动态 mask 率 BERT + 加权 cross-entropy"</strong>，<strong>SEDD 把 score 概念搬到离散</strong>。两条路在 absorbing case 上几乎等价。</p>
+
+<h2>20.1 MDLM：简到极致</h2>
+
+<p>Sahoo et al. 把 D3PM absorbing 的 ELBO 化到最简：</p>
+
+$$\mathcal{L}_{\text{MDLM}} = -\mathbb{E}_{t, x_0}\!\left[\frac{1}{t} \sum_{i \in \text{masked}} \log p_\theta(x_0^{(i)} | x_t)\right]$$
+
+<p>步骤：</p>
+<ol>
+  <li>采 $t \in (0, 1)$。</li>
+  <li>每个 token 独立以概率 $t$ 替换为 [MASK]。</li>
+  <li>模型 forward，预测所有 mask 位置 logits。</li>
+  <li>cross-entropy on masked，除以 $t$（来自 ELBO 推导）。</li>
+</ol>
+
+<p><strong>就是 BERT 训练 + (mask rate 连续, loss 除以 t)</strong>。直接复用 LLaMA / GPT 架构，改 loss 就行。</p>
+
+<h2>20.2 SEDD：concrete score</h2>
+
+<p>Lou & Ermon 2024 把 score-based 搬到离散。relabel "score" 为<strong>相邻状态的概率比率</strong>：</p>
+
+$$s(x, y) := \frac{p_t(y)}{p_t(x)} \quad \text{对每对相邻} (x, y)$$
+
+<p>训练用 <strong>score-entropy loss</strong>（KL-like，公式见 SEDD paper）。性质：只用<em>已知</em> $Q_t$，不需要 $p_t$ 本身。工程可行。</p>
+
+<h2>20.3 MDLM vs SEDD</h2>
+
+<table style="width:100%; border-collapse:collapse; margin:1rem 0; font-size:0.92rem;">
+  <tr style="background:var(--surface-soft);"><th style="padding:0.5rem; text-align:left;"></th><th style="padding:0.5rem; text-align:left;">MDLM</th><th style="padding:0.5rem; text-align:left;">SEDD</th></tr>
+  <tr style="border-top:1px solid var(--border);"><td style="padding:0.5rem;">理论起点</td><td style="padding:0.5rem;">D3PM absorbing ELBO 化简</td><td style="padding:0.5rem;">discrete concrete score matching</td></tr>
+  <tr style="border-top:1px solid var(--border);"><td style="padding:0.5rem;">损失</td><td style="padding:0.5rem;">加权 CE on masked</td><td style="padding:0.5rem;">score-entropy</td></tr>
+  <tr style="border-top:1px solid var(--border);"><td style="padding:0.5rem;">支持 $Q$</td><td style="padding:0.5rem;">只 absorbing</td><td style="padding:0.5rem;">absorbing / uniform / 其他</td></tr>
+  <tr style="border-top:1px solid var(--border);"><td style="padding:0.5rem;">实现</td><td style="padding:0.5rem;">极简</td><td style="padding:0.5rem;">中等（要算 ratio）</td></tr>
+</table>
+
+<h2>20.4 采样：从全 mask 渐进填回</h2>
+
+<svg viewBox="0 0 600 160" role="img" aria-label="MDLM 采样填回过程">
+  <g font-family="ui-mono, monospace" font-size="13" fill="var(--text)">
+    <text x="300" y="20" text-anchor="middle" font-family="ui-sans-serif" font-size="13" font-weight="600">从全 mask → 逐步填回</text>
+
+    <text x="40" y="50" font-family="ui-sans-serif" font-size="11" font-weight="600">step 1:</text>
+    <text x="100" y="50">[M] [M] [M] [M] [M]</text>
+
+    <text x="40" y="78" font-family="ui-sans-serif" font-size="11" font-weight="600">step 4:</text>
+    <text x="100" y="78">从 [M] 有 [M] 山</text>
+
+    <text x="40" y="106" font-family="ui-sans-serif" font-size="11" font-weight="600">step 8:</text>
+    <text x="100" y="106">从 前 有 座 山</text>
+
+    <text x="100" y="140" font-family="ui-sans-serif" font-size="11" fill="var(--text-muted)">每步用模型预测、按 confidence 选 top-k 填回</text>
+  </g>
+</svg>
+
+<div class="my-addition">
+🟡 <strong>教材外补充：</strong>
+<ul>
+  <li>LLaDA 8B 在某些 benchmark 已经接近 LLaMA-3 8B；DiffuLLaMA 7B 还在追赶。语言扩散是否真能 scaling 超越 ARM 还是 open question。</li>
+  <li>SEDD-medium 是第一个 perplexity 接近同尺寸 GPT-2 的 diffusion LM。</li>
+</ul>
+</div>
+
+<figure class="clip-frame">
+  <iframe src="https://www.youtube.com/embed/mXEjZblUBPs?start=379" title="CMU L12: MDLM / SEDD 对比" allowfullscreen></iframe>
+  <figcaption>📺 CMU 10799 Lecture 12（6:19 处）—— "flow matching 的离散版" 引入 SEDD</figcaption>
+</figure>
+
+<div class="takeaways">
+  <strong>本章要记住的三件事</strong>
+  <ul>
+    <li>MDLM = absorbing diffusion ELBO 简化 = "动态 mask 率 BERT + loss 除以 t"。极简工程。</li>
+    <li>SEDD = score-based 视角的离散版；用概率比率（concrete score）+ score-entropy loss。</li>
+    <li>两者在 absorbing case 几乎等价；SEDD 还支持其他 Q 矩阵。</li>
+  </ul>
+</div>
+
+</article>

@@ -1,0 +1,69 @@
+<style>
+/* prefix: vd- */
+.vd-quickref{background:var(--surface-soft);border-left:3px solid var(--module-accent);padding:0.8rem 1rem;border-radius:0 4px 4px 0;margin:1rem 0;font-size:0.92rem;}
+.vd-quickref div{margin:0.3rem 0;}
+.vd-svg{display:block;margin:1.2rem auto;max-width:100%;height:auto;}
+.vd-pitfalls ol{padding-left:1.4rem;} .vd-pitfalls li{margin:0.5rem 0;}
+.vd-source{font-style:italic;color:var(--text-muted);border-left:2px solid var(--border);padding:0.2rem 0.8rem;margin:0.5rem 0;font-size:0.9rem;}
+</style>
+<article class="concept-entry">
+  <header class="concept-header">
+    <span class="concept-eyebrow">概念</span>
+    <h1>Video Diffusion</h1>
+    <p class="concept-tagline">— spatiotemporal latent + DiT；Sora / Runway / Veo / Luma R3 的核心架构。</p>
+  </header>
+  <aside class="vd-quickref">
+    <div><strong>定义</strong> · 视频 → Video VAE 压成 spatiotemporal latent → DiT on 3D patches。</div>
+    <div><strong>公式</strong> · 与图像 diffusion 同 DDPM / FM 数学；张量多一个时间维。</div>
+    <div><strong>易错</strong> · "视频" ≠ "图像序列"——时间连贯靠 temporal attention / 3D conv。</div>
+  </aside>
+  <section class="concept-intuition">
+    <p>CMU L11 (Luma 工程师 Linqi Zhou) chunk #2：</p>
+    <div class="vd-source">「We show some samples from our latest video model R3. ... ground truth velocity field exists. <strong>L2 loss is extremely stable and scalable</strong> to large parameters. But naturally suffers from ODE simulation error and slow inference.」—— CMU L10</div>
+  </section>
+  <section class="concept-deepdive">
+    <h2>三维 latent 而非帧序列</h2>
+    <p>10s 1080p ≈ $10^9$ 个数值 —— 不可能直接扩散。Video VAE 同时下采 spatial 8× + temporal 4-8×。然后在 latent 上跑 DiT。</p>
+    <svg class="vd-svg" viewBox="0 0 500 130" role="img" aria-label="视频架构">
+      <g font-family="ui-sans-serif" font-size="10" fill="var(--text)">
+        <rect x="20" y="30" width="50" height="40" rx="3" fill="var(--surface-soft)" stroke="var(--border)"/>
+        <rect x="30" y="40" width="50" height="40" rx="3" fill="var(--surface-soft)" stroke="var(--border)" opacity="0.8"/>
+        <rect x="40" y="50" width="50" height="40" rx="3" fill="var(--surface-soft)" stroke="var(--border)" opacity="0.6"/>
+        <text x="55" y="105" text-anchor="middle">视频</text>
+        <text x="105" y="65" font-size="9" fill="var(--text-muted)">VAE→</text>
+        <rect x="140" y="50" width="50" height="30" rx="3" fill="var(--blue)"/>
+        <text x="165" y="68" text-anchor="middle" fill="var(--surface)" font-size="9">latent</text>
+        <rect x="210" y="30" width="180" height="60" rx="4" fill="var(--red-soft)" stroke="var(--red)"/>
+        <text x="300" y="50" text-anchor="middle" font-weight="600" fill="var(--red)">DiT spatiotemporal</text>
+        <text x="300" y="68" text-anchor="middle" font-size="9">3D patches + 3D attention</text>
+        <text x="300" y="85" text-anchor="middle" font-size="9" fill="var(--text-muted)">所有帧同时去噪</text>
+        <text x="405" y="65" font-size="9" fill="var(--text-muted)">VAE→</text>
+        <rect x="435" y="50" width="40" height="30" rx="3" fill="var(--module-accent)"/>
+        <text x="455" y="68" text-anchor="middle" fill="var(--surface)" font-size="9">视频</text>
+      </g>
+    </svg>
+    <h2>时间连贯三种做法</h2>
+    <ul>
+      <li>3D 卷积（早期 Video Diffusion Model）</li>
+      <li>Spatiotemporal attention（Sora 用 DiT 扫 3D patches）</li>
+      <li>分解 attention（先 spatial 再 temporal）</li>
+    </ul>
+  </section>
+  <section class="concept-interact"><p>左帧堆 → 右单帧——<strong>不变量</strong>是<em>所有帧同时</em>经过 diffusion，不是逐帧生成。</p></section>
+  <section class="concept-pitfalls">
+    <h2>常见误区</h2>
+    <ol>
+      <li><strong>"视频 = 图像 + 小补丁"。</strong>反例：纯 spatial-only 视频会闪烁、跳变。需要真正 spatiotemporal。</li>
+      <li><strong>"长视频靠堆 GPU"。</strong>反例：attention $O((THW)^2)$ 爆炸；Sora 用 patch sampling + truncated attention。</li>
+      <li><strong>"图像 + 视频两套"。</strong>反例：Sora / Veo 用同模型——image 是 T=1 特例。</li>
+    </ol>
+  </section>
+  <section class="concept-seealso">
+    <h2>相关概念</h2>
+    <ul><li><a href="/video-to-notebook/concepts/latent-diffusion/">Latent Diffusion</a></li><li><a href="/video-to-notebook/concepts/ddim/">DDIM</a></li><li><a href="/video-to-notebook/concepts/classifier-free-guidance/">CFG</a></li><li><a href="/video-to-notebook/concepts/velocity-field/">Velocity</a></li></ul>
+  </section>
+  <section class="concept-sources">
+    <h2>来源</h2>
+    <ol><li><a href="https://www.youtube.com/watch?v=H7MxR3XDt30&t=44s" target="_blank" rel="noopener">cmu-10799-diffusion-flow · L10 · Luma R3 视频生成 · (0:44)</a></li></ol>
+  </section>
+</article>

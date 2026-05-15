@@ -1,0 +1,89 @@
+<style>
+/* prefix: ep- */
+.ep-quickref{background:var(--surface-soft);border-left:3px solid var(--module-accent);padding:0.8rem 1rem;border-radius:0 4px 4px 0;margin:1rem 0;font-size:0.92rem;}
+.ep-quickref div{margin:0.3rem 0;}
+.ep-svg{display:block;margin:1.2rem auto;max-width:100%;height:auto;}
+.ep-pitfalls ol{padding-left:1.4rem;} .ep-pitfalls li{margin:0.5rem 0;}
+.ep-source{font-style:italic;color:var(--text-muted);border-left:2px solid var(--border);padding:0.2rem 0.8rem;margin:0.5rem 0;font-size:0.9rem;}
+</style>
+
+<article class="concept-entry">
+  <header class="concept-header">
+    <span class="concept-eyebrow">概念</span>
+    <h1>Epsilon Prediction</h1>
+    <p class="concept-tagline">— 网络输出"加进去的噪声 ε"而非 x₀ 或 μ，理由是训练稳定。</p>
+  </header>
+
+  <aside class="ep-quickref">
+    <div><strong>定义</strong> · $\epsilon_\theta(x_t, t)$ 直接预测前向 reparameterization 里的 Gaussian 噪声。</div>
+    <div><strong>公式</strong> · loss = $\|\epsilon - \epsilon_\theta\|^2$；$\hat x_0 = (x_t - \sqrt{1-\bar\alpha_t}\hat\epsilon)/\sqrt{\bar\alpha_t}$。</div>
+    <div><strong>易错</strong> · 这是参数化选择，等价于 $x_0$- / $v$-prediction，只是数值更稳。</div>
+  </aside>
+
+  <section class="concept-intuition">
+    <p>DDPM 论文的关键工程决定不是网络结构，是<strong>输出格式</strong>。Ho et al. 2020 实测：把网络输出从 "predict $\mu$" 改成 "predict $\epsilon$"，再丢掉 t 相关系数，得到 $L_{\text{simple}}$ —— 训练更稳，FID 反而降。Vizuara L8 直接给：</p>
+    <div class="ep-source">「Our objective is to minimize the mean square error between $\epsilon$ and $\hat\epsilon$ for all these different points in the forward chain.」—— Vizuara L6 #6</div>
+  </section>
+
+  <section class="concept-deepdive">
+    <h2>三种参数化的尺度对比</h2>
+    <ul>
+      <li><strong>$x_0$-prediction</strong>：目标量量级 = 数据本身（图像 $\in [-1, 1]$）。但 $t$ 大时 $x_t$ 近纯噪声 → 网络要"凭空猜" $x_0$ → 梯度大不稳。</li>
+      <li><strong>$\epsilon$-prediction</strong>：目标 $\epsilon \sim \mathcal{N}(0, I)$，<em>对所有 t 同尺度</em>。训练梯度平滑。</li>
+      <li><strong>$v$-prediction</strong>：$v = \sqrt{\bar\alpha}\epsilon - \sqrt{1-\bar\alpha}x_0$。两端都不退化，适合 distillation。</li>
+    </ul>
+
+    <svg class="ep-svg" viewBox="0 0 600 200" role="img" aria-label="三种 prediction 在不同 t 的尺度">
+      <g font-family="ui-sans-serif" font-size="11" fill="var(--text)">
+        <line x1="60" y1="170" x2="540" y2="170" stroke="var(--text-muted)"/>
+        <line x1="60" y1="40" x2="60" y2="170" stroke="var(--text-muted)"/>
+        <text x="300" y="190" text-anchor="middle">t / T</text>
+
+        <line x1="60" y1="105" x2="540" y2="105" stroke="var(--module-accent)" stroke-width="2"/>
+        <text x="545" y="110" fill="var(--module-accent)" font-size="10">ε 恒定</text>
+
+        <path d="M 60 160 Q 200 90 540 50" stroke="var(--red)" fill="none" stroke-width="2" stroke-dasharray="4,3"/>
+        <text x="545" y="55" fill="var(--red)" font-size="10">x₀ 变化大</text>
+
+        <path d="M 60 130 Q 300 100 540 130" stroke="var(--blue)" fill="none" stroke-width="2"/>
+        <text x="545" y="135" fill="var(--blue)" font-size="10">v 混合</text>
+      </g>
+    </svg>
+
+    <h2>互转通过 Tweedie</h2>
+    <p>$\hat x_0, \hat\epsilon, \hat v$ 三者线性互转（<a href="/video-to-notebook/concepts/tweedies-formula/">Tweedie 公式</a>统一）。所以工程上选哪个不改变模型能力，只改变梯度行为。</p>
+  </section>
+
+  <section class="concept-interact">
+    <p>三条曲线对比——<strong>不变量</strong>：绿色（ε）水平、红蓝随 t 变化。这就是 DDPM 选 ε 的原因。</p>
+  </section>
+
+  <section class="concept-example">
+    <h2>手算反向 step</h2>
+    <p>$\bar\alpha_t = 0.5, x_t = 2, \hat\epsilon = 0.5$。$\hat x_0 = (2 - \sqrt{0.5}\cdot 0.5)/\sqrt{0.5} = (2 - 0.354)/0.707 = 2.33$。</p>
+  </section>
+
+  <section class="concept-pitfalls">
+    <h2>常见误区</h2>
+    <ol>
+      <li><strong>"ε-prediction 是 DDPM 本质"。</strong>反例：score-based 用 score-prediction、EDM 用 v-prediction，都能 SOTA。</li>
+      <li><strong>"不能做图像编辑"。</strong>反例：转回 $\hat x_0$ 就能 SDEdit。</li>
+      <li><strong>"不适合 latent diffusion"。</strong>反例：SD 1.x/2.x 全用 ε。SD3 用 v 是为 distillation 不是 latent 要求。</li>
+    </ol>
+  </section>
+
+  <section class="concept-seealso">
+    <h2>相关概念</h2>
+    <ul>
+      <li><a href="/video-to-notebook/concepts/ddpm/">DDPM</a></li>
+      <li><a href="/video-to-notebook/concepts/simple-loss-objective/">Simple Loss</a></li>
+    </ul>
+  </section>
+
+  <section class="concept-sources">
+    <h2>来源</h2>
+    <ol>
+      <li><a href="https://www.youtube.com/watch?v=IcWFNS0gjQc&t=405s" target="_blank" rel="noopener">diffusion-principles-vizuara · L6 · MSE on ε · (6:45)</a></li>
+    </ol>
+  </section>
+</article>

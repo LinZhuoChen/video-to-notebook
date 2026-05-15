@@ -1,0 +1,93 @@
+<style>
+  .ld-ch svg { display: block; margin: 1.2rem auto; max-width: 100%; height: auto; }
+  .ld-ch .clip-frame { max-width: 720px; margin: 1.4rem auto; }
+  .ld-ch .clip-frame iframe { width: 100%; aspect-ratio: 16/9; border: 0; border-radius: 6px; }
+  .ld-ch .clip-frame figcaption { color: var(--text-muted); font-size: 0.85rem; margin-top: 0.4rem; text-align: center; }
+  .ld-ch .my-addition { background: #fff7d6; border-left: 3px solid var(--m4); padding: 0.7rem 1rem; margin: 1rem 0; border-radius: 0 4px 4px 0; font-size: 0.95rem; }
+  .ld-ch .source-quote { font-style: italic; color: var(--text-muted); border-left: 2px solid var(--border); padding: 0.2rem 0.8rem; margin: 0.6rem 0; font-size: 0.92rem; }
+</style>
+
+<article class="ld-ch">
+
+<h1>18. Latent Diffusion 与视频扩散</h1>
+
+<p class="lead">CMU L11 是 Luma AI 的 Linqi (Alex) Zhou 来做客座。chunk #2 他直接展示 Luma 最新视频生成模型 R3 的 demo——"<strong>we show some samples from our latest video model R3</strong>"。chunk #5 强调"L2 loss is extremely stable and scalable"，chunk #6 说扩散模型 suffer from "ODE simulation error and slow inference"。这一章用 Luma 视角讲 latent diffusion + 视频。</p>
+
+<h2>18.1 像素 diffusion 为什么贵</h2>
+
+<p>512×512×3 = 786,432 像素。U-Net 每层都要处理这么大张量；attention 是 $O(N^2)$。<strong>消费级硬件根本跑不动</strong>。这是为什么 DALL·E 2 / Imagen 都先在低分辨率扩散、再 cascade 超分。</p>
+
+<h2>18.2 Latent Diffusion (Rombach 2022)</h2>
+
+<p>核心思路：用 VAE 压缩到 latent，扩散在 latent 上做。</p>
+
+<svg viewBox="0 0 600 200" role="img" aria-label="Latent Diffusion 架构">
+  <g font-family="ui-sans-serif" font-size="11" fill="var(--text)">
+    <rect x="20" y="80" width="80" height="60" rx="4" fill="var(--surface-soft)" stroke="var(--border)"/>
+    <text x="60" y="115" text-anchor="middle">x (512²×3)</text>
+
+    <path d="M 105 110 L 175 110" stroke="var(--text-muted)" marker-end="url(#ld-ar)"/>
+    <text x="140" y="100" text-anchor="middle" font-size="9" fill="var(--text-muted)">VAE enc</text>
+
+    <rect x="180" y="90" width="55" height="40" rx="3" fill="var(--blue)"/>
+    <text x="207" y="115" text-anchor="middle" fill="var(--surface)" font-size="10">z (64²×4)</text>
+
+    <rect x="255" y="60" width="220" height="100" rx="6" fill="var(--red-soft)" stroke="var(--red)"/>
+    <text x="365" y="85" text-anchor="middle" font-weight="600" fill="var(--red)">diffusion 在 latent 上</text>
+    <text x="365" y="108" text-anchor="middle" font-size="10">U-Net / DiT + cross-attn(text)</text>
+    <text x="365" y="130" text-anchor="middle" font-size="10" fill="var(--text-muted)">计算 = 64×64 而非 512×512</text>
+    <text x="365" y="148" text-anchor="middle" font-size="10" fill="var(--text-muted)">开销 ↓ 64x</text>
+
+    <path d="M 480 110 L 510 110" stroke="var(--text-muted)" marker-end="url(#ld-ar)"/>
+
+    <rect x="515" y="80" width="65" height="60" rx="4" fill="var(--module-accent)"/>
+    <text x="547" y="115" text-anchor="middle" fill="var(--surface)">x̂</text>
+
+    <defs><marker id="ld-ar" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--text-muted)"/></marker></defs>
+  </g>
+</svg>
+
+<h2>18.3 关键工程细节</h2>
+
+<ul>
+  <li>VAE 必须<strong>单独预训冻结</strong>。联合训会让 VAE latent 退化。</li>
+  <li>压缩率 $f = 8$ 是甜点。$f = 16$ 重建质量崩。</li>
+  <li>VAE 是有损的 —— latent diffusion 质量上限 = VAE 重建质量。SD3 升级 VAE 到 16 通道就是为此。</li>
+  <li>文本通过 cross-attention 注入（CLIP / T5 编码 prompt → 注入每层 K/V）。</li>
+</ul>
+
+<h2>18.4 视频扩散（Luma 视角）</h2>
+
+<p>Linqi Zhou (chunk #2-5)：</p>
+
+<blockquote class="source-quote">「视频是更夸张的高维数据。我们 visualize 这个 process on a simple 2D graph——左边噪声、右边数据，<strong>blue lines = trajectories</strong>。ground-truth velocity field 通过 conditional flow matching 学到。<strong>L2 loss is extremely stable and scalable</strong> to large number of [parameters]. 但 diffusion models naturally suffer from <em>ODE simulation error and slow inference</em>——这是 Luma 内部一直在优化的方向。」</blockquote>
+
+<p>Video diffusion 架构：</p>
+
+<ol>
+  <li>Video VAE：3D 卷积 + 时间下采，把视频压成 spatiotemporal latent。</li>
+  <li>Diffusion backbone：DiT 扫 3D patches（spatial × temporal）。</li>
+  <li>采样：DDIM / flow matching 都行；CFG 同样适用。</li>
+</ol>
+
+<p>Sora、Runway Gen-3、Kling、Veo、Luma R3 全是这套。</p>
+
+<div class="my-addition">
+🟡 <strong>教材外补充：</strong>视频 diffusion 的核心挑战不是架构而是 (1) 数据稀缺（高质量长视频 ≪ 图像）、(2) 长时一致性、(3) attention $O(N^2)$ 在 $N = THW$ 下爆炸。Sora 用 patch sampling + truncated attention 才训得起。
+</div>
+
+<figure class="clip-frame">
+  <iframe src="https://www.youtube.com/embed/H7MxR3XDt30?start=44" title="CMU L11: Luma R3 视频 demo + flow matching" allowfullscreen></iframe>
+  <figcaption>📺 CMU 10799 Lecture 11（0:44 处）—— Linqi Zhou (Luma) 展示 R3 视频模型</figcaption>
+</figure>
+
+<div class="takeaways">
+  <strong>本章要记住的三件事（讲师亲口给的）</strong>
+  <ul>
+    <li>Latent diffusion = VAE 压缩到 latent + diffusion 在 latent 上；开销降 ~64×。</li>
+    <li>Luma R3 用 conditional flow matching + L2 loss——"extremely stable and scalable"。</li>
+    <li>视频 = spatiotemporal latent + DiT；Sora / Veo / R3 同一架构。</li>
+  </ul>
+</div>
+
+</article>

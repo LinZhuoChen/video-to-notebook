@@ -1,0 +1,63 @@
+<style>
+/* prefix: fm- */
+.fm-quickref{background:var(--surface-soft);border-left:3px solid var(--module-accent);padding:0.8rem 1rem;border-radius:0 4px 4px 0;margin:1rem 0;font-size:0.92rem;}
+.fm-quickref div{margin:0.3rem 0;}
+.fm-svg{display:block;margin:1.2rem auto;max-width:100%;height:auto;}
+.fm-pitfalls ol{padding-left:1.4rem;} .fm-pitfalls li{margin:0.5rem 0;}
+.fm-source{font-style:italic;color:var(--text-muted);border-left:2px solid var(--border);padding:0.2rem 0.8rem;margin:0.5rem 0;font-size:0.9rem;}
+</style>
+<article class="concept-entry">
+  <header class="concept-header">
+    <span class="concept-eyebrow">概念</span>
+    <h1>Flow Matching</h1>
+    <p class="concept-tagline">— 直接训 ODE 速度场把噪声变数据，loss 是简单 MSE。SD3、SORA 都用。</p>
+  </header>
+  <aside class="fm-quickref">
+    <div><strong>定义</strong> · 学时变向量场 $v_\theta(x, t)$，ODE $dx/dt = v_\theta$ 把噪声流到数据。</div>
+    <div><strong>公式</strong> · 直线 FM: $\mathcal{L} = \mathbb{E}[\|v_\theta(x_t, t) - (x_1 - x_0)\|^2]$，$x_t = (1-t)x_0 + tx_1$。</div>
+    <div><strong>易错</strong> · 训完后轨迹未必直；直线插值给的是条件速度。</div>
+  </aside>
+  <section class="concept-intuition">
+    <p>CMU L5 讲师"灵光乍现"：</p>
+    <div class="fm-source">「Why don't we just do linear interpolation of the two things? Same noise, same data. This is <strong>literally the only thing</strong> stopping us from full matching. Class is over.（笑）」—— CMU L5 #2, #5</div>
+    <p>训练目标：采 $x_1, x_0, t$；合成 $x_t = (1-t)x_0 + tx_1$；让 $v_\theta(x_t, t)$ 估 $x_1 - x_0$；MSE。</p>
+  </section>
+  <section class="concept-deepdive">
+    <h2>FM 比 DDPM 简洁在哪</h2>
+    <ul>
+      <li>无 schedule：直接选插值。</li>
+      <li>无 ELBO：MSE 不来自变分。</li>
+      <li>无 score：学 velocity（线性关联 score 但概念独立）。</li>
+      <li>任意路径：直线、OT、diffusion path 都行。</li>
+    </ul>
+    <svg class="fm-svg" viewBox="0 0 500 130" role="img" aria-label="FM 直线">
+      <line x1="60" y1="100" x2="440" y2="40" stroke="var(--module-accent)" stroke-width="2"/>
+      <circle cx="60" cy="100" r="8" fill="var(--blue)"/>
+      <text x="60" y="125" text-anchor="middle" font-size="10">x₀ (noise)</text>
+      <circle cx="440" cy="40" r="8" fill="var(--module-accent)"/>
+      <text x="440" y="25" text-anchor="middle" font-size="10">x₁ (data)</text>
+      <text x="250" y="85" text-anchor="middle" font-size="11" fill="var(--text-muted)">$x_t = (1-t)x_0 + tx_1$, $v = x_1 - x_0$ 恒</text>
+    </svg>
+  </section>
+  <section class="concept-interact"><p>直线 + 端点——<strong>不变量</strong>是直线情况下速度 $x_1 - x_0$ 不随 t 变。</p></section>
+  <section class="concept-example">
+    <h2>样本 loss</h2>
+    <p>$x_0=0.2, x_1=1.8, t=0.6 \Rightarrow x_t = 1.16$. ground-truth $v = 1.6$. 设 $v_\theta = 1.4$. loss = $0.04$.</p>
+  </section>
+  <section class="concept-pitfalls">
+    <h2>常见误区</h2>
+    <ol>
+      <li><strong>"训完轨迹直"。</strong>反例：marginal velocity 在 mode 交叉处弯；要 <a href="/video-to-notebook/concepts/rectified-flow/">rectified flow</a> 显式拉直。</li>
+      <li><strong>"不能 likelihood"。</strong>反例：CNF + change-of-variables 可算。</li>
+      <li><strong>"FM = RF = CM"。</strong>反例：递进——FM 基础、RF reflow 拉直、CM 蒸馏一步。</li>
+    </ol>
+  </section>
+  <section class="concept-seealso">
+    <h2>相关概念</h2>
+    <ul><li><a href="/video-to-notebook/concepts/velocity-field/">Velocity Field</a></li><li><a href="/video-to-notebook/concepts/continuous-normalizing-flow/">CNF</a></li><li><a href="/video-to-notebook/concepts/discrete-diffusion/">Discrete Diffusion</a></li><li><a href="/video-to-notebook/concepts/rectified-flow/">Rectified Flow</a></li></ul>
+  </section>
+  <section class="concept-sources">
+    <h2>来源</h2>
+    <ol><li><a href="https://www.youtube.com/watch?v=_OOITDB2VCY&t=101s" target="_blank" rel="noopener">cmu-10799-diffusion-flow · L5 · "linear interpolation" 灵光 · (1:41)</a></li></ol>
+  </section>
+</article>
