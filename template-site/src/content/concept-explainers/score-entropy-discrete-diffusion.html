@@ -1,0 +1,214 @@
+<style>
+/* prefix: sedd- */
+.sedd-quickref{background:var(--surface-soft);border-left:3px solid var(--module-accent);padding:0.8rem 1rem;border-radius:0 4px 4px 0;margin:1rem 0;font-size:0.92rem;}
+.sedd-quickref div{margin:0.3rem 0;}
+.sedd-svg{display:block;margin:1.2rem auto;max-width:100%;height:auto;}
+.sedd-source{font-style:italic;color:var(--text-muted);border-left:2px solid var(--border);padding:0.2rem 0.8rem;margin:0.5rem 0;font-size:0.9rem;}
+.sedd-pitfalls ol{padding-left:1.4rem;} .sedd-pitfalls li{margin:0.6rem 0;}
+.sedd-callout{background:var(--module-accent-soft);border-left:3px solid var(--module-accent);padding:0.6rem 0.9rem;border-radius:0 4px 4px 0;margin:0.8rem 0;font-size:0.93rem;}
+.my-addition{background:var(--accent-soft);border-left:3px solid var(--accent);padding:0.5rem 0.8rem;border-radius:0 4px 4px 0;margin:0.6rem 0;font-size:0.92rem;color:var(--text);}
+.sedd-controls{display:flex;flex-wrap:wrap;gap:0.4rem;margin:0.6rem 0;}
+.sedd-controls button{padding:0.4rem 0.8rem;border:1px solid var(--border);background:var(--surface);color:var(--text);border-radius:4px;cursor:pointer;font-size:0.88rem;}
+.sedd-controls button.active{background:var(--module-accent);color:var(--surface);border-color:var(--module-accent);}
+#sedd-readout{background:var(--surface-soft);padding:0.8rem;border-radius:4px;margin-top:0.6rem;min-height:80px;}
+.sedd-line{display:none;font-size:0.95rem;}
+.sedd-line.sedd-active-line{display:block;}
+.sedd-table{width:100%;border-collapse:collapse;margin:0.8rem 0;font-size:0.9rem;}
+.sedd-table th,.sedd-table td{border:1px solid var(--border);padding:0.4rem 0.6rem;text-align:left;}
+.sedd-table th{background:var(--surface-soft);}
+</style>
+
+<article class="concept-entry">
+  <header class="concept-header">
+    <span class="concept-eyebrow">概念</span>
+    <h1>Score-Entropy Discrete Diffusion (SEDD)</h1>
+    <p class="concept-tagline">— 把 "score" 推广到离散空间：用比值代替梯度，用 score-entropy 代替 score matching。</p>
+  </header>
+
+  <aside class="sedd-quickref">
+    <div><strong>定义</strong> · Lou, Meng &amp; Ermon (ICML 2024) 提出的离散扩散框架，用 <em>concrete score</em>（比值 $p_t(y)/p_t(x)$）代替梯度 $\nabla \log p$。</div>
+    <div><strong>公式</strong> · $\mathcal{L} = \mathbb{E}\left[\sum_{y \neq x} q(y|x)\left(s_\theta(x,y,t) - \frac{p_t(y)}{p_t(x)} \log s_\theta(x,y,t)\right)\right] + \text{const}$。</div>
+    <div><strong>易错</strong> · 不是"换个名字的离散扩散"——它把 score-based 框架真正搬到离散空间，而不是退化成 MDLM 那种掩码方案。</div>
+  </aside>
+
+  <section class="concept-intuition">
+    <p>很多人第一次听到 SEDD，会以为它就是"discrete diffusion 换了个名字"。这是错的。<strong>SEDD 把 "score" 这个概念本身推广到了离散空间</strong>——它不是给离散扩散加了个新损失项，而是回答了一个更基础的问题：当 $x$ 是离散 token 时，$\nabla \log p(x)$ 根本不存在（你没法对"猫"这个 token 求梯度），那连续扩散里赖以为生的 "score-based model" 这整条路，还能不能搬到文本和分子上来？</p>
+
+    <div class="sedd-source">「continuous diffusion 我们有三种视角——denoising、score-based、flow matching。问题是：能不能把这三套公式映射到 discrete diffusion？这就是今天主要要回答的问题。」—— CMU 10799 L12 @06:19</div>
+
+    <p>讲师在 CMU 10799 Lecture 12 把这件事讲得很直白：连续空间里 score 是 $\nabla_x \log p_t(x)$，它是一个向量场，告诉反向 SDE "在 $x$ 处应该往哪个方向漂"。在离散空间里没有"方向"这种东西，只有"该不该从当前 token 跳到某个邻居 token"。换句话说，连续 score 回答的是"how much"，离散 score 必须回答的是"which one"。于是 SEDD 用一个新对象——<em>concrete score</em>，也就是相邻状态的概率比值 $p_t(y)/p_t(x)$——来代替梯度。这个比值大于 1 意味着邻居 $y$ 比当前 $x$ 更"可能"，反向链就倾向于跳过去；小于 1 意味着邻居更不可能，反向链就更愿意停留。整套框架因此被称作 <em>Score Entropy Discrete Diffusion</em>，缩写 SEDD，原始论文是 Lou, Meng &amp; Ermon (ICML 2024)。</p>
+
+    <div class="sedd-source">「Stanford 那篇是第一个 diffusion language model 的尝试——先 embedding，再在连续 embedding 空间跑扩散，最后 nearest neighbor 解码——但效果不如我们今天要讲的这个。」—— CMU 10799 L12 @04:55</div>
+
+    <div class="sedd-source">「Anthropic 的人和我说，ICML 2024 有个观点：任何不能压进文本的信息都是无趣的、图像生成不在通往 AGI 的路上。所以离散数据生成现在变得超级重要——不光是文本，还有分子、DNA 序列，甚至 image 本身也是离散的（0-255 像素值）。」—— CMU 10799 L12 @02:00（讲师铺垫为什么要研究离散扩散）</div>
+
+    <p>讲师特意把 SEDD 放在 Stanford 早期"embedding + 连续扩散"那条思路的对面来介绍：那条路是<em>把离散问题伪装成连续问题</em>——先把 token 映到连续 embedding，再在 embedding 空间跑标准扩散，最后做 nearest neighbor 解码——它的麻烦在于训练目标和最终生成目标不对齐，连续空间里 score 很小的样本可能 nearest-neighbor 之后跳到一个完全不同的 token；SEDD 则是<em>把 score-based 的整套语言真正改造成离散原生的</em>，不再绕道连续空间。这件事在训练里对应的就是：用一个网络 $s_\theta(x, y, t)$ 去预测比值 $p_t(y)/p_t(x)$，损失函数叫 <em>score entropy</em>——它是连续 score matching 的离散类比，结构上是一个针对正比值的 Bregman divergence，最优解恰好命中真实比值。后面我们会把这件事一步步拆开。</p>
+  </section>
+
+  <section class="concept-deepdive">
+    <h2>核心对象一：concrete score（具体得分）</h2>
+
+    <p>连续空间里 score 定义为 $\nabla_x \log p_t(x)$，它是个向量场。离散空间里 $x$ 是 token，没有梯度。SEDD 的关键替换：</p>
+
+    <p>$$s(x, y, t) \;:=\; \frac{p_t(y)}{p_t(x)}, \qquad y \neq x.$$</p>
+
+    <p>对每一对相邻状态 $(x, y)$，concrete score 是一个标量——告诉你"从 $x$ 跳到 $y$ 比待在 $x$ 概率高/低多少倍"。<strong>Why</strong>：这是 score 的"离散类比"，理由可以一步推出来。注意 $\log p_t(y) - \log p_t(x) = \log \frac{p_t(y)}{p_t(x)}$，而连续 score $\nabla_x \log p_t$ 本质上就是 $\log p_t$ 在邻域的"局部差分"——在连续空间它通过求极限退化成偏导数，在离散空间它就是相邻状态的对数比值，无需取极限。SEDD 把这件事直接搬到 token 空间：邻居之间的对数比值。换句话说，"score" 这个词在两个空间里指的是同一个数学对象，只是在连续空间用梯度实现、在离散空间用比值实现，二者通过测度论的密度概念被统一起来。</p>
+
+    <div class="sedd-callout"><strong>关键观察</strong>：对于词汇表大小 $K$ 的离散变量，每个状态有 $K-1$ 个邻居（除了它自己），所以 concrete score 不是一个数而是一个 $(K-1)$ 维向量——每个出邻居占一个分量。神经网络 $s_\theta(x, \cdot, t)$ 一次 forward 输出整组比值。对一段长度 $L$ 的文本，输出张量形状就是 $L \times (K-1)$。和"预测下一个 token 的概率分布"形状一致，但语义完全不同：softmax 输出的是归一化概率、加起来等于 1，SEDD 输出的是<em>未归一化的比值</em>，可以大于 1，也不需要总和约束。这件事一旦没意识到，工程实现就会无意识地套 softmax，导致目标变形。</div>
+
+    <h2>核心对象二：CTMC 与生成矩阵</h2>
+
+    <p>SEDD 的前向过程是<strong>连续时间马尔可夫链</strong>（CTMC）。状态分布演化由生成矩阵 $Q_t$ 描述：</p>
+
+    <p>$$\dot p_t \;=\; Q_t\, p_t,$$</p>
+
+    <p>其中 $Q_t \in \mathbb{R}^{K \times K}$ 满足 $(Q_t)_{yx} \geq 0$（$y \neq x$）且每列和为 0。$(Q_t)_{yx}$ 的物理含义是"在时间 $t$ 从 $x$ 跳到 $y$ 的瞬时速率"，单位是 1/时间。<strong>Why</strong>：CTMC 把"加噪"理解成"以一定速率随机跳到别的 token"——masking 加噪对应 $Q$ 只允许跳到一个特殊的 [MASK] 状态，uniform 加噪对应 $Q$ 让所有 token 等概率互相跳，Gaussian-on-codebook 对应按 embedding 距离加权的 $Q$。三种常见的离散噪声方案都可以通过设计 $Q_t$ 在同一个框架下实现，前向加噪和反向去噪用同一套矩阵语言描述。这一点和连续扩散里"forward SDE + 反向 SDE"是完全对偶的：那边是无穷小漂移加扩散，这边是无穷小跳跃速率。</p>
+
+    <p>把 $Q_t$ 的对角元定义成 $-\sum_{y \neq x}(Q_t)_{yx}$ 保证概率守恒；这件事虽然小但关键，因为它让"留在原地"自动被计入，反向链不需要单独建模"自跳"。反向 CTMC 的生成矩阵 $\bar Q_t$ 由 Kolmogorov 时间反演关系给出，结果异常干净：</p>
+
+    <p>$$(\bar Q_t)_{xy} \;=\; \frac{p_t(y)}{p_t(x)}\,(Q_t)_{yx} \quad (x \neq y).$$</p>
+
+    <p>注意右边出现了 concrete score $p_t(y)/p_t(x)$——<strong>这就是为什么你只需要学比值就能反向采样</strong>。这条关系是 SEDD 整个框架的几何中心：前向矩阵 $Q_t$ 由你设计、是已知的；反向矩阵 $\bar Q_t$ 多了一个"比值因子"；这个因子正是 concrete score。讲师在 L12 把它和连续扩散的反向 SDE 对照：连续情形是 $\nabla \log p$ 加进 drift 项 $f - g^2 \nabla \log p$，离散情形是比值乘进 transition rate。两个反向公式结构上完全平行。</p>
+
+    <h2>核心对象三：score entropy 损失</h2>
+
+    <p>要学 $s_\theta(x, y, t) \approx p_t(y)/p_t(x)$，但 $p_t(y)/p_t(x)$ 没法直接监督——分母 $p_t(x)$ 是边缘概率，不可观测。SEDD 用 score entropy：</p>
+
+    <p>$$\mathcal{L} \;=\; \mathbb{E}_{x_0,\, x \sim p_t(\cdot | x_0)} \!\!\left[\sum_{y \neq x} q(y|x)\!\left(s_\theta(x,y,t) - \frac{p_t(y\,|\,x_0)}{p_t(x\,|\,x_0)}\log s_\theta(x,y,t)\right)\right] + \text{const}.$$</p>
+
+    <p><strong>Why（最关键的一步）</strong>：这个损失初看奇怪——既有 $s_\theta$ 的线性项又有 $\log s_\theta$ 的非线性项，符号还不一致——但它实际上是一个 <em>Bregman divergence on positive ratios</em>。具体来说，定义凸函数 $\phi(u) = u \log u - u$（这是正实数上的标准熵函数），它生成的 Bregman 散度为 $D_\phi(r \| s) = r \log(r/s) - (r - s)$。把 SEDD 损失里 $y$ 这一项展开并丢掉与 $s_\theta$ 无关的常数，结果正比于 $D_\phi(r^\star \| s_\theta)$——所以 score entropy 不是凭空构造的，它就是"在正比值空间上做凸距离最小化"的标准形式。展开后对 $s_\theta$ 求梯度得到 $\mathbb{E}[(s_\theta - r^\star)\,\nabla \log s_\theta]$，其中 $r^\star = p_t(y)/p_t(x)$ 是真实比值；令梯度为零，最优解恰好是 $s_\theta^\star = p_t(y)/p_t(x)$。这和 Hyvärinen score matching 的思想完全一致：构造一个看起来不依赖未知分布的代理损失，但保证其最优解仍然命中真实 score。Score matching 在连续空间用分部积分消未知量，SEDD 在离散空间用"枚举邻居 + 条件化到 $x_0$"消未知量——两套机制不同，但精神相同。</p>
+
+    <div class="sedd-callout"><strong>类比 Hyvärinen 的 trick</strong>：连续 score matching 用<em>分部积分</em>消掉未知的 $\nabla \log p$，把 $\mathbb{E}_p\|s_\theta - \nabla \log p\|^2$ 改写成不含 $p$ 显式出现的 $\mathbb{E}\|s_\theta\|^2 + 2 \nabla \cdot s_\theta$。SEDD 在离散空间没有分部积分这种工具，但有一个等价的离散对应物：<em>状态枚举 + 条件化</em>。对每个 $x$ 枚举它的邻居 $y$，把比值 $p_t(y)/p_t(x)$ 用全概率公式展开成对 $x_0$ 的期望，得到比值 $p_t(y\,|\,x_0)/p_t(x\,|\,x_0)$——这个量在给定干净样本 $x_0$ 下是<strong>条件可计算的解析量</strong>，因为前向 transition kernel $p_t(\cdot\,|\,x_0)$ 是你自己设计的、有闭式表达。于是 score entropy 损失变成完全可监督的——这就是离散版的"消未知量"。</div>
+
+    <svg class="sedd-svg" viewBox="0 0 600 280" role="img" aria-label="concrete score: ratio matching across discrete neighbors">
+      <g font-family="ui-sans-serif" font-size="11" fill="var(--text)">
+        <text x="300" y="20" text-anchor="middle" font-weight="600">Concrete Score：从 x 出发，每个邻居一个比值</text>
+
+        <circle cx="300" cy="140" r="28" fill="var(--module-accent)"/>
+        <text x="300" y="144" text-anchor="middle" fill="var(--surface)" font-size="13">x = cat</text>
+
+        <circle cx="120" cy="80" r="22" fill="var(--surface-soft)" stroke="var(--border)"/>
+        <text x="120" y="84" text-anchor="middle" font-size="11">dog</text>
+        <circle cx="120" cy="200" r="22" fill="var(--surface-soft)" stroke="var(--border)"/>
+        <text x="120" y="204" text-anchor="middle" font-size="11">car</text>
+        <circle cx="480" cy="80" r="22" fill="var(--surface-soft)" stroke="var(--border)"/>
+        <text x="480" y="84" text-anchor="middle" font-size="11">[MASK]</text>
+        <circle cx="480" cy="200" r="22" fill="var(--surface-soft)" stroke="var(--border)"/>
+        <text x="480" y="204" text-anchor="middle" font-size="11">bat</text>
+
+        <path d="M 275 125 L 142 90" stroke="var(--module-accent)" stroke-width="1.5"/>
+        <path d="M 275 155 L 142 195" stroke="var(--module-accent)" stroke-width="1.5"/>
+        <path d="M 325 125 L 458 90" stroke="var(--module-accent)" stroke-width="1.5"/>
+        <path d="M 325 155 L 458 195" stroke="var(--module-accent)" stroke-width="1.5"/>
+
+        <text x="195" y="100" font-size="10" fill="var(--text-muted)">s(x,dog) = p(dog)/p(cat)</text>
+        <text x="195" y="190" font-size="10" fill="var(--text-muted)">s(x,car) ≈ 0.02</text>
+        <text x="345" y="100" font-size="10" fill="var(--text-muted)">s(x,MASK) = 0.6</text>
+        <text x="345" y="190" font-size="10" fill="var(--text-muted)">s(x,bat) ≈ 0.05</text>
+
+        <text x="300" y="255" text-anchor="middle" font-size="11" fill="var(--text-muted)">网络 $s_\theta(x, \cdot, t)$ 一次输出 K-1 个比值；反向链按比值采样下一跳。</text>
+      </g>
+    </svg>
+
+    <h2>采样：反向 CTMC 走一步</h2>
+
+    <p>给定当前状态 $x_t$，反向链下一步的瞬时跳跃速率为 $(\bar Q_t)_{x_t \to y} = s_\theta(x_t, y, t)\,(Q_t)_{y \to x_t}$。用 tau-leaping 或 Euler 离散化采样：在小步长 $\Delta t$ 内，以概率 $\propto s_\theta(x_t, y, t) \cdot (Q_t)_{y \to x_t} \cdot \Delta t$ 跳到 $y$，剩余概率留在 $x_t$ 不动。<strong>这正是连续 score 的"WHICH transition to take"在离散空间的等价表述</strong>——比值越大的邻居越可能被选中。整个采样过程在概念上和连续扩散的 Euler-Maruyama 一模一样，只是把"沿着 score 方向漂一小步"换成"按比值采样一个跳跃"，把高斯增量换成 Bernoulli/Poisson 增量。</p>
+
+    <div class="my-addition">🟡 教材外补充：和 MDLM (Masked Diffusion Language Model) 对比——MDLM 的 forward 只允许 token → MASK 一种跳跃，反向时网络只需预测"这个 MASK 位置应该填什么 token"，每个位置 1 套 logits、O(1) 个监督信号。SEDD 是完全连接的 CTMC，每个位置要预测 $K-1$ 个比值——表达力更强（可以模型化任意 token 之间的转移倾向），但计算量也是 $O(K)$ 倍。在 text vocab $K \approx 50\,000$ 时这是非常显著的开销，原论文用结构化 $Q$（uniform / absorbing）让计算可以摊销到 $O(\log K)$ 或近似 $O(1)$；这也是后续工作 (MD4、RADD 等) 重点优化的方向。在 perplexity 指标上，SEDD 和 MDLM 早期版本表现接近，但 SEDD 的框架被认为更通用、可以原生支持非掩码的噪声方案，是 diffusion-as-foundation-model 的离散版起点；这也是为什么后续讨论"离散扩散基础模型"时通常以 SEDD 作为参考点，而不是更早的 D3PM。</div>
+
+    <h2>训练 pipeline 速览</h2>
+
+    <p>把上面的零件拼起来，SEDD 的训练循环和连续扩散惊人地相似：</p>
+
+    <ol>
+      <li><strong>采干净样本</strong> $x_0 \sim p_{\text{data}}$，例如一句文本。</li>
+      <li><strong>采时间</strong> $t \sim \text{Uniform}(0, T)$。</li>
+      <li><strong>采加噪样本</strong> $x_t \sim p_t(\cdot\,|\,x_0)$，按设计好的前向 CTMC 跳跃。对 uniform $Q$ 而言这是闭式分布，对 absorbing $Q$ 而言每个 token 独立按概率被替换成 [MASK]。</li>
+      <li><strong>解析算真实比值</strong> $r^\star(y) = p_t(y\,|\,x_0)/p_t(x_t\,|\,x_0)$，对每个邻居 $y$。这一步因为 kernel 已知所以是确定性的。</li>
+      <li><strong>前向 + 反向</strong>：网络输出 $s_\theta(x_t, \cdot, t)$，计算 score entropy 损失，反向传播。</li>
+    </ol>
+
+    <p>对比 DDPM 训练循环：采 $x_0$、采 $t$、采 $\epsilon$、加噪得 $x_t = \sqrt{\bar\alpha_t} x_0 + \sqrt{1 - \bar\alpha_t}\,\epsilon$、网络预测 $\hat\epsilon$、算 MSE。结构完全一致，只是"加噪 + 解析监督量"从 $\epsilon$ 换成了"邻居比值向量"。这种深刻的结构相似性正是 SEDD 被称为"score-based 在离散空间的自然延续"的原因，而不只是又一种 discrete diffusion 变体。如果你看懂了连续扩散的 noise prediction 训练流程，把 noise vector 换成 ratio vector、把 Gaussian kernel 换成 CTMC kernel，就直接得到 SEDD。</p>
+
+    <h2>工程上的几个细节</h2>
+
+    <p>在实际实现里，有几个不写出来就训不收敛的细节，讲师虽然没在课堂上完全展开但论文里反复强调：第一，$s_\theta$ 必须用 $\exp$ 参数化保证正性，否则 $\log s_\theta$ 在 $s_\theta \to 0$ 时会爆炸出 $-\infty$；第二，时间 $t$ 接近 0 时比值的方差非常大（干净样本附近，邻居比值能差几个数量级）、接近 $T$ 时几乎都接近 1（噪声充分混合），所以要按 noise schedule 给不同时间段的损失加权才能保持训练稳定；第三，对 absorbing $Q$（也就是只允许 token → MASK 的情形），未 mask 的位置 concrete score 退化成常数 1，损失自动稀疏化、计算量从 $O(L \cdot K)$ 降到 $O(\text{mask count} \cdot K)$；第四，反向采样的 tau-leaping 离散化里，如果步长 $\Delta t$ 太大会导致总跳跃概率超过 1（数学上越界），工程上常用 Poisson clipping 或者干脆缩小 $\Delta t$ 来回避；第五，词汇表 $K = 50\,000$ 时 $L \times K$ 的输出张量内存压力巨大，需要 mixed precision 或分块计算。这些细节合在一起，决定了 SEDD 能不能跑出和同规模 autoregressive transformer 接近的 perplexity——论文报告的结果是在 OpenWebText 上和 GPT-2 接近，这在 2024 年是离散扩散的标志性成果，也奠定了它作为后续工作（MD4、RADD、SDTT 等）出发点的地位。</p>
+
+
+    <h2>和连续 score-based 的对照表</h2>
+
+    <table class="sedd-table">
+      <thead><tr><th></th><th>连续 (Song &amp; Ermon)</th><th>SEDD (离散)</th></tr></thead>
+      <tbody>
+        <tr><td>score</td><td>$\nabla_x \log p_t(x)$</td><td>$p_t(y)/p_t(x)$, $y \neq x$</td></tr>
+        <tr><td>前向</td><td>SDE: $dx = f\,dt + g\,dW$</td><td>CTMC: $\dot p_t = Q_t p_t$</td></tr>
+        <tr><td>反向</td><td>SDE 带 score drift</td><td>反向 CTMC, rate 乘比值</td></tr>
+        <tr><td>损失</td><td>Hyvärinen (分部积分)</td><td>score entropy (枚举邻居)</td></tr>
+        <tr><td>每步代价</td><td>$O(d)$ 维度</td><td>$O(K)$ 状态数</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section class="concept-interact">
+    <p><strong>注意看不变量</strong>：随着步骤推进，公式从"我们要学的目标"出发，逐步替换出"可计算的代理"——但<em>最优解的位置永远是 $s_\theta^\star = p_t(y)/p_t(x)$</em>，这就是 SEDD 能 work 的核心。每一步都不改变最优解、只改变损失函数的"形状"和"可监督性"，整个推导本质上是一个等价变换链。</p>
+
+    <div class="sedd-controls">
+      <button data-step="0" class="active">① 目标</button>
+      <button data-step="1">② 代理</button>
+      <button data-step="2">③ 解析项</button>
+      <button data-step="3">④ 最优解</button>
+    </div>
+
+    <div id="sedd-readout">
+      <div class="sedd-line sedd-active-line" data-line="0">想学的真目标（不可直接监督）：<br>$$s_\theta(x, y, t) \;\approx\; \frac{p_t(y)}{p_t(x)}.$$</div>
+      <div class="sedd-line" data-line="1">用 Bregman-on-ratios 构造代理损失：<br>$$\mathcal{L} = \mathbb{E}\!\left[\sum_{y \neq x} q(y|x)\!\left(s_\theta - \frac{p_t(y)}{p_t(x)}\log s_\theta\right)\right].$$</div>
+      <div class="sedd-line" data-line="2">用条件分布消掉未知的 $p_t$：<br>$$\frac{p_t(y)}{p_t(x)} = \mathbb{E}_{x_0}\!\!\left[\frac{p_t(y\,|\,x_0)}{p_t(x\,|\,x_0)}\,\Big|\,x_t = x\right] \text{（kernel 已知，可解析算）.}$$</div>
+      <div class="sedd-line" data-line="3">取梯度令其为 0，最优解恰好命中真实比值：<br>$$s_\theta^\star(x, y, t) = \frac{p_t(y)}{p_t(x)}. \quad\checkmark$$</div>
+    </div>
+    <script>
+      (function () {
+        const btns = document.querySelectorAll('.sedd-controls button');
+        const lines = document.querySelectorAll('#sedd-readout .sedd-line');
+        function show(step) {
+          btns.forEach(b => b.classList.toggle('active', +b.dataset.step === step));
+          lines.forEach(l => l.classList.toggle('sedd-active-line', +l.dataset.line === step));
+        }
+        btns.forEach(b => b.addEventListener('click', () => show(+b.dataset.step)));
+        show(0);
+      })();
+    </script>
+  </section>
+
+  <section class="concept-example">
+    <h2>三 token 玩具例子</h2>
+    <p>设词汇表 $\{A, B, C\}$，前向 uniform CTMC，时刻 $t$ 真实条件分布 $p_t(\cdot\,|\,x_0=A) = (0.6, 0.3, 0.1)$（也就是说，从干净样本 $A$ 加噪到时刻 $t$，有 60% 概率还是 $A$、30% 跳到了 $B$、10% 跳到了 $C$）。现在采样器观察到 $x_t = B$，要决定反向往哪儿跳。算两个 concrete score：</p>
+    <p>$$\frac{p_t(A\,|\,x_0)}{p_t(B\,|\,x_0)} = \frac{0.6}{0.3} = 2.0, \qquad \frac{p_t(C\,|\,x_0)}{p_t(B\,|\,x_0)} = \frac{0.1}{0.3} \approx 0.33.$$</p>
+    <p>反向链从 $B$ 出发，跳到 $A$ 的瞬时速率是跳到 $C$ 的 $2.0 / 0.33 \approx 6$ 倍——符合直觉：$A$ 是真实干净样本，比值应当大。score entropy 损失给网络的监督信号就是让 $s_\theta(B, A, t) \to 2.0$、$s_\theta(B, C, t) \to 0.33$。注意这两个值都是<em>未归一化</em>的，而且 $s_\theta(B, A, t)$ 大于 1——这是 concrete score 和 softmax 概率最容易混淆的地方。如果你硬要在最后一层套 softmax，最优解就被强行归一化到 $(2.0, 1.0, 0.33)/3.33 \approx (0.60, 0.30, 0.10)$，看似还是真实分布，但训练目标的<em>形状</em>变了——score entropy 关心的是比值的几何，cross-entropy 关心的是概率的单纯形几何，两者梯度方向不同、收敛轨迹也不同。这也是为什么 SEDD 原始实现一定用 exp 参数化、不用 softmax。</p>
+  </section>
+
+  <section class="concept-pitfalls">
+    <h2>常见误区</h2>
+    <ol>
+      <li><strong>"SEDD 就是给 discrete diffusion 换个损失"。</strong>反例：D3PM (Austin 2021) 用 ELBO + KL 散度，目标是直接学反向转移核 $p_\theta(x_{t-1}\,|\,x_t)$；SEDD 学的对象是 <em>比值</em> $p_t(y)/p_t(x)$，再通过 Kolmogorov 关系反推 $\bar Q_t$ 才得到转移概率——架构、训练目标、采样器、归一化处理全都不同。两者关系类似于连续扩散里 DDPM 和 score-based SDE：终点相似，路径完全不同。</li>
+      <li><strong>"concrete score 是一个数"。</strong>反例：对 token 化文本，每个位置每步要预测 $K-1 \approx 50\,000$ 个比值。网络输出张量形状是 $L \times (K-1)$，每个位置一个完整的"邻居比值向量"，<em>不</em>是 $L \times 1$。这是 SEDD 比 MDLM 贵的根源——MDLM 每个位置只输出一个 $K$ 维 softmax，只回答 "MASK 应填什么"，但 SEDD 要回答 "当前 token 与每个候选 token 的相对密度"，信息量大得多、监督信号也密集得多。</li>
+      <li><strong>"score entropy 就是 cross-entropy"。</strong>反例：cross-entropy 是 $-\sum_i p_i \log q_i$，定义在归一化概率分布上；score entropy 是 $\sum_y q(y|x)(s - r \log s)$，定义在<em>正比值</em>上 ($s, r > 0$)，对应的不是 KL 而是 Bregman divergence on positive reals。两者最优解形式相似 ($s^\star = r^\star$) 但代数结构和数值稳定性截然不同——$s$ 必须严格大于 0，工程上常用 $s_\theta = \exp(f_\theta)$ 参数化，且 log 项可能在 $s$ 很小时数值爆炸，需要特别处理。混淆这两者会让你以为可以套用 softmax 训练 SEDD，结果完全 train 不出来。</li>
+    </ol>
+  </section>
+
+  <section class="concept-seealso">
+    <h2>相关概念</h2>
+    <ul>
+      <li><a href="/video-to-notebook/concepts/discrete-diffusion/">Discrete Diffusion</a></li>
+      <li><a href="/video-to-notebook/concepts/masked-diffusion/">Masked Diffusion</a></li>
+    </ul>
+  </section>
+
+  <section class="concept-sources">
+    <h2>来源</h2>
+    <ol>
+      <li><a href="https://www.youtube.com/watch?v=mXEjZblUBPs&t=2s" target="_blank" rel="noopener">cmu-10799-diffusion-flow · L12 · Discrete Diffusion &amp; Masked Diffusion · (00:02)</a></li>
+      <li><a href="https://www.youtube.com/watch?v=mXEjZblUBPs&t=326s" target="_blank" rel="noopener">cmu-10799-diffusion-flow · L12 · 三视角 → discrete diffusion 映射 · (05:26)</a></li>
+      <li><a href="https://www.youtube.com/watch?v=mXEjZblUBPs&t=284s" target="_blank" rel="noopener">cmu-10799-diffusion-flow · L12 · Stanford 第一篇 diffusion LM 与 SEDD 对比 · (04:44)</a></li>
+    </ol>
+  </section>
+</article>

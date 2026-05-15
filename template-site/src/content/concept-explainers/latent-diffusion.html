@@ -1,0 +1,221 @@
+<style>
+/* prefix: ld- */
+.ld-quickref{background:var(--surface-soft);border-left:3px solid var(--module-accent);padding:0.8rem 1rem;border-radius:0 4px 4px 0;margin:1rem 0;font-size:0.92rem;}
+.ld-quickref div{margin:0.3rem 0;}
+.ld-svg{display:block;margin:1.2rem auto;max-width:100%;height:auto;}
+.ld-pitfalls ol{padding-left:1.4rem;} .ld-pitfalls li{margin:0.6rem 0;}
+.ld-source-quote{font-style:italic;color:var(--text-muted);border-left:2px solid var(--border);padding:0.3rem 0.9rem;margin:0.6rem 0;font-size:0.92rem;}
+.my-addition{background:var(--accent-soft);border-left:3px solid var(--accent);padding:0.45rem 0.9rem;margin:0.8rem 0;font-size:0.9rem;border-radius:0 4px 4px 0;}
+.ld-callout{background:var(--module-accent-soft);border:1px solid var(--border);padding:0.6rem 0.9rem;border-radius:4px;margin:0.8rem 0;font-size:0.92rem;}
+.ld-stage{background:var(--surface-soft);border:1px solid var(--border);border-radius:4px;padding:0.7rem 0.9rem;margin:0.6rem 0;}
+.ld-stage h3{margin:0 0 0.3rem 0;font-size:1rem;}
+.ld-controls{display:flex;gap:0.5rem;flex-wrap:wrap;margin:0.6rem 0;}
+.ld-controls button{background:var(--surface);border:1px solid var(--border);color:var(--text);padding:0.35rem 0.7rem;border-radius:4px;cursor:pointer;font-size:0.88rem;}
+.ld-controls button.active{background:var(--module-accent);color:var(--surface);border-color:var(--module-accent);}
+.ld-line{display:none;font-family:ui-monospace,monospace;font-size:0.88rem;padding:0.4rem 0.6rem;background:var(--surface-soft);border-radius:4px;margin:0.3rem 0;color:var(--text);}
+.ld-line.cd-active-line{display:block;}
+@keyframes ld-noise-flow{0%{stroke-dashoffset:0;}100%{stroke-dashoffset:-40;}}
+.ld-flow-arrow{stroke-dasharray:4 4;animation:ld-noise-flow 2s linear infinite;}
+</style>
+
+<article class="concept-entry">
+  <header class="concept-header">
+    <span class="concept-eyebrow">概念</span>
+    <h1>Latent Diffusion</h1>
+    <p class="concept-tagline">— 先用 VAE 把图压成小张量，再让 diffusion 在小张量空间里跑。</p>
+  </header>
+
+  <aside class="ld-quickref">
+    <div><strong>定义</strong> · 把 diffusion 的前向/反向过程整个搬到 VAE encoder 的 latent space $z = E(x)$ 里跑；Stable Diffusion 的核心配方（Rombach et al. 2022）。</div>
+    <div><strong>公式</strong> · 训练损失 $\mathcal{L}_{LDM} = \mathbb{E}_{z, \epsilon, t}\big[\|\epsilon - \epsilon_\theta(z_t, t, c)\|^2\big]$，其中 $z_t = \sqrt{\bar\alpha_t}\,E(x_0) + \sqrt{1-\bar\alpha_t}\,\epsilon$。</div>
+    <div><strong>易错</strong> · 不是"用 VAE 提速的 diffusion"——是 <em>两阶段</em> 训练：先把 $E, D$ 训到收敛，再 <strong>冻住</strong> $E, D$ 训 U-Net。两件事的目标函数完全不同。</div>
+  </aside>
+
+  <section class="concept-intuition">
+    <p>很多人第一次看到 Stable Diffusion 论文标题就以为：<strong>latent diffusion = 把 VAE 拼到 diffusion 前面，端到端一起训</strong>。这是最常见的误解。真相是：<em>latent diffusion 是 TWO-STAGE 训练，VAE 提前完成了「感知压缩」（perceptual compression），然后才轮到 diffusion 上场</em>。两阶段的 loss、数据、目标都不一样，中间用 <code>E.requires_grad_(False)</code> 把 encoder/decoder 冻得死死的。如果你把它当成一阶段端到端模型去推梯度公式，会发现根本对不上——因为 diffusion 训练时 VAE 完全是个常量函数。</p>
+
+    <p>打个上课用得到的比喻：<strong>VAE 像后台美术，diffusion 像剧作家</strong>。后台美术先把"512×512 像素的画布"折叠成"64×64×4 的小笺"——这小笺保留了所有<em>能被人眼分辨的语义</em>，丢掉了人眼根本看不出区别的高频抖动（一根头发丝的具体灰度值）。剧作家拿到小笺之后，只用专心写"该出现什么内容"，不用操心"每根头发怎么渲染"。最后把写好的小笺递给后台美术，由 decoder 一次性铺成 512×512 的成品。这就是为什么 Rombach 把第一阶段叫做 perceptual compression、第二阶段叫做 semantic compression：前者削掉"看不出来的"，后者建模"语义层面"。</p>
+
+    <p>另一个等价的比喻是<strong>地图测绘</strong>：你要在地图上画一条河流的走势，没必要把每滴水的位置都建模——把河面抽象成几个控制点就够了。VAE encoder 干的就是"把河面抽象成控制点"，diffusion 在控制点空间里规划走势，最后 decoder 把控制点还原成连续河面。计算量集中在抽象层，效率自然高。</p>
+
+    <div class="ld-source-quote">「过去五年，diffusion 和 flow matching 主宰了视觉生成 AI 的版图，催生了极强的 text-to-image、text-to-video 模型——GPT-4o image、nano banana、Midjourney、Flux……背后的核心技术就是 diffusion / flow matching。」—— CMU 10799 L11, Linqi (Alex) Zhou (Luma AI), @00:44</div>
+
+    <div class="ld-source-quote">「Luma 自己也训了大规模 text-to-video 模型，主打真实感……可以看到这些模型在生成运动和真实角色动画上非常擅长。」—— CMU 10799 L11, @01:36（Alex 在介绍 Luma R3 视频生成模型时）</div>
+
+    <p>讲师 Alex 在 CMU L11 没有专门展开 latent diffusion 这一节，但他列举的所有商用图/视频模型（GPT-4o image、nano banana、Midjourney、Flux、Luma R3）<strong>全部</strong>跑在 latent space 里。换句话说：你在 2026 年看到的几乎所有"能跑得动 4K 视频"的生成模型，都靠 latent diffusion 这一招把计算量压下来——否则 GPU 集群烧不起。Luma 的 R3 视频模型 latent 是 3D（含时间维），但配方完全沿用 Rombach 2022 的两阶段框架。</p>
+
+    <p>训练里这件事对应：阶段一把 $E, D$ 训成一个能保留语义的"图像压缩器"；阶段二把 U-Net 训成一个"在压缩域里去噪"的网络。后者才是大家熟悉的 $\epsilon$-prediction，只是 $x$ 换成了 $z$。再往后，无论是 classifier-free guidance、DDIM、DPM-Solver 还是 flow matching，所有采样技巧<strong>无一例外</strong>地继续在 latent 空间起作用——只要把训练阶段的 token 维度认成 $z$ 而不是 $x$，整套数学不动一行。这是 latent diffusion 范式的真正威力：它把"压缩"和"生成"<em>解耦</em>，让后续所有进展都自动继承速度红利。</p>
+
+    <p>从另一个角度看：CMU L11 的 Alex 在白板上画的 OD trajectory（probability flow ODE 的蓝色路径）本来是在数据分布和高斯先验之间连线；latent diffusion 把这两端的"数据分布"换成了"latent 分布"，trajectory 的形状和数学不变，只是脚下的空间从百万维像素流形变成了万级 latent 流形。这种"换空间不换数学"的设计思路在深度学习里非常少见——绝大多数加速技巧都要付出"重新推一遍 loss"的代价，而 latent diffusion 几乎是免费的。代价只有一个：你需要先训好那个 VAE。</p>
+  </section>
+
+  <section class="concept-deepdive">
+    <h2>两阶段是哪两阶段？</h2>
+    <p>Rombach et al. 2022《High-Resolution Image Synthesis with Latent Diffusion Models》给出的核心配方就是把生成任务拆成两段独立训练。论文的关键洞察是：在像素空间直接跑 diffusion，模型实际上在做两件不同的事情——既要学"全局语义"（什么物体出现在哪里），又要学"高频细节渲染"（每根头发的灰度抖动）。这两件事的难度、所需建模能力、数据效率完全不同，硬塞给同一个 U-Net 就是事倍功半。Rombach 的解法：用一个生成 GAN 风味的 VAE 把高频渲染部分预先学完、固化在 decoder 里；剩下的语义建模交给 latent 空间的 diffusion。</p>
+
+    <div class="ld-stage">
+      <h3>Stage 1: Perceptual Compression（训 VAE）</h3>
+      <p>输入 $x \in \mathbb{R}^{H \times W \times 3}$（比如 $512 \times 512 \times 3$，共 786 432 维）。<strong>Why 不直接在像素跑 diffusion</strong>：像素空间里一大半比特用在描述"人眼根本分辨不出"的高频细节上——直接在像素跑 diffusion 等于让模型把算力浪费在不该建模的层级。Rombach 在论文 Figure 2 里画了一张著名图：横轴 distortion（PSNR），纵轴 rate（bits）；曲线上"感知失真和率失真分道扬镳"的那个拐点就是 perceptual compression 的甜区——压到该拐点为止，人眼分辨不出；压过头，开始丢语义。VAE 的工作就是把模型拽到这个甜区。</p>
+      <p>训练目标三项相加：</p>
+      <p>$$\mathcal{L}_{VAE} = \underbrace{\|x - D(E(x))\|_1}_{\text{重建}} + \underbrace{\lambda_{KL} \cdot D_{KL}(q(z|x) \| \mathcal{N}(0, I))}_{\text{正则}} + \underbrace{\lambda_{adv} \cdot \mathcal{L}_{GAN}(x, D(E(x)))}_{\text{对抗}}$$</p>
+      <p><strong>Why 每一项</strong>：重建（L1 比 L2 更鲁棒、对 outlier 不敏感）保证 decoder 能还原；KL 保证 latent 分布不至于退化成离散点（但权重极小，$\lambda_{KL} \approx 10^{-6}$，否则模糊）；对抗损失用 PatchGAN 判别器保证 decoder 输出"看起来真实"——单靠 L1 重建会糊，加 adversarial 之后纹理才锐。<strong>Why 不直接用大 KL 权重</strong>：那就退化成纯 VAE，重建模糊到 diffusion 都救不回；Stable Diffusion 的 KL 系数几乎可以忽略，本质上更像 "regularized AE + GAN"，名字叫 VAE 只是历史包袱。</p>
+      <p>输出 latent $z \in \mathbb{R}^{64 \times 64 \times 4}$（共 16 384 维）。压缩比 = $786{,}432 / 16{,}384 = 48\times$。Stable Diffusion 用 $f=8$（每维空间下采 8 倍），channel 数 = 4。<strong>Why $f=8$ 而不是更大</strong>：Rombach 实验扫了 $f \in \{4, 8, 16, 32\}$，$f=4$ FID 最好但算力收益不够，$f=16$ 起重建质量崩，$f=8$ 是"FID 与速度的帕累托最优"。</p>
+      <div class="ld-callout"><strong>工程提示</strong>：Stable Diffusion 公开发布的 VAE checkpoint <code>sd-vae-ft-mse</code> 是社区在原版基础上用 MSE loss + 更大数据集 finetune 出来的，比原版纹理更稳定，跑文生图前默认换掉。另一个常踩的坑是 <code>fp16</code> 推理时 VAE encoder 会数值溢出（latent 出现 NaN），需要在 encoder 部分强制 <code>fp32</code> 跑、只把 U-Net 跑 fp16，这是 diffusers 库里默认的 <code>upcast_vae</code> 行为。</div>
+    </div>
+
+    <div class="ld-stage">
+      <h3>Stage 2: Latent Diffusion（冻 VAE，训 U-Net）</h3>
+      <p>冻住 $E, D$。对每个训练样本 $x_0$：</p>
+      <ol>
+        <li>$z_0 = E(x_0)$，得到 $64 \times 64 \times 4$ 的"干净 latent"；</li>
+        <li>乘以 <code>scale_factor=0.18215</code> 把 latent 重标定到接近单位方差（关键工程细节，见 pitfall #3）；</li>
+        <li>采 $t \sim \mathcal{U}\{1, \ldots, T\}$、$\epsilon \sim \mathcal{N}(0, I)$；</li>
+        <li>加噪：$z_t = \sqrt{\bar\alpha_t}\, z_0 + \sqrt{1-\bar\alpha_t}\, \epsilon$；</li>
+        <li>U-Net 预测 $\hat\epsilon = \epsilon_\theta(z_t, t, c)$，其中 $c$ 是 text embedding；</li>
+        <li>loss = $\| \epsilon - \hat\epsilon\|^2$（Ho 2020 的 simple loss，未带任何重加权）。</li>
+      </ol>
+      <p><strong>Why $\epsilon$-prediction 在 latent 空间依旧成立</strong>：noise schedule、ELBO、Tweedie 公式全部对 $z$ 同样推导——只要 $z$ 维度有限、近似高斯，DDPM 的所有数学不需要改一行。这就是为什么 Rombach 论文里能直接复用 Ho 2020 的 simple loss，整篇论文几乎没有新的 diffusion 数学，全部贡献集中在"换个空间跑"。</p>
+      <p>引用 CMU L11 Alex 对 simple loss 的总结：<em>「最终损失归结为一个简单的 L2 loss，极其稳定，对大参数量也极易 scale。」</em>（@04:13）这句话在 latent diffusion 上同样成立，且因为 latent 维度更低，每步反向传播的显存占用骤降，反而让大模型更容易训。</p>
+    </div>
+
+    <h2>两阶段的训练时长与数据</h2>
+    <p>Stage 1 训练 VAE 用 OpenImages 数据集，约 250 万张图，A100 单卡训 7 天即可收敛——因为 perceptual compression 任务相对独立，不需要文本对齐数据。Stage 2 训 U-Net 用 LAION-5B 子集（约 6 亿张图文对），256 张 A100 训约 25 天得到 SD-1.4。<strong>Why 数据量差距这么大</strong>：阶段一只需"学会压缩任意自然图像"，阶段二要"学会把所有人类语言概念映射到视觉 latent"，后者是开放词汇问题，数据量需求高三个数量级。</p>
+    <p>这套数据分工还有一个隐含的可复用性：阶段一训出的 VAE 可以被多个 diffusion 模型共享——SD-1.x、SD-2.x、ControlNet、各种 finetune 用的都是同一个 <code>kl-f8</code> VAE checkpoint。社区每年消耗的"训 VAE"算力其实只在 2022 年发生过一次。这种"前置压缩器一次训好，万人共享"的范式后来也启发了语音生成（EnCodec 之于 AudioLM）、3D 生成（DINO feature 之于 3D diffusion）等多个领域，是 latent diffusion 思想最深远的间接影响。</p>
+
+    <h2>条件输入：cross-attention</h2>
+    <p>U-Net 的每个 transformer block 里加 cross-attention：query 来自 latent feature map，key/value 来自 text encoder（早期用 CLIP ViT-L，SD3 用 T5-XXL + CLIP-L + CLIP-G 三合一）：</p>
+    <p>$$\text{Attn}(Q, K, V) = \text{softmax}\!\left(\frac{Q K^\top}{\sqrt{d}}\right) V, \quad Q = W_Q \phi(z_t),\ K = W_K \tau_\theta(c),\ V = W_V \tau_\theta(c)$$</p>
+    <p>这里 $\phi(z_t)$ 是 U-Net 中间层的 spatial feature（把 $H \times W$ 拍平成 token 序列），$\tau_\theta(c)$ 是 text encoder 的输出（77 个 token，每个 token 768 维）。每个 spatial token "去问" 77 个 text token "你和我有多相关"，再加权聚合到自己身上。</p>
+    <p><strong>Why 用 cross-attention 而不是 concat</strong>：text token 数和 spatial token 数不一样（77 vs $64{\times}64$），concat 会强制 padding；cross-attention 允许任意条件长度，还能让模型显式学到"哪个词关注哪块区域"——可视化 attention map 能看到"dog"这个词的注意力聚焦在图里狗的轮廓上，这是 latent diffusion 可解释性研究（Prompt-to-Prompt、Attend-and-Excite）的基石。</p>
+    <p><strong>Why 注入在 U-Net 中间层而不是输入层</strong>：U-Net bottleneck 的 feature 已经是抽象语义，比浅层像素更适合和"语义文本"对齐；Rombach 实测在浅层注入 cross-attn 收敛慢、且文图对齐差。</p>
+
+    <h2>为什么快 50 倍？</h2>
+    <p>U-Net 的算力主要花在 self-attention 上，复杂度 $O(N^2 d)$，$N$ 是空间 token 数。Pixel diffusion：$N = 512 \times 512 = 262{,}144$；latent diffusion：$N = 64 \times 64 = 4{,}096$。比值 $(262144 / 4096)^2 \approx 4096\times$ 的注意力开销缩减，整体（含卷积部分被稀释）实测 ~50× 加速 + ~10× 显存降低。这就是 Stable Diffusion 能在单张消费级 GPU 推理的根本原因。</p>
+    <p>对比 Imagen（Google 2022）：Imagen 在 64×64 pixel 上跑 base diffusion，再用两个 super-resolution diffusion 阶梯放大到 1024×1024，三个模型加起来约 8B 参数。Stable Diffusion 用一个 U-Net (~860M) + 一个 VAE (~80M)，单卡 8GB 显存就能跑。前者贵在算力，后者贵在"想到要解耦压缩与生成"——一次架构选择换来一整代消费级生成 AI。值得注意的是：Imagen 走 cascade 路线本质上也在"降维"——它先在低分辨率像素上完成大部分语义建模，再用 SR 阶梯补细节；只不过 cascade 用<em>分辨率</em>降维，latent 用<em>学习到的语义空间</em>降维。后者更彻底，因为 VAE 学到的压缩比固定分辨率下采更聪明：64×64 latent 携带的信息相当于 256×256 像素，但只占 64×64 的算力。</p>
+
+    <h2>采样与推理</h2>
+    <p>推理流程是训练的镜像：</p>
+    <ol>
+      <li>从先验采 $z_T \sim \mathcal{N}(0, I)$（这是 64×64×4 的高斯噪声 tensor，不是 512×512×3 的）；</li>
+      <li>跑 $T'$ 步反向（DDIM 通常取 $T' = 50$，DPM-Solver 可降至 20）：每步用 U-Net 预测 $\hat\epsilon$，按采样器更新 $z_{t-1}$；</li>
+      <li>得到 $z_0$，乘以 $1/\text{scale\_factor}$ 反归一化；</li>
+      <li>$x_0 = D(z_0)$ 一次性 decode 出 512×512×3 像素。</li>
+    </ol>
+    <p>注意 decoder 只跑一次——它不参与反复迭代。这意味着即使 decoder 比较慢，分摊到每张图上也几乎可以忽略。如果你以为 decoder 也是迭代去噪结构，那就把 latent diffusion 和 cascade diffusion（Imagen 那种）搞混了：cascade 是<em>多个 diffusion 串联</em>，每一级都迭代；latent diffusion 是<em>一个 diffusion + 一次性 decoder</em>。两者解决"算力"的思路完全不同——cascade 是"分辨率分级摊销"，latent 是"换空间一次性降维"。</p>
+
+    <p>这种解耦还带来一个重要的工程红利：<strong>"what to generate" 与 "how to render" 完全分离</strong>。latent diffusion 决定"内容"（构图、对象、姿态），frozen decoder 决定"渲染"（纹理、笔触、风格细节）。想换风格？不重训 U-Net，只 fine-tune decoder 就行——这就是 SDXL refiner、各种社区 VAE finetune（mse-ft、ema-ft）能存在的原理。反过来，想换内容理解？保留 decoder，只重训 U-Net（DreamBooth、LoRA 走的路径）。两条工程路径互不干扰，是 latent diffusion 生态繁荣的底层原因。</p>
+
+    <div class="my-addition">🟡 教材外补充：源 CMU L11 没展开 latent diffusion 细节，但 Alex 列举的 Luma R3、Midjourney、Flux 全部建立在 Rombach 2022 这套两阶段框架上。SD1/SD2 用 KL-VAE（4 channel）；SDXL 升级到 4 channel 但更大空间分辨率 + refiner 二级 U-Net；SD3 改用 16 channel VAE 并把 backbone 换成 MMDiT (multimodal diffusion transformer)，丢弃 U-Net；FLUX.1 用 16 channel + rectified flow 替代 DDPM；Luma R3、Sora 都把 latent 扩到 3D (时间维)。共同点是<em>没有人回到像素空间</em>——latent diffusion 已经是 2026 年视觉生成事实上的标配。</div>
+
+    <svg class="ld-svg" viewBox="0 0 600 240" role="img" aria-label="Latent Diffusion 块图：像素 x 经 VAE encoder 进入 latent z，diffusion 在 latent 空间反复加噪去噪，decoder 还原成像素">
+      <g font-family="ui-sans-serif" font-size="11" fill="var(--text)">
+        <!-- pixel x -->
+        <rect x="15" y="90" width="80" height="60" rx="4" fill="var(--surface-soft)" stroke="var(--border)"/>
+        <text x="55" y="115" text-anchor="middle">x</text>
+        <text x="55" y="132" text-anchor="middle" font-size="9" fill="var(--text-muted)">512×512×3</text>
+        <!-- encoder -->
+        <path d="M 100 120 L 145 120" stroke="var(--text-muted)" marker-end="url(#ld-arr)"/>
+        <rect x="148" y="95" width="60" height="50" rx="4" fill="var(--module-accent)"/>
+        <text x="178" y="118" text-anchor="middle" fill="var(--surface)" font-size="10">E</text>
+        <text x="178" y="132" text-anchor="middle" fill="var(--surface)" font-size="9">VAE enc</text>
+        <text x="178" y="160" text-anchor="middle" font-size="9" fill="var(--text-muted)">frozen</text>
+        <!-- latent z0 -->
+        <path d="M 210 120 L 245 120" stroke="var(--text-muted)" marker-end="url(#ld-arr)"/>
+        <rect x="248" y="100" width="50" height="40" rx="3" fill="var(--surface-soft)" stroke="var(--border-strong)"/>
+        <text x="273" y="118" text-anchor="middle" font-size="10">z₀</text>
+        <text x="273" y="132" text-anchor="middle" font-size="8" fill="var(--text-muted)">64×64×4</text>
+        <!-- diffusion loop -->
+        <path d="M 300 120 L 340 120" stroke="var(--text-muted)" marker-end="url(#ld-arr)"/>
+        <rect x="343" y="80" width="120" height="80" rx="4" fill="var(--module-accent-soft)" stroke="var(--module-accent)"/>
+        <text x="403" y="105" text-anchor="middle" font-size="10">U-Net 去噪</text>
+        <text x="403" y="122" text-anchor="middle" font-size="9" fill="var(--text-muted)">z_T → z_{T-1} → … → z_0</text>
+        <text x="403" y="138" text-anchor="middle" font-size="9" fill="var(--text-muted)">cross-attn(text c)</text>
+        <path d="M 403 160 C 460 200, 345 200, 403 165" fill="none" stroke="var(--module-accent)" class="ld-flow-arrow"/>
+        <text x="403" y="195" text-anchor="middle" font-size="9" fill="var(--module-accent)">T steps</text>
+        <!-- decoder -->
+        <path d="M 465 120 L 500 120" stroke="var(--text-muted)" marker-end="url(#ld-arr)"/>
+        <rect x="503" y="95" width="60" height="50" rx="4" fill="var(--module-accent)"/>
+        <text x="533" y="118" text-anchor="middle" fill="var(--surface)" font-size="10">D</text>
+        <text x="533" y="132" text-anchor="middle" fill="var(--surface)" font-size="9">VAE dec</text>
+        <text x="533" y="160" text-anchor="middle" font-size="9" fill="var(--text-muted)">frozen</text>
+        <!-- output -->
+        <path d="M 533 145 L 533 200" stroke="var(--text-muted)" marker-end="url(#ld-arr)"/>
+        <text x="533" y="220" text-anchor="middle" font-size="10">x̂ = D(z₀)</text>
+        <!-- text condition -->
+        <rect x="343" y="20" width="120" height="30" rx="4" fill="var(--blue-soft)" stroke="var(--blue)"/>
+        <text x="403" y="40" text-anchor="middle" font-size="9" fill="var(--text)">text c (CLIP/T5)</text>
+        <path d="M 403 50 L 403 78" stroke="var(--blue)" marker-end="url(#ld-arr)"/>
+        <defs>
+          <marker id="ld-arr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--text-muted)"/>
+          </marker>
+        </defs>
+      </g>
+    </svg>
+  </section>
+
+  <section class="concept-interact">
+    <p>下面按顺序点四个按钮，看 latent diffusion 一次完整的 <strong>训练 / 推理</strong> 流程。<strong>不变量</strong>：所有运算都在 $64 \times 64 \times 4$ 的 latent 上进行，pixel space 只在最起点和最终点出现两次。</p>
+    <div class="ld-controls">
+      <button data-step="0" class="active">① 编码</button>
+      <button data-step="1">② 加噪</button>
+      <button data-step="2">③ 反扩散</button>
+      <button data-step="3">④ 解码</button>
+    </div>
+    <div id="ld-readout">
+      <div class="ld-line cd-active-line" data-line="0">z₀ = E(x₀) ∈ ℝ^{64×64×4} &nbsp;// 像素 → latent，一次性，frozen</div>
+      <div class="ld-line" data-line="1">z_t = √ᾱₜ · z₀ + √(1−ᾱₜ) · ε, &nbsp; ε ∼ 𝒩(0, I) &nbsp;// 在 latent 加噪</div>
+      <div class="ld-line" data-line="2">z_{t−1} ← μ_θ(z_t, t, c) + σ_t · ξ, &nbsp; for t = T, T−1, …, 1 &nbsp;// U-Net 反向 T 步</div>
+      <div class="ld-line" data-line="3">x̂ = D(z₀) ∈ ℝ^{512×512×3} &nbsp;// latent → 像素，一次性，frozen</div>
+    </div>
+    <script>
+      (function () {
+        const btns = document.querySelectorAll('.ld-controls button');
+        const lines = document.querySelectorAll('#ld-readout .ld-line');
+        function show(step) {
+          btns.forEach(b => b.classList.toggle('active', +b.dataset.step === step));
+          lines.forEach(l => l.classList.toggle('cd-active-line', +l.dataset.line === step));
+        }
+        btns.forEach(b => b.addEventListener('click', () => show(+b.dataset.step)));
+        show(0);
+      })();
+    </script>
+  </section>
+
+  <section class="concept-example">
+    <h2>手算压缩比与算力比</h2>
+    <p>Pixel 维度 $= 512 \cdot 512 \cdot 3 = 786{,}432$。Latent 维度 $= 64 \cdot 64 \cdot 4 = 16{,}384$。压缩比 $= 786{,}432 / 16{,}384 = 48$。</p>
+    <p>注意力空间 token 数：pixel 端 $N_p = 512 \cdot 512 = 262{,}144$；latent 端 $N_z = 64 \cdot 64 = 4{,}096$。自注意力复杂度 $\propto N^2$，故比值 $= (262{,}144 / 4{,}096)^2 = 64^2 = 4{,}096$。算上卷积部分被稀释，实际端到端加速实测约 $50\times$，显存下降约 $10\times$（Rombach 2022 Table 8）。</p>
+    <p>训练 cost 对比（512×512、A100 单卡）：pixel DDPM ≈ 150 GPU-day；SD-1.4 ≈ 6 GPU-day 在 latent 上即可达到同等 FID。差 $25\times$。</p>
+    <p>再算一笔显存账：U-Net 前向时单层 activation $\propto N \cdot c$，pixel 端单 channel 单层 $= 262{,}144 \cdot 4\text{ bytes} = 1\text{ MB}$，latent 端 $= 16{,}384 \cdot 4 = 64\text{ KB}$。一个 32 层 U-Net、256 channel、batch=4，pixel 端 activation 总量 $\approx 32 \cdot 256 \cdot 1\text{MB} \cdot 4 = 32\text{ GB}$（爆显存）；latent 端 $\approx 2\text{ GB}$（轻松塞进 8GB 卡）。这就是为什么 SD 能在 RTX 3060 上跑而 pixel DDPM 不能。</p>
+  </section>
+
+  <section class="concept-pitfalls">
+    <h2>常见误区</h2>
+    <ol>
+      <li><strong>"Latent diffusion 是端到端训 VAE + U-Net"。</strong>反例：Stable Diffusion 1.4 的 <code>config.yaml</code> 里 <code>first_stage_config.params.ckpt_path</code> 指向一个<em>独立预训练</em>的 KL-VAE（<code>kl-f8.ckpt</code>），训 U-Net 时 <code>first_stage_model.eval()</code> 全程开着、梯度不回传。如果你尝试解冻 VAE 一起训，会发现 latent 分布漂移、训练初期重建质量明显崩坏，FID 在前 10k 步内反而上升——因为 diffusion 的梯度信号是对"已成形的语义压缩空间"去噪，强行修改这个空间等于让 U-Net 追着一个移动靶打。SD3 后续尝试过端到端联合微调，也只是在 U-Net 训练后期解冻 VAE 做<em>有限步数</em>的微调，全程冻结仍是默认方案。</li>
+      <li><strong>"latent 越小越好，反正算得快"。</strong>反例：把 $f$ 从 8 调到 16（latent $32 \times 32 \times 4$），FID 从 8.3 涨到 17.6（Rombach Table 6）；继续到 $f=32$，FID 飙到 27。压得太狠丢失重建细节，diffusion 再准也救不回——decoder 是上限，VAE 重建 FID 是 latent diffusion FID 的<em>不可突破下界</em>。这告诉我们："perceptual compression 的甜区"必须实测扫出来，不能拍脑袋拉大压缩比。反过来 $f=4$ 重建质量虽好，但 latent 维度回到 $128 \times 128 \times 3 \approx 49\text{K}$ 维，diffusion 算力上反而失去了主要优势。</li>
+      <li><strong>"VAE-latent ≈ 高斯，所以可以直接采 $z \sim \mathcal{N}(0, I)$ 拿去 decode"。</strong>反例：实测 latent 的 channel-wise std ≈ $\{4.17, 3.51, 4.06, 3.36\}$（SD-1.4 量化结果），不是单位方差；Rombach 在配置里专门加了 <code>scale_factor=0.18215</code>（约等于 $1/\text{std}$）把 latent 重标定到接近单位方差，diffusion 才稳。直接拿 $\mathcal{N}(0, I)$ 采样会 decode 出一片灰雾（亮度均值正确但纹理全乱）。Stable Diffusion 推理代码里 <code>z = z / 0.18215</code> 这行就是反归一化，少了它整张图爆白。这个常数不是从理论推出来的，是 Rombach 在训练前先跑一批数据统计出 latent 标准差再取倒数得到的<em>经验值</em>——换数据集或换 VAE checkpoint 就要重新统计。</li>
+    </ol>
+  </section>
+
+  <section class="concept-seealso">
+    <h2>相关概念</h2>
+    <p>Latent diffusion 是一个连接性极强的概念：它向上承接 VAE 的压缩理论，向下接管所有现代采样技巧，横向延伸到视频生成。理解了它，下面几个概念基本就连成网了。</p>
+    <ul>
+      <li><a href="/video-to-notebook/concepts/video-diffusion/">Video Diffusion</a> — 把同一套两阶段框架扩到时序，latent 从 4D 变成 5D（含时间维），Luma R3、Sora、Veo 走的都是这条路。</li>
+      <li><a href="/video-to-notebook/concepts/classifier-free-guidance/">Classifier-Free Guidance</a> — Stable Diffusion 推理的标配条件强化技术，在 latent 空间执行 $\epsilon_{\text{guided}} = \epsilon_\text{uncond} + w(\epsilon_\text{cond} - \epsilon_\text{uncond})$，是文图对齐质量的关键调控旋钮。</li>
+      <li><a href="/video-to-notebook/concepts/ddim/">DDIM</a> — Stable Diffusion 默认采样器，在 latent 上跑同样适用，把推理步数从 1000 降到 50 是商用落地的前提。</li>
+      <li><a href="/video-to-notebook/concepts/probability-flow-ode/">Probability Flow ODE</a> — 把 latent diffusion 改写成 ODE 后能套 DPM-Solver 这类高阶求解器，进一步把步数压到 20 步以下。</li>
+    </ul>
+  </section>
+
+  <section class="concept-sources">
+    <h2>来源</h2>
+    <ol>
+      <li><a href="https://www.youtube.com/watch?v=H7MxR3XDt30&t=44s" target="_blank" rel="noopener">cmu-10799-diffusion-flow · L11 · Guest Lecture Linqi (Alex) Zhou (Luma AI) — diffusion/flow 主宰视觉生成 · (00:44)</a></li>
+      <li><a href="https://www.youtube.com/watch?v=H7MxR3XDt30&t=96s" target="_blank" rel="noopener">cmu-10799-diffusion-flow · L11 · 商用 T2I/T2V 模型（Midjourney、Flux、Luma R3）背后都是 diffusion · (01:36)</a></li>
+      <li><a href="https://www.youtube.com/watch?v=H7MxR3XDt30&t=253s" target="_blank" rel="noopener">cmu-10799-diffusion-flow · L11 · Simple L2 loss 与 inference 慢的根因 · (04:13)</a></li>
+    </ol>
+  </section>
+</article>

@@ -1,0 +1,179 @@
+<style>
+/* prefix: sl- */
+.sl-quickref{background:var(--surface-soft);border-left:3px solid var(--module-accent);padding:0.8rem 1rem;border-radius:0 4px 4px 0;margin:1rem 0;font-size:0.92rem;}
+.sl-quickref div{margin:0.3rem 0;}
+.sl-svg{display:block;margin:1.2rem auto;max-width:100%;height:auto;}
+.sl-pitfalls ol{padding-left:1.4rem;} .sl-pitfalls li{margin:0.5rem 0;}
+.sl-source{font-style:italic;color:var(--text-muted);border-left:2px solid var(--border);padding:0.2rem 0.8rem;margin:0.5rem 0;font-size:0.9rem;}
+.sl-callout{background:var(--surface-soft);border-left:3px solid var(--module-accent);padding:0.8rem 1rem;margin:1rem 0;font-size:0.92rem;border-radius:0 4px 4px 0;}
+.sl-callout-quote{background:var(--module-accent-soft);border-left:3px solid var(--module-accent);padding:0.7rem 1rem;margin:0.8rem 0;font-style:italic;color:var(--text);border-radius:0 4px 4px 0;}
+.my-addition{background:var(--blue-soft);border-left:3px solid var(--blue);padding:0.4rem 0.8rem;margin:0.8rem 0;font-size:0.9rem;color:var(--text);border-radius:0 4px 4px 0;font-weight:600;}
+.sl-controls{display:flex;gap:0.4rem;flex-wrap:wrap;margin:0.8rem 0;}
+.sl-controls button{background:var(--surface-soft);border:1px solid var(--border);color:var(--text);padding:0.35rem 0.7rem;border-radius:4px;cursor:pointer;font-size:0.88rem;}
+.sl-controls button.active{background:var(--module-accent);color:var(--surface);border-color:var(--module-accent);}
+.sl-readout{background:var(--surface-soft);border:1px solid var(--border);border-radius:4px;padding:0.8rem;margin:0.6rem 0;}
+.sl-line{opacity:0.35;transition:opacity 0.2s;margin:0.3rem 0;font-size:0.92rem;}
+.sl-line.cd-active-line{opacity:1;font-weight:600;color:var(--module-accent);}
+.sl-eq{font-family:ui-monospace,Menlo,monospace;font-size:0.88rem;}
+</style>
+
+<article class="concept-entry">
+  <header class="concept-header">
+    <span class="concept-eyebrow">概念</span>
+    <h1>Simple Loss</h1>
+    <p class="concept-tagline">— 不是另一个目标函数，而是 ELBO 把每步权重换成 1 之后的版本。</p>
+  </header>
+
+  <aside class="sl-quickref">
+    <div><strong>定义</strong> · $L_{\text{simple}} = \mathbb{E}_{t, x_0, \epsilon}\big[\|\epsilon - \epsilon_\theta(x_t, t)\|^2\big]$，$t \sim \text{Uniform}\{1, \dots, T\}$。</div>
+    <div><strong>公式</strong> · 同上。<em>逐步权重统一为 1</em> 的 MSE——丢掉了 ELBO 里 $\frac{\beta_t^2}{2\sigma_t^2 \alpha_t (1-\bar\alpha_t)}$ 这种 $t$ 相关系数。</div>
+    <div><strong>易错</strong> · 不是 ELBO 的近似下界，而是同一个 ε-prediction MSE 换了一组权重；采样阶段两者完全一样。</div>
+  </aside>
+
+  <section class="concept-intuition">
+    <p>很多人第一次看 Ho et al. 2020 都会以为：DDPM 抛弃了变分下界（ELBO），自己另起炉灶造了一个工程上能跑的 MSE。<strong>其实不是。</strong>simple loss 和 ELBO 用的是同一个网络、同一种参数化、同一个 ε-prediction 头部——区别只在<em>训练信号怎么按时间步加权</em>这一件事上。把每一步的权重 $w_t$ 全换成 1，就得到 $L_{\text{simple}}$；保留原始 $w_t = \frac{\beta_t^2}{2\sigma_t^2 \alpha_t (1-\bar\alpha_t)}$，就回到 ELBO。两者参数化完全相同，唯一不同是<strong>训练时让哪些 $t$ 的损失更大声说话</strong>。换句话说，simple loss 不是「另一个目标函数」，而是<strong>完整 ELBO 把逐步权重去掉之后的版本——而实证上，这一去反而效果更好</strong>。这个反直觉的结果，正是 DDPM 论文真正捅破的窗户纸。</p>
+
+    <p>Vizuara 的 Dr. Raj 在 L7 一开头就直接承认这一段「直觉很顺，公式很噩梦」的撕裂感——他刻意把整个 L7 设计成「practical 拯救 theoretical」的一节课：</p>
+    <div class="sl-callout-quote">「这听起来很直觉对吧？但当你真的开始推数学，它一点也不显然，要走到最后才能看出来。」—— Vizuara L7 @04:18</div>
+    <p>他给出的讲法是：先把目标用人话说出来——<em>预测一个 $\hat\epsilon$，要尽可能贴近前向过程里真正加进去的那粒 $\epsilon$</em>——再回头去看为什么这件事能从 ELBO 推出来。他在 L7 @03:15 用一句很关键的话定调了 simple loss 的全部精神：</p>
+    <div class="sl-callout-quote">「如果你想从真实分布采图，那你需要预测一个 ε̂，让它尽可能接近前向过程里真实加入的那粒噪声。」—— Vizuara L7 @03:15</div>
+
+    <p>更生活化的比喻是 Dr. Raj 反复用的<strong>香水扩散 / 糖溶解</strong>——你在房间一角喷香水，粒子慢慢散开；你往水里撒糖，结构慢慢消失、变得均匀噪声。两个过程的共同点是：<em>原始结构会一点一点被噪声覆盖</em>。逆过程的「老师」是谁？是<strong>当初真正注入的那粒噪声 $\epsilon$</strong>。我们让网络在每一个时间步复述这粒噪声，不是因为它在数学上最优雅，而是因为它在每一个时间步都是一个<em>干净、确定、有真值可比对的监督信号</em>。这种「让网络猜回老师手里的那张参考答案」是所有去噪式生成模型的共同范式。</p>
+
+    <p>CMU 10-799 Kelly 在 L3 把同一件事讲得更直白，她在黑板上把整条 ELBO 链摊开后，干脆抬头跟学生说：</p>
+    <div class="sl-callout-quote">「This chain of chaos is elegant in theory but doesn't work that well, it's too complicated. You multiply by something and divide it by something then you get an equal sign —— the greatest mathematical trick of all time.」—— CMU L3 #45</div>
+    <p>她讲的「乘一个除一个」不是修辞——是说 Ho et al. 用 $\epsilon$ 参数化把均值 $\mu_\theta$ 换成 $\hat\epsilon$ 的那一步代换，让所有 $t$ 相关的常数收缩到一个标量权重里、把核心损失变成纯 MSE 的过程。两位老师从两个方向逼近同一个事实：<em>simple loss 之所以「simple」，是因为它把 ELBO 里所有跟时间步绑死的丑陋系数全部抹平成 1。</em></p>
+
+    <p>放到机器学习的训练上下文里：你随机抽一个 $t \sim \text{Uniform}\{1, \dots, T\}$、抽一张干净图 $x_0$、抽一粒高斯噪声 $\epsilon \sim \mathcal{N}(0, I)$，把它们前向一步到位地加噪得到 $x_t = \sqrt{\bar\alpha_t} x_0 + \sqrt{1 - \bar\alpha_t}\,\epsilon$，让 U-Net 看着 $(x_t, t)$ 猜出 $\epsilon$，算 MSE，反传——三行 PyTorch。这就是「simple」的全部意思：<em>训练 loop 不需要展开整条马尔可夫链，每次只挑一个 $t$ 算一次 MSE，方差由随机采样自动平摊掉</em>。Vizuara L7 用蝴蝶生成实战演示了这件事——1000 张蝴蝶图、$T = 1000$、batch size 64，配合 HuggingFace diffusers 库，整个 train loop 在一个 Colab notebook 里就能跑完；如果当年用的是 ELBO 原形，连「均值-方差怎么参数化」都得手写一大堆 schedule 函数，研究门槛会高出一个数量级。这是 simple loss 真正给整个领域带来的礼物：<strong>它把扩散模型从理论物理般的复杂度降到了和回归任务同等的工程门槛。</strong></p>
+  </section>
+
+  <section class="concept-deepdive">
+    <h2>从 ELBO 一步一步推到 $L_{\text{simple}}$</h2>
+    <p>负对数似然 $-\log p_\theta(x_0)$ 不能直接优化（要对所有 $T$ 步的隐变量做积分）。标准做法是引入变分下界，把它拆成 $T$ 个 KL 之和：</p>
+    <p>$$-\log p(x_0) \le L_0 + \sum_{t=2}^{T} L_{t-1} + L_T, \quad L_{t-1} = D_{\mathrm{KL}}\big(q(x_{t-1} | x_t, x_0) \,\|\, p_\theta(x_{t-1} | x_t)\big)$$</p>
+    <p>这里 $q(x_{t-1} | x_t, x_0)$ 是「已知干净图 $x_0$ 时，前向过程的真实后验」——它仍然是一个解析可写的高斯；$p_\theta(x_{t-1} | x_t)$ 是网络要学的逆向高斯，均值由 $\mu_\theta(x_t, t)$ 给出，方差通常固定为 $\sigma_t^2 I$。两个高斯之间的 KL 等于均值差的平方除以方差（外加一个跟参数无关的常数项），所以：</p>
+    <p>$$L_{t-1} = \frac{1}{2\sigma_t^2}\,\|\tilde\mu_t(x_t, x_0) - \mu_\theta(x_t, t)\|^2 + C$$</p>
+    <p>这一步就把「KL」化成了「均值差的 MSE」，但还没出现 $\epsilon$。Ho et al. 的关键观察是：<em>真实后验均值 $\tilde\mu_t$ 可以用 $\epsilon$ 显式写出来</em>——只要把前向公式 $x_t = \sqrt{\bar\alpha_t} x_0 + \sqrt{1 - \bar\alpha_t}\,\epsilon$ 反解出 $x_0$ 代回去，就能得到</p>
+    <p>$$\tilde\mu_t(x_t, x_0) = \frac{1}{\sqrt{\alpha_t}}\Big(x_t - \frac{\beta_t}{\sqrt{1 - \bar\alpha_t}}\,\epsilon\Big)$$</p>
+    <p>那就把网络也写成同样形式：<strong>不让网络直接预测均值 $\mu_\theta$，而让它预测「该减去的那粒噪声」 $\epsilon_\theta(x_t, t)$</strong>。代入展开，均值差的平方一收缩，所有跟 $t$ 相关的繁琐系数（$\beta_t, \alpha_t, \bar\alpha_t, \sigma_t$）都被压进一个标量权重 $w_t$：</p>
+    <p>$$L_{t-1} = \mathbb{E}_{x_0, \epsilon}\bigg[\underbrace{\frac{\beta_t^2}{2\sigma_t^2 \alpha_t (1 - \bar\alpha_t)}}_{w_t}\, \|\epsilon - \epsilon_\theta(x_t, t)\|^2\bigg]$$</p>
+    <p><strong>Why 这一步是核心：</strong>原本 ELBO 看起来是一座大山——$T$ 个 KL、每个 KL 涉及四个调度量、每个调度量都跟 $t$ 耦合。$\epsilon$ 参数化做完之后，剩下的 $\|\epsilon - \epsilon_\theta\|^2$ 是一个普通到不能再普通的 MSE，所有的复杂性都被吸进了 $w_t$ 这个标量里。换句话说：<em>ELBO 在 ε-参数化之下，本来就是「加权 MSE」</em>——只是权重长得很复杂、随 $t$ 变化巨大。这是 CMU Kelly 说「the greatest mathematical trick」的那一步代换：通过「乘一个除一个」让两个看似不同的公式之间出现等号。</p>
+
+    <p>Ho 团队接着做了一件「在论文里看起来轻描淡写、实际改变了整个领域」的事——直接把所有 $w_t$ 换成 1，并把 $t$ 的采样改成均匀分布：</p>
+    <p>$$L_{\text{simple}} = \mathbb{E}_{t \sim \mathcal{U}\{1,T\}, x_0, \epsilon}\big[\|\epsilon - \epsilon_\theta(x_t, t)\|^2\big]$$</p>
+    <p><strong>Why 这么干：</strong>$w_t$ 的形状告诉你它<em>偏爱小 $t$</em>。当 $t$ 很小（高 SNR，$x_t$ 几乎还是干净图），$\beta_t$ 很小、$1 - \bar\alpha_t$ 也很小，分母 $2\sigma_t^2 \alpha_t (1 - \bar\alpha_t)$ 被压扁，$w_t$ 反而<strong>变得很大</strong>。可是<em>那个 $t$ 的 MSE 本身已经很小了</em>——$x_t$ 跟 $x_0$ 几乎没差别，去噪是个 trivial 任务，网络稍微训几步就能把 $\|\epsilon - \epsilon_\theta\|^2$ 压到接近 0。两件事一相乘，「大权重乘小损失」依然贡献了很大一部分的总梯度——结果就是：ELBO 把大量训练预算花在了一个网络早就会做的简单任务上，<em>而真正困难的高噪声区间（大 $t$，$x_t$ 几乎是纯噪声、要从一片混沌里猜出全局结构）没人逼网络去练</em>。把 $w_t$ 全置 1，相当于做了一次「均匀采样的课程平摊」——让网络对每一个噪声尺度都付出同样的努力。从这个角度看，simple loss 不是在「丢弃信息」，而是在「重新分配信息」。</p>
+
+    <div class="sl-callout">📌 <strong>采样阶段两者完全相同</strong>。$L_{\text{simple}}$ 和 ELBO 训出来的网络结构一样、ε-prediction 接口一样、DDPM/DDIM 采样器调用的也是同一个 $\epsilon_\theta(x_t, t)$；唯一的差别埋在「<em>训练时哪个 $t$ 的梯度更大</em>」里。所以 simple loss 不是「另一个模型」，而是「同一个模型的另一种课程表」。这一点对调参非常重要：你<em>不能</em>通过看推断阶段的代码判断别人用了 ELBO 还是 simple——必须看训练时的 loss 函数有没有那个 $w_t$ 系数。</div>
+
+    <h2>为什么 ε-参数化是必要中间步</h2>
+    <p>有读者会问：既然最后要丢权重，能不能直接对均值 $\mu_\theta$ 做 MSE、跳过 ε-参数化？答案是不能，原因有两个。第一，$\tilde\mu_t$ 和 $\mu_\theta$ 都依赖 $x_t$，它们之间的 MSE 跟着 $t$ 的尺度变化巨大——小 $t$ 时两个均值都接近 $x_t$ 本身、差很小；大 $t$ 时差异由 $x_0$ 主导、可以很大。这让网络在不同 $t$ 上面对的「损失数量级」差很多，优化不稳定。第二，$\epsilon$ 是 $\mathcal{N}(0, I)$ 的随机量，<em>对 $t$ 不变</em>——它的尺度是常数 1，让网络在所有时间步上面对的目标都处于同一个数值范围内。这就是为什么 Ho et al. 选择预测 $\epsilon$ 而不是 $\mu$ 或 $x_0$（虽然后两个在数学上等价）：<strong>ε-参数化让损失的「天然尺度」对 $t$ 不敏感，这恰好是「可以丢权重」的隐含前提</strong>。如果用 $x_0$-prediction，丢权重会比保留权重糟得多——这件事 Salimans &amp; Ho 在 v-prediction 论文里详细讨论过。</p>
+
+    <h2>反直觉的实证结果</h2>
+    <p>Ho 等人在 CIFAR-10 上做了对照实验（DDPM 2020 Table 2，IS / FID 是图像质量越大越好 / 越小越好的两个常用指标）：</p>
+    <ul>
+      <li>直接优化 ELBO（论文里写作 $L_{\mathrm{vlb}}$）：FID ≈ 13.5。</li>
+      <li>优化 $L_{\text{simple}}$（同一个网络、同一组超参，只是把 $w_t \to 1$）：FID ≈ 3.17。</li>
+    </ul>
+    <p>简化后的目标比理论上「最紧」的下界好了<strong>四倍</strong>。这不是数值波动，而是说明：<em>ELBO 作为图像质量的代理目标本身就有 mismatch</em>——它过度奖励了 likelihood 在高 SNR 区间的精度，而人眼判断图像质量更依赖中高噪声区间的「能不能从一团模糊里恢复出清晰结构」的能力。换句话说，<strong>负对数似然和 FID 在 diffusion 上不是同一个量</strong>。直接优化下界，你拿到的是更高的 likelihood、更糟的图像；优化 simple loss，你拿到的是稍弱的 likelihood、好得多的图像。这件事 Improved DDPM（Nichol &amp; Dhariwal 2021）后来做了精细量化：他们提出 $L_{\text{hybrid}} = L_{\text{simple}} + \lambda L_{\mathrm{vlb}}$，$\lambda = 0.001$ 时既保住 simple 的图像质量、又改进 likelihood，是这段历史的最干净注脚。</p>
+
+    <div class="my-addition">🟡 教材外补充：「该给每个 $t$ 多大权重」后来变成一个独立研究子领域。</div>
+    <ul>
+      <li><strong>P2 weighting</strong>（Choi et al. 2022）：进一步压低高 SNR 端的权重，把训练预算往中等噪声推；论文标题就叫《Perception Prioritized Training》，直白指出权重重塑就是在调「感知优先级」。</li>
+      <li><strong>min-SNR weighting</strong>（Hang et al. 2023）：用 $\min(\text{SNR}(t), \gamma)$ 当权重，把所有 $t$ 的损失幅度卡到一个可比的尺度上，缓解 multi-task imbalance；被 Stable Diffusion 3 / Imagen 等后续大模型采纳。</li>
+      <li><strong>EDM</strong>（Karras et al. 2022）：把噪声尺度从离散的 $t$ 改成连续的 $\sigma$，权重设计直接关于 $\sigma$，公式更干净；这套噪声调度后来成了 SDXL / SD3 的事实标准。</li>
+      <li><strong>v-prediction</strong>（Salimans &amp; Ho 2022）：换一个预测目标 $v = \alpha_t \epsilon - \sigma_t x_0$，让 loss 在所有 $t$ 上数值更均匀；本质上也是「重新挑权重」的一个变体。</li>
+    </ul>
+    <p>这些工作都没有改 ε-MSE 这个形式，改的只是 $w_t$。所以 simple loss 真正的历史定位是：<em>它捅破了一个秘密——ELBO 和图像质量之间的差距，主要由权重决定。</em>到了 2024 年，业界已经把「设计 $w_t$」当成 diffusion 训练的关键调度旋钮之一，和学习率、batch size 并列。SD3 的论文 (Esser et al. 2024) 甚至把 weighting scheme 单独列为一个消融维度，对比了 uniform、SNR-based、min-SNR、Karras EDM 等多种方案在 logit-normal $t$-采样下的表现，得出的结论再次验证了 Ho 的原始发现：<em>权重设计的好坏对最终 FID 的影响，比模型放大几倍还要显著</em>。这就是为什么如今讲 simple loss 不能只把它当成「DDPM 的一个工程化技巧」，而要把它理解为<strong>「重新分配训练注意力」这条研究路线的开端</strong>——它打开了一扇门，门里面是 P2、min-SNR、EDM 一连串改进，每一项都在用不同的方式回答同一个问题：「在所有 $t$ 中，哪些 $t$ 值得被网络多看几眼？」</p>
+
+    <svg class="sl-svg" viewBox="0 0 600 280" role="img" aria-label="ELBO 时间步加权 vs simple loss 均匀加权">
+      <g font-family="ui-sans-serif" font-size="11" fill="var(--text)">
+        <line x1="50" y1="240" x2="560" y2="240" stroke="var(--text-muted)"/>
+        <line x1="50" y1="40" x2="50" y2="240" stroke="var(--text-muted)"/>
+        <text x="305" y="265" text-anchor="middle" fill="var(--text-muted)">时间步 $t$ （小 = 高 SNR，大 = 接近纯噪声）</text>
+        <text x="20" y="140" text-anchor="middle" fill="var(--text-muted)" transform="rotate(-90 20 140)">权重 $w_t$</text>
+        <text x="50" y="255" text-anchor="middle" font-size="10" fill="var(--text-muted)">1</text>
+        <text x="305" y="255" text-anchor="middle" font-size="10" fill="var(--text-muted)">T/2</text>
+        <text x="560" y="255" text-anchor="middle" font-size="10" fill="var(--text-muted)">T</text>
+
+        <path d="M 60 60 Q 100 70 160 110 Q 240 170 350 210 Q 450 230 555 235"
+              stroke="var(--red)" stroke-width="2" fill="none"/>
+        <text x="170" y="80" fill="var(--red)" font-weight="600">ELBO $w_t$</text>
+        <text x="170" y="95" fill="var(--red)" font-size="10">大权重压在小 $t$，loss 已饱和</text>
+
+        <line x1="60" y1="155" x2="555" y2="155" stroke="var(--module-accent)" stroke-width="2"/>
+        <text x="380" y="148" fill="var(--module-accent)" font-weight="600">L_simple：$w_t \equiv 1$</text>
+        <text x="380" y="170" fill="var(--module-accent)" font-size="10">均匀课程，逼网络也学大 $t$</text>
+
+        <circle cx="120" cy="90" r="4" fill="var(--red)"/>
+        <text x="130" y="93" font-size="10" fill="var(--text-muted)">$x_t$ 几乎干净</text>
+        <circle cx="480" cy="225" r="4" fill="var(--red)"/>
+        <text x="395" y="220" font-size="10" fill="var(--text-muted)">$x_t$ 几乎纯噪声</text>
+      </g>
+    </svg>
+  </section>
+
+  <section class="concept-interact">
+    <p>下面按 ELBO → ε-参数化 → 丢权重 三步展开等式链。<strong>注意看的不变量</strong>：<em>每一步等号两侧的 $\|\epsilon - \epsilon_\theta\|^2$ 都没变，变的只是它前面的系数。</em>第一步是 KL 形式、第二步是「KL 化成加权 MSE」、第三步是「把权重直接抹平」。三步连起来就证明了：simple loss 和 ELBO 在「衡量什么」这一点上完全一致——同一份预测残差、同一种 MSE 范数——区别只在「怎么加权」。这正是文章开头那句反直觉断言的可视化证明：simple loss 不是另一个目标，是同一个目标的另一种课程表。</p>
+
+    <div class="sl-controls">
+      <button data-step="0" class="active">① ELBO 原形（KL 之和）</button>
+      <button data-step="1">② ε-参数化（系数 $w_t$ 出现）</button>
+      <button data-step="2">③ 丢权重（$w_t \equiv 1$）</button>
+    </div>
+    <div class="sl-readout" id="sl-readout">
+      <div class="sl-line sl-eq" data-line="0">$L_{\mathrm{vlb}} = \sum_{t} D_{\mathrm{KL}}\big(q(x_{t-1} | x_t, x_0) \,\|\, p_\theta(x_{t-1} | x_t)\big)$</div>
+      <div class="sl-line sl-eq" data-line="1">$= \sum_{t} \dfrac{\beta_t^2}{2\sigma_t^2 \alpha_t (1 - \bar\alpha_t)} \,\|\epsilon - \epsilon_\theta(x_t, t)\|^2$</div>
+      <div class="sl-line sl-eq" data-line="2">$L_{\text{simple}} = \mathbb{E}_{t}\big[\,\|\epsilon - \epsilon_\theta(x_t, t)\|^2\,\big]$ &nbsp; （所有 $w_t \to 1$）</div>
+    </div>
+
+    <script>
+      (function () {
+        const btns = document.querySelectorAll('.sl-controls button');
+        const lines = document.querySelectorAll('#sl-readout .sl-line');
+        function show(step) {
+          btns.forEach(b => b.classList.toggle('active', +b.dataset.step === step));
+          lines.forEach(l => l.classList.toggle('cd-active-line', +l.dataset.line === step));
+        }
+        btns.forEach(b => b.addEventListener('click', () => show(+b.dataset.step)));
+        show(0);
+      })();
+    </script>
+  </section>
+
+  <section class="concept-example">
+    <h2>手算：一个时间步上 $w_t$ 有多偏</h2>
+    <p>取 DDPM 默认线性 β-schedule：$\beta_1 = 10^{-4}$，$\beta_T = 0.02$，$T = 1000$。我们算两端 $w_t = \frac{\beta_t^2}{2\sigma_t^2 \alpha_t (1 - \bar\alpha_t)}$ 的相对大小，验证「ELBO 偏爱小 $t$」这一节里那个论断的量级。</p>
+    <p>$t = 1$（高 SNR，几乎是干净图）：$\beta_1 = 10^{-4}$，$\alpha_1 = 1 - \beta_1 \approx 1$，$\bar\alpha_1 = \alpha_1 \approx 1 - 10^{-4}$，所以 $1 - \bar\alpha_1 \approx 10^{-4}$。DDPM 原文取 $\sigma_t^2 = \beta_t$，则</p>
+    <p>$$w_1 = \frac{(10^{-4})^2}{2 \cdot 10^{-4} \cdot 1 \cdot 10^{-4}} = \frac{10^{-8}}{2 \cdot 10^{-8}} = 0.5$$</p>
+    <p>$t = T = 1000$（低 SNR，$x_T$ 接近纯噪声）：$\beta_T = 0.02$，$\alpha_T = 0.98$，且 $\bar\alpha_T = \prod_{s=1}^{T} \alpha_s \approx 0$，所以 $1 - \bar\alpha_T \approx 1$。代入：</p>
+    <p>$$w_T = \frac{(0.02)^2}{2 \cdot 0.02 \cdot 0.98 \cdot 1} = \frac{4 \cdot 10^{-4}}{0.0392} \approx 0.0102$$</p>
+    <p>比值 $w_1 / w_T \approx 0.5 / 0.0102 \approx 49$。也就是说，ELBO 给 $t=1$ 的损失放大了将近 50 倍——可那里的 MSE 本身已经接近 0（高 SNR 下网络几乎不用学就会输出 $\hat\epsilon \approx \epsilon$）。换成 $L_{\text{simple}}$ 后，$w_1 = w_T = 1$，所有 $t$ 共享同一份梯度预算，大 $t$ 的硬骨头被同等关注，网络才有机会学好「从纯噪声里重建全局结构」这件事。FID 从 13.5 跌到 3.17 一点都不奇怪——它换来的就是这 50 倍预算的重新分配。</p>
+    <p>顺带一提：上面这个 50 倍的数字只是 $t = 1$ 一端的极端，整条曲线 $w_t$ 沿着 $t$ 从 1 到 $T$ 单调下降；如果你画出 $w_t$ 对 $\log\text{SNR}(t)$ 的图，会看到 ELBO 在高 SNR 段是一根高高翘起的尾巴，simple loss 则是一条水平线。这正是上面 SVG 想传达的不变量。你也可以反过来看：simple loss 等价于「给所有 $t$ 一票」的民主投票；ELBO 等价于「按 likelihood 贡献加权投票」，而这个加权恰好和我们想要的「图像质量」目标错位。把这件事记在心里——它会出现在你接下来读到的每一篇 noise schedule / weighting 论文里，是理解所有后续改进方法的共同钥匙。</p>
+  </section>
+
+  <section class="concept-pitfalls">
+    <h2>常见误区</h2>
+    <ol>
+      <li><strong>「$L_{\text{simple}}$ 是 ELBO 的近似下界、所以理论上更弱」。</strong>反例：DDPM 2020 Table 2，CIFAR-10 上 $L_{\text{simple}}$ 训出 FID = 3.17、IS = 9.46，而直接优化 $L_{\mathrm{vlb}}$ 只到 FID = 13.5。简化反而压低 FID 四倍——这个差距大到不可能是噪声。「更紧的下界」和「更好的图像」是两回事；ELBO 衡量的是 likelihood，FID 衡量的是分布之间的距离，二者在 diffusion 上有结构性 mismatch。</li>
+      <li><strong>「权重换不换无所谓，反正梯度方向一致」。</strong>反例：min-SNR weighting（Hang et al. 2023）只是把 $w_t$ 从 $\text{SNR}(t)$ 换成 $\min(\text{SNR}(t), 5)$，<em>网络结构、损失形式、噪声调度全部不变</em>，仅这一行权重改动就让 ImageNet-256 上的训练步数缩短 3.4 倍、FID 从 4.49 跌到 3.69。如果方向一致就足够，这种现象不会存在。权重决定了网络把容量花在哪个 $t$ 上，等价于隐式课程学习。</li>
+      <li><strong>「simple loss 只适用 ε-prediction」。</strong>反例：v-prediction（Salimans &amp; Ho 2022）用同样的「丢加权 MSE」思路预测 $v = \alpha_t \epsilon - \sigma_t x_0$，被 Imagen Video 等工作采纳；rectified flow（Liu et al. 2022）用「MSE on velocity field」；score matching 用「MSE on $s_\theta = -\epsilon_\theta / \sigma_t$」。simple 的精神 = <em>取一个跟时间步耦合的复杂损失，证明它等价于一个加权 MSE，再丢掉权重</em>——同一个剧本套不同主语，DDPM 只是第一个公开演出的版本。</li>
+    </ol>
+  </section>
+
+  <section class="concept-seealso">
+    <h2>相关概念</h2>
+    <ul>
+      <li><a href="/video-to-notebook/concepts/ddpm/">DDPM</a></li>
+      <li><a href="/video-to-notebook/concepts/epsilon-prediction/">Epsilon Prediction</a></li>
+    </ul>
+  </section>
+
+  <section class="concept-sources">
+    <h2>来源</h2>
+    <ol>
+      <li><a href="https://www.youtube.com/watch?v=6to_EG3SJgs&t=258s" target="_blank" rel="noopener">diffusion-principles-vizuara · L7 · 「直觉很顺、数学要走到最后」 · (04:18)</a></li>
+      <li><a href="https://www.youtube.com/watch?v=6to_EG3SJgs&t=195s" target="_blank" rel="noopener">diffusion-principles-vizuara · L7 · ε̂ 必须接近真实噪声 · (03:15)</a></li>
+      <li><a href="https://www.youtube.com/watch?v=H-RbhdiWzto&t=2150s" target="_blank" rel="noopener">cmu-10799-diffusion-flow · L3 · 「the greatest mathematical trick」 · (35:50)</a></li>
+    </ol>
+  </section>
+</article>

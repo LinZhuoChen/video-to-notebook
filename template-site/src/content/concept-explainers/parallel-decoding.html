@@ -1,0 +1,244 @@
+<style>
+/* prefix: pd- */
+.pd-quickref{background:var(--surface-soft);border-left:3px solid var(--module-accent);padding:0.8rem 1rem;border-radius:0 4px 4px 0;margin:1rem 0;font-size:0.92rem;}
+.pd-quickref div{margin:0.3rem 0;}
+.pd-svg{display:block;margin:1.2rem auto;max-width:100%;height:auto;}
+.pd-callout-quote{font-style:italic;color:var(--text-muted);border-left:2px solid var(--module-accent);padding:0.4rem 0.9rem;margin:0.7rem 0;font-size:0.9rem;background:var(--surface-soft);border-radius:0 4px 4px 0;}
+.pd-pitfalls ol{padding-left:1.4rem;} .pd-pitfalls li{margin:0.55rem 0;line-height:1.55;}
+.pd-source{font-style:italic;color:var(--text-muted);border-left:2px solid var(--border);padding:0.2rem 0.8rem;margin:0.5rem 0;font-size:0.9rem;}
+.pd-my-addition{background:var(--surface-soft);border:1px dashed var(--module-accent);padding:0.5rem 0.8rem;margin:0.6rem 0;border-radius:4px;font-size:0.9rem;}
+.pd-table{width:100%;border-collapse:collapse;margin:0.8rem 0;font-size:0.9rem;}
+.pd-table th,.pd-table td{border:1px solid var(--border);padding:0.45rem 0.6rem;text-align:left;}
+.pd-table th{background:var(--surface-soft);color:var(--text);}
+.pd-controls{display:flex;gap:0.4rem;flex-wrap:wrap;margin:0.6rem 0;}
+.pd-controls button{padding:0.35rem 0.7rem;border:1px solid var(--border);background:var(--surface);color:var(--text);border-radius:4px;cursor:pointer;font-size:0.85rem;}
+.pd-controls button.active{background:var(--module-accent);color:var(--surface);border-color:var(--module-accent);}
+#pd-readout{background:var(--surface-soft);border:1px solid var(--border);border-radius:4px;padding:0.7rem 0.9rem;margin:0.5rem 0;font-family:ui-monospace,monospace;font-size:0.88rem;line-height:1.7;}
+#pd-readout .pd-line{opacity:0.35;transition:opacity 0.2s;}
+#pd-readout .pd-line.pd-active-line{opacity:1;color:var(--module-accent);font-weight:600;}
+.pd-token{display:inline-block;min-width:28px;padding:2px 6px;margin:1px;border:1px solid var(--border);border-radius:3px;text-align:center;font-family:ui-monospace,monospace;}
+.pd-token.pd-mask{background:var(--surface-soft);color:var(--text-faint);}
+.pd-token.pd-just-unmasked{background:var(--module-accent);color:var(--surface);border-color:var(--module-accent);}
+.pd-token.pd-committed{background:var(--module-accent-soft);color:var(--text);}
+</style>
+
+<article class="concept-entry">
+  <header class="concept-header">
+    <span class="concept-eyebrow">概念</span>
+    <h1>Parallel Decoding</h1>
+    <p class="concept-tagline">— 每步同时预测 $L$ 个位置、只提交其中最自信的 $k$ 个。</p>
+  </header>
+
+  <aside class="pd-quickref">
+    <div><strong>定义</strong> · 非自回归采样：一次 forward 给出整段长度 $L$ 上每个位置的 logits；按某种 schedule 选 $k$ 个位置 commit、其余继续保留 mask。</div>
+    <div><strong>公式</strong> · 理论步数 $T$（diffusion）vs $L$（AR）；每步选 $k_t$ 个位置，满足 $\sum_{t=1}^{T} k_t = L$。</div>
+    <div><strong>易错</strong> · 不等于"免费提速"。单条 prompt 上 KV-cache 让 AR 极快；parallel decoding 真正赢的是<em>大 batch、内存带宽受限</em>的场景。</div>
+  </aside>
+
+  <section class="concept-intuition">
+    <p>很多人以为 parallel decoding 就是"把 AR 的 $L$ 步压成 $T \ll L$ 步、于是 wall-clock 也快 $L/T$ 倍"。<strong>这是一个非常昂贵的误解</strong>。真实的墙钟时间不取决于"步数比"，而取决于每一步的<em>计算密度</em>与硬件瓶颈在哪一侧：是被算力（compute-bound）卡住，还是被显存带宽（memory-bandwidth-bound）卡住。单条 prompt 配 KV-cache 的 AR 解码已经把 GPU 用得很满，每步只算"新一行"的 attention，成本极低；parallel decoding 的优势真正显现在<em>大 batch、长序列、内存带宽受限</em>的 regime——这时 weight matrix 从 HBM 搬到 SM 的成本被分摊到几十上百条样本上，"一次 forward 服务全长度"才划算。</p>
+    <p>所以应该这样理解 parallel decoding：它换来的核心<strong>不是"快"，而是"双向语境"</strong>。AR 模型受 causal mask 约束，第 $i$ 步看不到 $x_{&gt;i}$；而 diffusion 推理里每一步都是 bidirectional attention——所有 mask 位置都能看到全局已知信息，包括尚未 commit 的 mask 周围的语境提示。这一点直接消除了著名的 reversal curse（"A 是 B 的妈妈"训过但问"B 的妈妈是谁"答不上来），并且原生支持任意位置的 infilling、constrained decoding、约束在末尾的 prompt 续写。这些能力<em>不是 AR 加大模型规模能解决的结构性缺陷</em>。</p>
+    <div class="pd-callout-quote">「我们要做的是慢慢揭开这些 mask、把原本在那里的 token 预测出来。」—— Vizuara《Diffusion LLM Inference Pipeline》L14 @02:15</div>
+    <p>放回训练上下文：discrete diffusion 模型（MDLM / LLaDA / DiffuLLaMA）训练时学到的是<em>给定任意 mask 模式下的条件分布</em> $p_\theta(x_0 \mid x_t)$；网络见过各种 mask 比例（10%、50%、90% 都有）、各种 mask 位置（连续段、随机散点）。推理时反过来用，每步同时对所有 mask 位置打分、再按 schedule 选若干位置 commit。这就是 parallel decoding 的本质，也是它和 AR 的 sampling 在<em>计算图层面</em>就根本不同的地方。</p>
+    <p>Vizuara 讲师在 L14 用图像扩散做类比来铺垫这个概念：图像扩散从全噪声开始、每一步轻微去噪、最终收敛到真实图像分布；语言扩散是离散版本——从"全 mask"开始（对应"全噪声"）、每一步揭开若干位置（对应"轻微去噪"）、最终收敛到真实文本分布。讲师特别强调：模型的参数在整个 demasking 过程里<strong>完全冻结</strong>，所有"逐步生成"的行为都来自 schedule 和 stochastic sampling，不是来自参数变化。这一点和图像扩散完全对应——你不会在采样时改 U-Net 的权重。</p>
+  </section>
+
+  <section class="concept-deepdive">
+    <h2>从 AR 到 parallel：每步预测多少 token？</h2>
+    <p>自回归（AR）解码的契约是"每步 1 个 token、严格左→右"：第 $i$ 步只看 $x_{&lt;i}$、采样 $x_i$、append 进序列、再算下一步。总步数 $= L$，每步彼此严格因果依赖。Parallel decoding 把这条契约破开——一次前向，模型对长度为 $L$ 的序列里<em>所有</em> mask 位置同时输出 logits；然后由"schedule"决定本步 commit 几个、commit 哪几个、剩下的位置在下一次 forward 里重新打分。</p>
+
+    <p><strong>Why</strong>：为什么 AR 不能直接复用做 parallel？因为 discrete diffusion 训练目标本就是"在随机 mask 模式下重建 $x_0$"——网络见过各种 mask 比例和位置，输出对所有 mask 位置都是<em>有效条件分布</em>。AR 模型没有这个性质：把一个 mask 放在中间让 AR 同时填，它从未训过这种 input pattern，logits 会处于 OOD 区域。这就是为什么 Medusa、Lookahead Decoding 这类 AR 上的"伪并行"技巧仍然要做 token-level 的 verification—— diffusion 的并行性是<em>由训练目标提供的</em>，AR 是要靠投机执行临时凑出来的。</p>
+
+    <h2>Vizuara L14 的四步 demasking demo</h2>
+    <p>讲师在 L14 给了一个最小例子：词典 $\{\text{BOS, EOS, MASK, A, B, C}\}$，长度 $L=3$（不计 BOS/EOS），扩散步数 $T=4$。规则是<strong>第 $t$ 步结束时还要保留 $t-1$ 个 mask</strong>——也就是 $t=4 \to 3$ masks、$t=3 \to 2$ masks、$t=2 \to 1$ mask、$t=1 \to 0$ mask。每步只 commit 1 个位置、对应一个线性 schedule。</p>
+
+    <div class="pd-callout-quote">「第一步要剩 3 个 mask，第二步剩 2 个，第三步剩 1 个，最后一步剩 0 个——这就是 demask 的规则。」—— Vizuara L14 @08:52</div>
+
+    <p>每步的具体逻辑：（1）把当前 partial-mask 序列过一遍 frozen 网络，拿到一个 $L \times V$ 的 logits 矩阵；（2）对每个 mask 位置取 argmax 得"<em>提议的 token</em>"以及其置信度（softmax 后的 max prob）；（3）按 schedule 应保留的 mask 数，把<strong>置信度最低的若干位置回退为 MASK</strong>，其余 commit 为提议 token；（4）把新的 partial 序列作为下一步的输入，回到第（1）步。注意整个推理过程中网络参数完全冻结——和扩散模型推理时网络冻结的逻辑一致，所有不确定性都来自 schedule + 采样噪声。</p>
+
+    <p><strong>Why</strong>：为什么是"最低置信度回退、最高置信度 commit"？因为模型对自己最确定的位置最不可能改主意；让这些位置先固定，下一步剩下的位置就能在更丰富的语境（前面已 commit 的 token）下重新打分，类似 EM 的"先定容易的、再迭代难的"。从概率视角看，每步 commit 高置信度位置等价于在做"近似 MAP + 序贯条件化"——把高熵位置留到后面，本质是把整段序列的联合分布<em>分阶段</em>地从边缘逼近到联合。如果一次 forward 就把所有位置 commit，相当于在用"边缘分布的独立乘积"近似"真实联合"，质量会显著下降；分多步则让网络在每一步都能用上"刚提交的 token 提供的新证据"。</p>
+
+    <h2>讲师演示里的关键一帧：logits 矩阵长什么样</h2>
+    <p>L14 chunk #216 给出了一个非常具体的 logits 矩阵示例。词典共 7 项 <code>[BOS, EOS, MASK, A, B, C, ...]</code>，长度 $L=3$ 时网络输出 shape 为 $3 \times V$ 的矩阵。讲师把它在白板上展开：position 1 的 logits 形如 $[1.22, 0.6, 2.2, 0.06, ...]$，position 2 形如 $[0.2, ...]$，position 3 形如 $[0.1, 0, 0, ...]$。每一行单独做 softmax，得到该位置的 token 分布；取 argmax 即为"提议 token"、取 max prob 即为"提议置信度"。<strong>关键点</strong>：每一行都是<em>边缘条件分布</em> $p_\theta(x_i \mid x_{\text{visible}})$，行与行之间不共享归一化常数——也就是说，position 1 的 confidence 0.43 和 position 2 的 confidence 0.50 是"跨位置可比的"，可以直接拿来做 top-$k$ 排序。这一点常被实现者搞错：不能把整张表 flatten 之后做 top-$k$，那样会忽略位置归一化。</p>
+
+    <h2>三种常见 schedule</h2>
+    <table class="pd-table">
+      <thead><tr><th>名字</th><th>怎么选 $k$ 个位置</th><th>典型用处</th></tr></thead>
+      <tbody>
+        <tr><td>Confidence top-$k$ unmask</td><td>对所有 mask 位置取 $\max_v p(v)$，按降序 commit 前 $k$ 个</td><td>Vizuara L14 / MaskGIT / MDLM 主流</td></tr>
+        <tr><td>Nucleus per position</td><td>每个位置独立做 top-$p$ 采样，commit 概率超过阈值的位置</td><td>需要多样性时</td></tr>
+        <tr><td>Gumbel top-$k$</td><td>logits 加 Gumbel 噪声再取 top-$k$，等价于不放回采样</td><td>LLaDA / 需要 sampling without replacement</td></tr>
+      </tbody>
+    </table>
+
+    <p><strong>Why</strong> nucleus / Gumbel：纯 confidence top-$k$ 是 deterministic 的，多次采样得到相同结果；想要 multi-sample diversity（如做 self-consistency 投票）就需要把"选哪几个位置"也变成随机过程。Gumbel top-$k$ 的好处是 reparameterization-style——一行 <code>argmax(logits + gumbel)</code>，无需手写采样循环，并且在数学上严格等价于不放回的 categorical sampling without replacement。LLaDA 论文里用的就是这种实现，因为它和 PyTorch 的 vectorized broadcast 完全兼容、可以在 GPU 上一次性算完全部位置的"被选概率"。</p>
+
+    <h2>Schedule 怎么决定每步 commit 多少个位置？</h2>
+    <p>Vizuara L14 用的是线性 schedule（每步 commit 1 个位置、共 $L$ 步）；这只是最简单的一种。常见的是几何 schedule：第 $t$ 步剩 $\lfloor L \cdot t/T \rfloor$ 个 mask，使得早期步数 commit 少（高熵位置慢慢揭）、后期 commit 多（已经有上下文了、低熵位置可以一次批量提交）。MaskGIT 用的是 cosine schedule $\lfloor L \cdot \cos(\pi t/(2T))\rfloor$，论文中的实验表明 cosine 比 linear 在 FID 上好 ~1.5 分。<strong>Why</strong>：cosine 在中间步保留更多 mask，让网络在"信息逐渐增多"的过程中迭代多次、自我修正；linear schedule 后期 commit 太快、来不及修正。</p>
+
+    <h2>理论提速 vs 实际墙钟</h2>
+    <p>理论 FLOPs 视角：AR 需要 $L$ 次 forward（每次只算 1 个新 token，但 attention 仍是 $O(L)$）；diffusion parallel decoding 需要 $T$ 次 forward（每次都对整个长度 $L$ 重新算）。每次 forward 成本约 $C \cdot L$，所以总成本 AR $\approx C L^2$（无 KV-cache）vs diffusion $\approx C L T$。理论 speedup $= L/T$。</p>
+
+    <div class="pd-my-addition">🟡 教材外补充：上述比较故意忽略了 KV-cache。带 KV-cache 的 AR 单步只算<strong>新 token 那一行</strong>的 attention（$O(L)$ 而非 $O(L^2)$），总成本是 $C L^2$ 而非 $C L^3$，但内存读写仍是带宽瓶颈——因为每一步都要把模型的 weight matrix 整个搬一遍。在 batch=1 时 GPU 吃不饱，AR 反而比 diffusion 快；在 batch=128、长序列时，diffusion 的"一次前向、全位置受益"才能摊薄带宽成本。这是当前 LLaDA / DiffuLLaMA 报告 throughput speedup（tokens/sec/GPU）显著、而 latency speedup（单 prompt 出第一个 token 的时间）不大的核心原因。如果你在做 serving 优化，请记住：parallel decoding 是<em>throughput-oriented</em> 的优化，不是 latency-oriented 的。</div>
+
+    <h2>双向语境与 reversal curse</h2>
+    <p>AR 模型最被诟病的结构缺陷之一是 reversal curse：训练里见过"A 的儿子是 B"，但问"B 的爸爸是谁"答不上来。原因不在容量，而在 causal mask——AR 在 token 级永远只能看左侧上下文，知识被以"单向"形式编码进权重。Parallel decoding 因为<strong>没有 causal mask</strong>，模型每一步看到的是完整双向上下文：当 B 在 mask 状态、A 已经在 prompt 里时，attention 可以从 A 直接流向 B 的位置；反过来 A 在 mask 状态、B 已知时，attention 也能从 B 流向 A。这就是为什么 LLaDA 在 reversal benchmark（如 BBH 的 reverse-word 任务）上明显优于同等参数量的 AR baseline——并不是模型"更聪明"，而是<em>解码契约</em>本身就允许双向信息流。</p>
+
+    <h2>在 MDLM / LLaDA / DiffuLLaMA 中的具体形态</h2>
+    <p>三个代表性 paper 的 inference 都建立在 parallel decoding 之上，但 schedule 选择各异，预告一下后面的章节会怎么细讲：</p>
+    <ul>
+      <li><strong>MDLM（Sahoo et al., 2024）</strong>：用 confidence top-$k$，schedule 是简单的均匀划分 $k_t = L/T$；T 通常取 32 或 64。论文中明确指出"more steps ≠ better quality"——在 $T \geq 64$ 之后 PPL 几乎不动，因为 mask 比例已经被精细切分。</li>
+      <li><strong>LLaDA（Nie et al., 2025）</strong>：用 Gumbel-top-$k$ 引入采样随机性，schedule 是 cosine 风格的非均匀切分；前期慢、后期快。文中观察到 reversal benchmark 提升来自双向 attention，而不是更多步数。</li>
+      <li><strong>DiffuLLaMA（Gong et al., 2024）</strong>：从预训练 AR LLaMA 出发做 continual training 改成 diffusion，inference 时为了和 AR baseline 对齐使用<em>分块</em>（block-wise）parallel decoding——把序列切成 chunk、chunk 内并行、chunk 间因果。这是一种 hybrid 策略，本质是在 throughput 和 latency 之间做权衡。</li>
+    </ul>
+    <p><strong>Why</strong> 三家选择都不同：因为 schedule 是<em>inference-time hyper-parameter</em>，不影响训练目标。这给了下游使用者很大的调参空间——可以根据具体任务（要 throughput 还是 quality 还是 reversal capability）选不同 schedule，无需重训模型。这也是 parallel decoding 作为一项"推理基础设施"区别于"模型架构"的核心特征。后续 LLaDA 和 DiffuLLaMA 章节会回到这些 schedule 细节并对照它们在不同 benchmark 上的具体增益数字。</p>
+
+    <h2>什么时候 parallel decoding 真的赢？</h2>
+    <p>在结束本节之前把所有讨论收敛到一张可操作的"何时该用 parallel decoding"的决策表，这也是你在做工程选型时唯一需要带走的清单：（1）<em>大 batch serving</em>——同时服务几十上百条 prompt 时，memory bandwidth 被多 sample 共享、parallel decoding 的"一次 forward 全位置受益"赢面最大；（2）<em>infilling / 中间编辑</em>——需要在序列中间插入或重写内容时，AR 必须从头重新生成右侧整段、而 parallel decoding 只对 mask 区域工作；（3）<em>双向理解任务</em>——code repair、constrained generation、reversal QA 等任务里双向上下文带来明显质量提升；（4）<em>受限解码</em>——比如必须包含特定关键词、JSON schema 约束，parallel decoding 可以把约束位置直接 commit 进序列、其余位置围绕约束生成。反之，单条 prompt 的低延迟聊天场景里，AR + KV-cache + speculative decoding 仍然是当前 SOTA。这条决策表同时也解释了一个工程师常常会问到的问题："既然 diffusion LLM 这么好，为什么主流产品仍是 AR？"答案是：当前 chat 产品的核心 KPI 是 time-to-first-token 和 tokens/sec/user，这两条指标恰好就是 AR + KV-cache 这一套组合的优势区，而 throughput-per-GPU、infilling 质量、reversal robustness 这些 parallel decoding 的优势区在终端用户体验上感知不强。但在 code completion、agentic editing、batch summarization 这类后端密集场景，parallel decoding 的位置只会越来越靠前——这也是 MDLM / LLaDA / DiffuLLaMA 系列研究值得长期跟踪的原因。</p>
+
+    <svg class="pd-svg" viewBox="0 0 600 220" role="img" aria-label="AR 与 parallel decoding 的步数对比">
+      <g font-family="ui-sans-serif" font-size="11" fill="var(--text)">
+        <text x="20" y="22" font-weight="600">AR：L=8 步，每步 1 token</text>
+        <g>
+          <rect x="20" y="35" width="40" height="22" rx="3" fill="var(--module-accent)"/>
+          <rect x="65" y="35" width="40" height="22" rx="3" fill="var(--module-accent-soft)" stroke="var(--border)"/>
+          <rect x="110" y="35" width="40" height="22" rx="3" fill="var(--surface-soft)" stroke="var(--border)"/>
+          <rect x="155" y="35" width="40" height="22" rx="3" fill="var(--surface-soft)" stroke="var(--border)"/>
+          <rect x="200" y="35" width="40" height="22" rx="3" fill="var(--surface-soft)" stroke="var(--border)"/>
+          <rect x="245" y="35" width="40" height="22" rx="3" fill="var(--surface-soft)" stroke="var(--border)"/>
+          <rect x="290" y="35" width="40" height="22" rx="3" fill="var(--surface-soft)" stroke="var(--border)"/>
+          <rect x="335" y="35" width="40" height="22" rx="3" fill="var(--surface-soft)" stroke="var(--border)"/>
+          <text x="40" y="50" text-anchor="middle" fill="var(--surface)">t1</text>
+          <text x="85" y="50" text-anchor="middle">t2</text>
+          <text x="130" y="50" text-anchor="middle" fill="var(--text-faint)">…</text>
+          <text x="380" y="50" fill="var(--text-muted)">8 forward passes</text>
+        </g>
+        <text x="20" y="100" font-weight="600">Parallel decoding：T=4 步，每步 commit 2 个位置</text>
+        <g>
+          <text x="20" y="120" fill="var(--text-muted)">t=4</text>
+          <rect x="60" y="108" width="32" height="20" rx="3" fill="var(--surface-soft)" stroke="var(--border)"/>
+          <rect x="95" y="108" width="32" height="20" rx="3" fill="var(--module-accent)"/>
+          <rect x="130" y="108" width="32" height="20" rx="3" fill="var(--surface-soft)" stroke="var(--border)"/>
+          <rect x="165" y="108" width="32" height="20" rx="3" fill="var(--surface-soft)" stroke="var(--border)"/>
+          <rect x="200" y="108" width="32" height="20" rx="3" fill="var(--module-accent)"/>
+          <rect x="235" y="108" width="32" height="20" rx="3" fill="var(--surface-soft)" stroke="var(--border)"/>
+          <rect x="270" y="108" width="32" height="20" rx="3" fill="var(--surface-soft)" stroke="var(--border)"/>
+          <rect x="305" y="108" width="32" height="20" rx="3" fill="var(--surface-soft)" stroke="var(--border)"/>
+        </g>
+        <g>
+          <text x="20" y="148" fill="var(--text-muted)">t=3</text>
+          <rect x="60" y="136" width="32" height="20" rx="3" fill="var(--module-accent)"/>
+          <rect x="95" y="136" width="32" height="20" rx="3" fill="var(--module-accent-soft)"/>
+          <rect x="130" y="136" width="32" height="20" rx="3" fill="var(--surface-soft)" stroke="var(--border)"/>
+          <rect x="165" y="136" width="32" height="20" rx="3" fill="var(--surface-soft)" stroke="var(--border)"/>
+          <rect x="200" y="136" width="32" height="20" rx="3" fill="var(--module-accent-soft)"/>
+          <rect x="235" y="136" width="32" height="20" rx="3" fill="var(--module-accent)"/>
+          <rect x="270" y="136" width="32" height="20" rx="3" fill="var(--surface-soft)" stroke="var(--border)"/>
+          <rect x="305" y="136" width="32" height="20" rx="3" fill="var(--surface-soft)" stroke="var(--border)"/>
+        </g>
+        <g>
+          <text x="20" y="176" fill="var(--text-muted)">t=2</text>
+          <rect x="60" y="164" width="32" height="20" rx="3" fill="var(--module-accent-soft)"/>
+          <rect x="95" y="164" width="32" height="20" rx="3" fill="var(--module-accent-soft)"/>
+          <rect x="130" y="164" width="32" height="20" rx="3" fill="var(--module-accent)"/>
+          <rect x="165" y="164" width="32" height="20" rx="3" fill="var(--module-accent)"/>
+          <rect x="200" y="164" width="32" height="20" rx="3" fill="var(--module-accent-soft)"/>
+          <rect x="235" y="164" width="32" height="20" rx="3" fill="var(--module-accent-soft)"/>
+          <rect x="270" y="164" width="32" height="20" rx="3" fill="var(--surface-soft)" stroke="var(--border)"/>
+          <rect x="305" y="164" width="32" height="20" rx="3" fill="var(--surface-soft)" stroke="var(--border)"/>
+        </g>
+        <g>
+          <text x="20" y="204" fill="var(--text-muted)">t=1</text>
+          <rect x="60" y="192" width="32" height="20" rx="3" fill="var(--module-accent-soft)"/>
+          <rect x="95" y="192" width="32" height="20" rx="3" fill="var(--module-accent-soft)"/>
+          <rect x="130" y="192" width="32" height="20" rx="3" fill="var(--module-accent-soft)"/>
+          <rect x="165" y="192" width="32" height="20" rx="3" fill="var(--module-accent-soft)"/>
+          <rect x="200" y="192" width="32" height="20" rx="3" fill="var(--module-accent-soft)"/>
+          <rect x="235" y="192" width="32" height="20" rx="3" fill="var(--module-accent-soft)"/>
+          <rect x="270" y="192" width="32" height="20" rx="3" fill="var(--module-accent)"/>
+          <rect x="305" y="192" width="32" height="20" rx="3" fill="var(--module-accent)"/>
+        </g>
+        <text x="360" y="180" fill="var(--text-muted)" font-size="10">深色=本步 commit</text>
+        <text x="360" y="195" fill="var(--text-muted)" font-size="10">浅色=已 commit</text>
+        <text x="360" y="210" fill="var(--text-muted)" font-size="10">白色=仍是 mask</text>
+      </g>
+    </svg>
+  </section>
+
+  <section class="concept-interact">
+    <p>点击步骤按钮观察 Vizuara L14 demo 的 demasking 过程。<strong>不变量</strong>：每一步结束时，"已 commit 的位置数 + 剩余 mask 数 = $L=3$"；schedule 决定的是<em>分配</em>，不是<em>总量</em>。</p>
+    <div class="pd-controls">
+      <button data-step="0" class="active">① t=4 (all mask)</button>
+      <button data-step="1">② t=3 (commit pos 2)</button>
+      <button data-step="2">③ t=2 (commit pos 3)</button>
+      <button data-step="3">④ t=1 (commit pos 1)</button>
+    </div>
+    <div id="pd-readout">
+      <div class="pd-line" data-line="0">
+        输入 → <span class="pd-token pd-mask">[M]</span><span class="pd-token pd-mask">[M]</span><span class="pd-token pd-mask">[M]</span><br>
+        logits argmax → C / C / C；置信度 → 0.6 / 0.8 / 0.7<br>
+        本步规则：保留 3 mask（commit 0 个）→ 输出仍是全 mask
+      </div>
+      <div class="pd-line" data-line="1">
+        输入 → <span class="pd-token pd-mask">[M]</span><span class="pd-token pd-mask">[M]</span><span class="pd-token pd-mask">[M]</span><br>
+        logits argmax → A / C / C；置信度 → 0.3 / 0.85 / 0.7<br>
+        本步规则：保留 2 mask（commit 1 个最高）→ <span class="pd-token pd-mask">[M]</span><span class="pd-token pd-just-unmasked">C</span><span class="pd-token pd-mask">[M]</span>
+      </div>
+      <div class="pd-line" data-line="2">
+        输入 → <span class="pd-token pd-mask">[M]</span><span class="pd-token pd-committed">C</span><span class="pd-token pd-mask">[M]</span><br>
+        logits argmax → A / — / A；置信度 → 0.45 / — / 0.75<br>
+        本步规则：保留 1 mask（commit 1 个）→ <span class="pd-token pd-mask">[M]</span><span class="pd-token pd-committed">C</span><span class="pd-token pd-just-unmasked">A</span>
+      </div>
+      <div class="pd-line" data-line="3">
+        输入 → <span class="pd-token pd-mask">[M]</span><span class="pd-token pd-committed">C</span><span class="pd-token pd-committed">A</span><br>
+        logits argmax → B / — / —；置信度 → 0.92 / — / —<br>
+        本步规则：保留 0 mask → <span class="pd-token pd-just-unmasked">B</span><span class="pd-token pd-committed">C</span><span class="pd-token pd-committed">A</span>（完成）
+      </div>
+    </div>
+    <script>
+      (function () {
+        const btns = document.querySelectorAll('.pd-controls button');
+        const lines = document.querySelectorAll('#pd-readout .pd-line');
+        function show(step) {
+          btns.forEach(b => b.classList.toggle('active', +b.dataset.step === step));
+          lines.forEach(l => l.classList.toggle('pd-active-line', +l.dataset.line === step));
+        }
+        btns.forEach(b => b.addEventListener('click', () => show(+b.dataset.step)));
+        show(0);
+      })();
+    </script>
+  </section>
+
+  <section class="concept-example">
+    <h2>手算：confidence top-$k$ 在 L14 的具体一帧</h2>
+    <p>沿用讲师 chunk #217 的 logits：position 1 = $[1.0, 0, 0.8, 0.1]$（顺序为 A/B/C/—），position 2 = $[0.1, 0, 0.8, 1.0]$，position 3 = $[0.1, 0, 0.8, 1.0]$。先对每一行做 softmax：$p_1 = \mathrm{softmax}([1.0, 0, 0.8, 0.1]) \approx [0.43, 0.16, 0.35, 0.18]$，$\max p_1 \approx 0.43$；同理 $\max p_2 \approx \max p_3 \approx 0.50$。要 commit $k=1$ 个位置：在 $\{0.43, 0.50, 0.50\}$ 上取 argmax，得到 position 2（讲师明确说"或者位置 3，我选位置 2"）。该位置 argmax token = "—"（这里讲师在示例中用 C 代替"—"），commit；其余两位置回退为 MASK。下一步 forward 时，输入序列是 <code>[BOS, MASK, C, MASK, EOS]</code>，network 重新算所有位置 logits、再 commit 1 个。这就是<em>一次 forward → 一次 commit</em>的完整账。</p>
+    <div class="pd-callout-quote">「我要 unmask 的就是置信度最高的那个——位置 2 或 3，我这里选位置 2。」—— Vizuara L14 @09:31</div>
+    <p>注意一个被忽略的细节：上一步的 commit 决策会<em>改变下一步的 logits 分布</em>——这是 parallel decoding 和 AR 的最大区别在数值上的体现。AR 是"每步加一个 token、左侧 context 单调增长"；parallel decoding 是"每步往任意位置插一个 token、整段 context 重新打分"。如果你在调试一个 diffusion LLM 的 inference 实现，最值得 print 的就是每步的 max-conf 分布——如果发现某个位置长期低 confidence、被反复回退，多半是 schedule 太激进、应该减小每步 commit 数；反之如果所有位置 confidence 都迅速饱和到 0.99，说明 schedule 太保守、可以加大步内 commit 数提升 throughput。</p>
+    <p>另一个易踩的实现坑：在 Vizuara 演示里，每一步对<em>所有位置</em>（包括已 commit 的位置）都重新算 logits，然后用 mask 标记位过滤出"哪些位置还在 mask 状态、参与本步 top-$k$ 排序"。也就是说已 commit 位置的 logits 被算了但被忽略——这是 PyTorch 实现里浪费 FLOPs 但代码最简单的写法。如果要做工程优化，可以维护"active mask 索引"在 forward 后只取这些 row 算 softmax；但 attention 部分仍然要在完整长度 $L$ 上算（双向 attention 的必然代价）。</p>
+  </section>
+
+  <section class="pd-pitfalls concept-pitfalls">
+    <h2>常见误区</h2>
+    <ol>
+      <li><strong>"$T$ 步 diffusion 必然比 $L$ 步 AR 快 $L/T$ 倍。"</strong>反例：batch=1、$L=512$、$T=64$ 时，带 KV-cache 的 LLaMA-7B 实测延迟比同尺寸 MDLM 还低——因为 diffusion 每步要重算整段 $L$ 的 attention（无 KV-cache 可复用，整段 sequence 都在变），而 AR 每步只算 1 行 attention。理论 speedup $L/T = 8\times$ 在实测里变成 $\sim 0.7\times$。Speedup 只在 batch≥32 的 throughput 视角下成立。</li>
+      <li><strong>"每步 commit 越多 token 越好，反正一次 forward。"</strong>反例：MaskGIT 论文表 4，$L=256$ 上一步 commit 全部 → FID 暴增 ~6 分；commit 1/4 → 接近最优。一次 commit 太多会让低置信度位置"被裹挟"，破坏 demasking 的 EM-like 收敛性——本来该在下一步用新语境重新打分的位置被冻死在了高熵的 argmax 上。</li>
+      <li><strong>"parallel decoding 出来的 token 之间相互独立。"</strong>反例：position 2 在 step 3 commit 为 C 之后，position 1 在 step 4 的 logits 完全变了（输入序列变了）；token 间的依赖是<em>跨步</em>建立的，不是一次 forward 内建立的。所以"一次 forward 同时采 2 个 token"并不等于"采到联合分布的样本"——而是两个边缘分布的乘积 $p(x_1) \cdot p(x_2)$，忽略了 $p(x_1, x_2)$ 的相关性，质量比真正的联合采样差。这是为什么大 $k$ 会掉点的根本原因。</li>
+    </ol>
+  </section>
+
+  <section class="concept-seealso">
+    <h2>相关概念</h2>
+    <ul>
+      <li><a href="/video-to-notebook/concepts/diffusion-language-model/">Diffusion Language Model</a></li>
+    </ul>
+  </section>
+
+  <section class="concept-sources">
+    <h2>来源</h2>
+    <ol>
+      <li><a href="https://www.youtube.com/watch?v=3dzjtDLaUJM&t=135s" target="_blank" rel="noopener">diffusion-lm-vizuara · L14 · Diffusion LLM Inference Pipeline · demask 四步规则 · (02:15)</a></li>
+      <li><a href="https://www.youtube.com/watch?v=3dzjtDLaUJM&t=436s" target="_blank" rel="noopener">diffusion-lm-vizuara · L14 · 「这就是 demask 的规则」 · (07:16)</a></li>
+      <li><a href="https://www.youtube.com/watch?v=3dzjtDLaUJM&t=571s" target="_blank" rel="noopener">diffusion-lm-vizuara · L14 · confidence top-$k$ 选位置示例 · (09:31)</a></li>
+    </ol>
+  </section>
+</article>

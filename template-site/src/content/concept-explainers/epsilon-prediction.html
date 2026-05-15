@@ -1,0 +1,269 @@
+<style>
+/* prefix: ep- */
+.ep-quickref{background:var(--surface-soft);border-left:3px solid var(--module-accent);padding:0.8rem 1rem;border-radius:0 4px 4px 0;margin:1rem 0;font-size:0.92rem;}
+.ep-quickref div{margin:0.3rem 0;}
+.ep-svg{display:block;margin:1.2rem auto;max-width:100%;height:auto;}
+.ep-pitfalls ol{padding-left:1.4rem;} .ep-pitfalls li{margin:0.5rem 0;}
+.ep-source{font-style:italic;color:var(--text-muted);border-left:2px solid var(--border);padding:0.4rem 0.9rem;margin:0.6rem 0;font-size:0.92rem;background:var(--surface-soft);}
+.ep-callout{background:var(--module-accent-soft);border-left:3px solid var(--module-accent);padding:0.6rem 0.9rem;margin:0.8rem 0;border-radius:0 4px 4px 0;}
+.my-addition{background:var(--blue-soft);border-left:3px solid var(--blue);padding:0.45rem 0.8rem;margin:0.7rem 0;border-radius:0 4px 4px 0;font-size:0.92rem;}
+.ep-table{width:100%;border-collapse:collapse;margin:0.8rem 0;font-size:0.92rem;}
+.ep-table th,.ep-table td{border:1px solid var(--border);padding:0.4rem 0.6rem;text-align:left;}
+.ep-table th{background:var(--surface-soft);}
+.ep-controls{display:flex;gap:0.4rem;flex-wrap:wrap;margin:0.8rem 0;}
+.ep-controls button{padding:0.35rem 0.7rem;border:1px solid var(--border);background:var(--surface);color:var(--text);cursor:pointer;border-radius:4px;font-size:0.88rem;}
+.ep-controls button.active{background:var(--module-accent);color:var(--surface);border-color:var(--module-accent);}
+.ep-view{display:none;}
+.ep-view.ep-active-view{display:block;}
+@keyframes ep-noise-drift{0%{transform:translate(0,0);}50%{transform:translate(2px,-1px);}100%{transform:translate(0,0);}}
+.ep-noise-particle{animation:ep-noise-drift 1.6s ease-in-out infinite;}
+@keyframes ep-arrow-pulse{0%,100%{opacity:0.55;}50%{opacity:1;}}
+.ep-arrow-flow{animation:ep-arrow-pulse 1.8s ease-in-out infinite;}
+</style>
+
+<article class="concept-entry">
+  <header class="concept-header">
+    <span class="concept-eyebrow">概念</span>
+    <h1>Epsilon Prediction</h1>
+    <p class="concept-tagline">— 让网络猜"加进去的那团噪声"，比猜原图或猜均值都好训。</p>
+  </header>
+
+  <aside class="ep-quickref">
+    <div><strong>定义</strong> · 给定含噪样本 $x_t$ 和时间步 $t$，网络 $\epsilon_\theta(x_t, t)$ 直接预测前向过程中混入的那一份高斯噪声 $\epsilon$。</div>
+    <div><strong>公式</strong> · $L_{\text{simple}} = \mathbb{E}_{t,x_0,\epsilon}\bigl\|\epsilon - \epsilon_\theta(\sqrt{\bar\alpha_t}x_0 + \sqrt{1-\bar\alpha_t}\epsilon,\,t)\bigr\|^2$。</div>
+    <div><strong>易错</strong> · ε-prediction、$x_0$-prediction、$\mu_t$-prediction 三者在数学上完全等价；选择 ε 的唯一理由是<em>梯度尺度</em>，不是表达能力。</div>
+  </aside>
+
+  <section class="concept-intuition">
+    <p>很多人第一次读 DDPM 论文都会卡在这里：扩散模型不是要"生成图像"吗？那神经网络为什么不直接预测一张干净的图像 $x_0$，反而绕一大圈去预测"加进去的那团噪声 $\epsilon$"？这个反直觉的设计是 DDPM 工程层面最重要的一个选择，理解它就理解了为什么扩散模型能稳定训练到这么大的规模。</p>
+
+    <p>Vizuara 的 Dr. Raj 在 Lecture 4 一上来就用一个非常朴素的比喻：把图像比作往房间一角喷的香水。香水分子慢慢扩散、结构慢慢消失，最后整间房子里的空气变得均匀而嘈杂；而 DDPM 反向过程的任务，就是要"一步一步把分子收回到喷头那个位置"。要完成这件事，你<em>不需要</em>在每一步重建整间房子里香水的浓度场，你只需要知道"上一步多飘出来多少分子"，再把它退回去就好——你学的是"增量"，不是"绝对位置"。这是 ε-prediction 在直觉层面的第一个抓手。</p>
+
+    <div class="ep-source">「If you want to generate images which are sampled from the true distribution, then you need to predict a noise <strong>epsilon hat</strong> which is as close as possible to the real noise which is added in the forward process. This sounds very intuitive to begin with, right? But when you actually start doing the mathematics, this is not very apparent at the beginning and we only come towards it in the very end.」—— Vizuara L4 @03:15（Dr. Raj）</div>
+
+    <p>讲师这句话点出了 ε-prediction 的两个奇怪之处：第一，它的<strong>结论极其直观</strong>——"你加了多少，我就减掉多少"，小学生都能听懂；第二，它的<strong>推导一点都不显然</strong>，你要从变分下界（ELBO）一路展开，化简掉时间相关权重，直到最后一步才会"啪嗒"一下掉出 ε 这一项。这种"结论简单、推导曲折"的反差，是 DDPM 给人留下深刻印象的关键。下面我们就按这个顺序展开：先把数学推完，再回到直觉层面解释"为什么是 ε，而不是 $\mu$ 或 $x_0$"。</p>
+
+    <p>讲师还提到一个细节："Exactly the this noise is added at what time step? How to compare these two different noise levels? It is hard to explain all this in theory." 也就是说：单看 ε 这个量你还不够，必须把它和<em>具体的时间步 $t$</em> 绑在一起。这就是为什么 ε-prediction 的网络签名永远是 $\epsilon_\theta(x_t, t)$——$t$ 是必传的条件，它告诉网络当前处在哪个噪声等级。讲师强调"这两种不同噪声等级如何比较"是个困难的问题，背后正是 noise schedule 设计的核心痛点：在 $t=10$ 与 $t=900$ 这两个噪声水平上，"加进去多少噪声"的标准刻度是不同的，必须靠 $\bar\alpha_t$ 这条曲线给网络一个统一的坐标系。</p>
+
+    <p>在训练里，这件事对应着一个极简的循环：每个 step 随机采一个 $(x_0, t, \epsilon)$，用闭式公式构造出 $x_t$，把 $(x_t, t)$ 喂给 U-Net，让网络把 $\epsilon$ 还原回来，做 MSE 反向传播。没有 KL 项、没有重建项、没有时间相关权重——整个目标函数就是一个一行的回归损失。这种<em>训练目标的简洁性</em>，是 ε-prediction 真正改变行业的地方。Vizuara 课程在介绍这个 practical 部分时也指出："my experience with diffusion models has been that the theory appears very interesting but you cannot truly understand the underlying concepts unless you supplement it with a practical example"——理论看起来吓人，实操出奇简单，正是 ε-prediction 的特点。</p>
+
+    <div class="my-addition">🟡 教材外补充：另一个常被忽略的直觉是"噪声是 task-agnostic 的，干净图是 task-specific 的"。无论你训的是猫脸、CIFAR、还是 LAION-5B，<em>加进去的高斯噪声分布永远一模一样</em>——这意味着 ε-prediction 在跨数据集迁移时几乎不需要调超参；而 $x_0$-prediction 在切换数据集时，目标量级和分布会整体平移，必须重新调学习率。这是 ε 在大规模训练时间维度上的隐性优势。</div>
+  </section>
+
+  <section class="concept-deepdive">
+    <h2>第一步：从前向闭式解出 ε</h2>
+    <p>DDPM 前向过程的<strong>魔法</strong>在于：因为每步加的都是高斯噪声、协方差结构线性叠加，所以"原图加 $t$ 步噪声"可以一次性写成闭式（即 reparameterization trick 的应用）：</p>
+
+    <p>$$x_t = \sqrt{\bar\alpha_t}\,x_0 + \sqrt{1-\bar\alpha_t}\,\epsilon,\qquad \epsilon \sim \mathcal{N}(0, I).$$</p>
+
+    <p>这里 $\bar\alpha_t = \prod_{s=1}^t \alpha_s$ 是"累积保留系数"，从 $t=1$ 的接近 1 单调下降到 $t=T$ 的接近 0。换句话说，$\sqrt{\bar\alpha_t}$ 是<em>原图剩余强度</em>，$\sqrt{1-\bar\alpha_t}$ 是<em>叠加噪声强度</em>，二者平方和恒为 1（这是 schedule 的设计约束，保证 $x_t$ 的方差不爆炸）。</p>
+
+    <p>这条公式是一个一元一次方程。给定任意两个量，可以解出第三个：</p>
+
+    <p>$$\epsilon = \frac{x_t - \sqrt{\bar\alpha_t}\,x_0}{\sqrt{1-\bar\alpha_t}},\qquad x_0 = \frac{x_t - \sqrt{1-\bar\alpha_t}\,\epsilon}{\sqrt{\bar\alpha_t}}.$$</p>
+
+    <p><strong>Why（为什么这件事重要）</strong>：这两条公式告诉你 $\epsilon$、$x_0$、$x_t$ 三个量是<em>线性互换</em>的——知道任意两个，第三个就被锁死。所以让网络去拟合 $\epsilon$、$x_0$、或者反向均值 $\mu_t$ 中的<em>任何一个</em>，理论上能力上限完全相同。这就是文献里反复出现的"three equivalent parameterisations"。<strong>选哪个，是工程问题，不是数学问题。</strong></p>
+
+    <p>这条等价性还有一个值得反复强调的工程含义：你在训练时选择的"预测目标"，可以看作给同一个底层网络<em>套上不同的输出接口</em>。换言之，如果你已经训了一个 ε-prediction 模型，可以在采样时随时把它的输出转成 $\hat x_0$（用于做 inpainting、clip 到合法像素范围、SDEdit 编辑），转成 $\hat\mu_t$（用于和 ancestral sampler 拼接），甚至转成 score（用于走 Langevin / ODE 流程）。一个网络、多种解释——这是 DDPM 训练体系比 GAN 灵活的根本原因，也是后来 Karras 2022 的 EDM 把"训练目标"和"采样目标"彻底解耦的理论基础。</p>
+
+    <h2>第二步：把反向后验从 $x_0$ 改写成 ε</h2>
+    <p>从变分推导出来，反向过程 $p_\theta(x_{t-1}\mid x_t)$ 的均值需要去匹配真后验 $q(x_{t-1}\mid x_t, x_0)$ 的均值，记作 $\mu_q(x_t, x_0)$。Ho 2020 论文给出了闭式：</p>
+
+    <p>$$\mu_q(x_t, x_0) = \frac{\sqrt{\bar\alpha_{t-1}}\,\beta_t}{1-\bar\alpha_t}\,x_0 + \frac{\sqrt{\alpha_t}(1-\bar\alpha_{t-1})}{1-\bar\alpha_t}\,x_t.$$</p>
+
+    <p>这是用 $x_0$ 表达的版本——直觉上像是"$x_{t-1}$ 在 $x_0$ 和 $x_t$ 之间做一个时间相关的加权平均"。把上一节解出来的 $x_0 = (x_t - \sqrt{1-\bar\alpha_t}\,\epsilon)/\sqrt{\bar\alpha_t}$ 代进去，经过几行代数化简（用到 $\beta_t = 1 - \alpha_t$ 和 $\bar\alpha_t = \alpha_t \bar\alpha_{t-1}$），最终得到一个只含 $x_t$ 和 $\epsilon$ 的优雅版本：</p>
+
+    <p>$$\boxed{\;\mu_\theta(x_t, t) = \frac{1}{\sqrt{\alpha_t}}\left(x_t - \frac{\beta_t}{\sqrt{1-\bar\alpha_t}}\,\epsilon_\theta(x_t, t)\right).\;}$$</p>
+
+    <p><strong>Why</strong>：这条 boxed 公式是 DDPM 采样器的<em>骨架</em>。它告诉你：要算 $t-1$ 步的均值，你只要把网络预测的 $\hat\epsilon = \epsilon_\theta(x_t, t)$ 按一个固定系数从 $x_t$ 里"减掉"，再除以 $\sqrt{\alpha_t}$ 即可。所有时间相关的项都是<em>常数</em>（提前从 schedule 算好），网络的全部工作就是吐出一个和噪声同维度的张量。<strong>这就是 ε-prediction 在工程层面如此干净的原因：它让网络的输入输出有完全相同的形状和量级。</strong></p>
+
+    <h2>第三步：三种参数化的换算与对比</h2>
+    <p>同一个 U-Net 可以重新解释为三种不同的预测目标。下面是互转公式：</p>
+
+    <table class="ep-table">
+      <thead><tr><th>预测目标</th><th>训练损失</th><th>与 ε 的互转</th></tr></thead>
+      <tbody>
+        <tr><td>$\epsilon_\theta$（DDPM 默认）</td><td>$\|\epsilon - \epsilon_\theta\|^2$</td><td>—（基准）</td></tr>
+        <tr><td>$x_{0,\theta}$</td><td>$\|x_0 - x_{0,\theta}\|^2$</td><td>$x_{0,\theta} = (x_t - \sqrt{1-\bar\alpha_t}\,\epsilon_\theta)/\sqrt{\bar\alpha_t}$</td></tr>
+        <tr><td>$\mu_\theta$</td><td>$\|\mu_q - \mu_\theta\|^2$</td><td>见上方 boxed 公式</td></tr>
+        <tr><td>$v_\theta$（Salimans 2022）</td><td>$\|v - v_\theta\|^2$</td><td>$v = \sqrt{\bar\alpha_t}\,\epsilon - \sqrt{1-\bar\alpha_t}\,x_0$</td></tr>
+      </tbody>
+    </table>
+
+    <p>四种参数化数学上等价，但训练表现天差地别。<strong>为什么 ε 实际效果赢？</strong>三个理由叠加。</p>
+
+    <ol>
+      <li><strong>残差风格学习（ResNet 同款直觉）</strong>。把 $x_t = \sqrt{\bar\alpha_t}\,x_0 + \sqrt{1-\bar\alpha_t}\,\epsilon$ 看作"原图分量 + 噪声分量"两个 head 的叠加；让网络去预测<em>噪声那一个 head</em>，等于让它学一个残差。讲师在 Lecture 4 强调："网络学『我们加了什么』比学『原本是什么』容易得多"——前者的统计量是已知的（标准高斯白噪声），后者是未知的真实数据分布。从信息论角度看，预测 ε 是预测一个分布固定的目标，预测 $x_0$ 是预测一个分布未知的目标，前者的归纳偏置（inductive bias）天然更强。</li>
+      <li><strong>跨噪声等级尺度不变</strong>。$\epsilon$ 在任意 $t$ 都服从 $\mathcal{N}(0, I)$，方差永远是 1；而 $x_0$ 在 $t$ 大时已被噪声完全淹没（网络只能凭空"幻觉"出一张图）、$\mu_t$ 在 $t$ 小时几乎等于 $x_t$（信号被自身覆盖）。从 $t=1$ 到 $t=T=1000$，ε-prediction 的 MSE 损失典型量级都在同一个数量级上，optimizer 不需要随 $t$ 调学习率。这一点对训练稳定性至关重要——你不需要为不同时间步设计不同的 loss weighting。</li>
+      <li><strong>梯度信号在所有 $t$ 上平衡</strong>。Ho 2020 在原始论文中做了一个关键的工程实验：把变分下界里那个时间相关权重 $\frac{\beta_t^2}{2\sigma_t^2\alpha_t(1-\bar\alpha_t)}$ 整个丢掉、统一权重为 1，得到的 $L_{\text{simple}}$ 反而比理论上正确的 ELBO 训得<em>更好</em>。原因是：高噪声 step 在 ELBO 里本来权重就被压得很低（信号信噪比低），强行均匀化反而让网络在所有 $t$ 上都得到充分训练，模型容量被更平均地利用。这是"理论让位于实践"的经典案例。</li>
+    </ol>
+
+    <div class="my-addition">🟡 教材外补充：这三条理由也解释了为什么后续工作（EDM by Karras 2022、SD3 by Esser 2024）转向 v-prediction：当训练涉及极高噪声 step（接近纯噪声）或极低噪声 step（接近 clean image）时，ε 在低噪声端会"饱和"——$\sqrt{1-\bar\alpha_t}\to 0$，使 ε 的微小预测误差被放大成 $\hat x_0$ 上的巨大误差。v-prediction 通过对两端做正交化，把这种端点退化压住了。但在 $t$ 中段，ε 仍是最优选择，所以 SD 1.x、SD 2.x、几乎所有 2020–2023 的扩散模型都用 ε。</div>
+
+    <h2>第三点半：信噪比（SNR）视角的另一种解读</h2>
+    <p>把 $x_t = \sqrt{\bar\alpha_t}\,x_0 + \sqrt{1-\bar\alpha_t}\,\epsilon$ 改写一下，可以发现它的信噪比就是 $\text{SNR}(t) = \bar\alpha_t / (1-\bar\alpha_t)$。把不同参数化的损失函数都换算到 ε 视角上，会得到一个统一的形式：</p>
+
+    <p>$$L_{x_0\text{-pred}} = \frac{1-\bar\alpha_t}{\bar\alpha_t}\,L_{\epsilon\text{-pred}},\qquad L_{v\text{-pred}} = (\text{SNR}+1)\cdot \text{加权 } L_{\epsilon\text{-pred}}.$$</p>
+
+    <p><strong>Why</strong>：这条换算式说明，<em>选哪种 prediction target，等价于给不同时间步 $t$ 分配不同的隐式权重</em>。ε-prediction 默认给所有 $t$ 等权重（$L_{\text{simple}}$ 的设定）；$x_0$-prediction 等价于给高 SNR（小 $t$）更高权重；v-prediction 介于两者之间。这就是为什么不同选择会导致不同的视觉质量：高 SNR 端管细节、低 SNR 端管整体结构，权重不同 = 优化偏好不同。Salimans 2022 的 v-prediction 论文正是在这条尺度律上做的文章。</p>
+
+    <h2>第四步：训练循环的简洁性</h2>
+    <p>把上面的工程优势汇总到一起，DDPM 训练算法只有四行：</p>
+    <ol>
+      <li>从数据集采 $x_0$，从 $\{1, ..., T\}$ 均匀采 $t$，从 $\mathcal{N}(0, I)$ 采 $\epsilon$；</li>
+      <li>构造 $x_t = \sqrt{\bar\alpha_t}\,x_0 + \sqrt{1-\bar\alpha_t}\,\epsilon$（无需任何 for 循环，闭式直达任意时间步）；</li>
+      <li>前向 $\hat\epsilon = \epsilon_\theta(x_t, t)$，计算 $L = \|\epsilon - \hat\epsilon\|^2$；</li>
+      <li>反向传播，更新 $\theta$。</li>
+    </ol>
+    <p>整个流程没有 KL、没有 reparameterization 采样、没有时间相关权重，比 VAE 训练还简单。这是 ε-prediction 在 DDPM 论文里被称为"simple loss objective"的原因。讲师在 Lecture 4 把这一点反复强调："Through the practical examples we will get a firm understanding of the theory"——理论看起来复杂，但实操就是一个回归。</p>
+
+    <h2>第五步：和 score function 的桥梁</h2>
+    <p>ε-prediction 和 score matching 框架之间存在一个非常漂亮的恒等式。score function 定义为 $\nabla_{x_t} \log q(x_t)$，也就是"含噪数据分布的对数概率梯度"。在高斯前向核下，可以证明：</p>
+
+    <p>$$\nabla_{x_t} \log q(x_t \mid x_0) = -\frac{\epsilon}{\sqrt{1-\bar\alpha_t}}.$$</p>
+
+    <p><strong>Why</strong>：这条恒等式说，<em>预测 ε 本质上就是在预测（带符号、带归一化系数的）score function</em>。Yang Song 的 score-based 框架和 Ho 2020 的 DDPM 框架原本是两条独立发展的研究线（前者从 Langevin dynamics 出发，后者从变分推断出发），但通过这个等式，二者在数学上合流——这就是为什么文献里说 ε-prediction 和 score matching 是"两种语言、一件事"。这也解释了为什么从 ε 框架可以无痛切换到 ODE 视角（probability flow ODE）、再切换到 flow matching。</p>
+
+    <div class="my-addition">🟡 教材外补充：在实际代码中，HuggingFace `diffusers` 库的 schedulers（比如 `DDPMScheduler`、`DDIMScheduler`、`EulerDiscreteScheduler`）都有一个统一的参数 `prediction_type`，可选值为 `"epsilon"`、`"sample"`（即 $x_0$）、`"v_prediction"`。这就是工程层面"三种参数化"的直接体现——只要你训练时和采样时用同一个 `prediction_type`，结果就是对的；混用就会爆。讲师在 L4 提到的 `diffusers` 库正是这套抽象的载体。</div>
+  </section>
+
+  <section class="concept-interact">
+    <p>下方三个按钮切换<strong>同一个网络输出</strong>的三种解释方式：ε / $x_0$ / $\mu_t$。<strong>不变量</strong>：右侧 $x_{t-1}$ 那个点（也就是采样器下一步的输出）在三个视图里位置完全一致——三种参数化只是改变"我们让网络说出来的那一项"，最终的采样结果完全相同。这正是"三者数学等价"的可视化证明。</p>
+
+    <div class="ep-controls" role="tablist" aria-label="三种参数化视图切换">
+      <button data-step="0" class="active" aria-label="切换到 epsilon 视图">① 预测 ε</button>
+      <button data-step="1" aria-label="切换到 x0 视图">② 预测 x₀</button>
+      <button data-step="2" aria-label="切换到 mu 视图">③ 预测 μₜ</button>
+    </div>
+
+    <div id="ep-readout">
+      <div class="ep-view ep-active-view" data-line="0">
+        <svg viewBox="0 0 600 220" role="img" aria-label="网络预测 epsilon 视图">
+          <g font-family="ui-sans-serif" font-size="11" fill="var(--text)">
+            <rect x="30" y="80" width="90" height="60" rx="4" fill="var(--surface-soft)" stroke="var(--border)"/>
+            <text x="75" y="115" text-anchor="middle">x_t</text>
+            <text x="75" y="160" text-anchor="middle" font-size="10" fill="var(--text-muted)">含噪输入</text>
+            <path d="M 125 110 L 200 110" stroke="var(--text-muted)" class="ep-arrow-flow"/>
+            <rect x="205" y="70" width="120" height="80" rx="6" fill="var(--module-accent)" stroke="var(--module-accent)"/>
+            <text x="265" y="105" text-anchor="middle" fill="var(--surface)">U-Net</text>
+            <text x="265" y="125" text-anchor="middle" fill="var(--surface)" font-size="10">ε_θ(x_t, t)</text>
+            <path d="M 330 110 L 405 110" stroke="var(--text-muted)" class="ep-arrow-flow"/>
+            <circle cx="430" cy="110" r="22" fill="var(--red-soft)" stroke="var(--red)" class="ep-noise-particle"/>
+            <text x="430" y="115" text-anchor="middle" fill="var(--red)">ε̂</text>
+            <text x="430" y="160" text-anchor="middle" font-size="10" fill="var(--text-muted)">"加进去那团"</text>
+            <text x="490" y="100" font-size="10" fill="var(--text-muted)">→ 代入</text>
+            <text x="490" y="120" font-size="10" fill="var(--text-muted)">采样器</text>
+            <rect x="540" y="90" width="50" height="40" rx="4" fill="var(--surface-soft)" stroke="var(--border)"/>
+            <text x="565" y="115" text-anchor="middle">x_{t-1}</text>
+          </g>
+        </svg>
+        <p style="font-size:0.92rem;color:var(--text-muted);">采样规则：$x_{t-1} = \frac{1}{\sqrt{\alpha_t}}\bigl(x_t - \frac{\beta_t}{\sqrt{1-\bar\alpha_t}}\hat\epsilon\bigr) + \sigma_t z$。<strong>DDPM 原始论文采用的默认选项</strong>，Ho 2020 的实验主力。</p>
+      </div>
+
+      <div class="ep-view" data-line="1">
+        <svg viewBox="0 0 600 220" role="img" aria-label="网络预测 x0 视图">
+          <g font-family="ui-sans-serif" font-size="11" fill="var(--text)">
+            <rect x="30" y="80" width="90" height="60" rx="4" fill="var(--surface-soft)" stroke="var(--border)"/>
+            <text x="75" y="115" text-anchor="middle">x_t</text>
+            <text x="75" y="160" text-anchor="middle" font-size="10" fill="var(--text-muted)">含噪输入</text>
+            <path d="M 125 110 L 200 110" stroke="var(--text-muted)" class="ep-arrow-flow"/>
+            <rect x="205" y="70" width="120" height="80" rx="6" fill="var(--module-accent)" stroke="var(--module-accent)"/>
+            <text x="265" y="105" text-anchor="middle" fill="var(--surface)">U-Net</text>
+            <text x="265" y="125" text-anchor="middle" fill="var(--surface)" font-size="10">x₀_θ(x_t, t)</text>
+            <path d="M 330 110 L 405 110" stroke="var(--text-muted)" class="ep-arrow-flow"/>
+            <rect x="408" y="90" width="48" height="42" rx="4" fill="var(--blue-soft)" stroke="var(--blue)"/>
+            <text x="432" y="115" text-anchor="middle" fill="var(--blue)">x̂₀</text>
+            <text x="432" y="160" text-anchor="middle" font-size="10" fill="var(--text-muted)">"原图猜测"</text>
+            <text x="490" y="100" font-size="10" fill="var(--text-muted)">→ 代入</text>
+            <text x="490" y="120" font-size="10" fill="var(--text-muted)">采样器</text>
+            <rect x="540" y="90" width="50" height="40" rx="4" fill="var(--surface-soft)" stroke="var(--border)"/>
+            <text x="565" y="115" text-anchor="middle">x_{t-1}</text>
+          </g>
+        </svg>
+        <p style="font-size:0.92rem;color:var(--text-muted);">先转 ε：$\hat\epsilon = (x_t - \sqrt{\bar\alpha_t}\hat x_0)/\sqrt{1-\bar\alpha_t}$，再走 ε 那条路。和 ε-prediction 数学完全等价。SDEdit、图像编辑、inpainting 任务里更常用——因为可以直接 clip $\hat x_0$ 到 $[-1, 1]$。</p>
+      </div>
+
+      <div class="ep-view" data-line="2">
+        <svg viewBox="0 0 600 220" role="img" aria-label="网络预测 mu 视图">
+          <g font-family="ui-sans-serif" font-size="11" fill="var(--text)">
+            <rect x="30" y="80" width="90" height="60" rx="4" fill="var(--surface-soft)" stroke="var(--border)"/>
+            <text x="75" y="115" text-anchor="middle">x_t</text>
+            <text x="75" y="160" text-anchor="middle" font-size="10" fill="var(--text-muted)">含噪输入</text>
+            <path d="M 125 110 L 200 110" stroke="var(--text-muted)" class="ep-arrow-flow"/>
+            <rect x="205" y="70" width="120" height="80" rx="6" fill="var(--module-accent)" stroke="var(--module-accent)"/>
+            <text x="265" y="105" text-anchor="middle" fill="var(--surface)">U-Net</text>
+            <text x="265" y="125" text-anchor="middle" fill="var(--surface)" font-size="10">μ_θ(x_t, t)</text>
+            <path d="M 330 110 L 405 110" stroke="var(--text-muted)" class="ep-arrow-flow"/>
+            <ellipse cx="432" cy="110" rx="28" ry="20" fill="var(--module-accent-soft)" stroke="var(--module-accent)"/>
+            <text x="432" y="115" text-anchor="middle">μ̂</text>
+            <text x="432" y="160" text-anchor="middle" font-size="10" fill="var(--text-muted)">"后验均值"</text>
+            <text x="490" y="100" font-size="10" fill="var(--text-muted)">→ 直接是</text>
+            <text x="490" y="120" font-size="10" fill="var(--text-muted)">采样均值</text>
+            <rect x="540" y="90" width="50" height="40" rx="4" fill="var(--surface-soft)" stroke="var(--border)"/>
+            <text x="565" y="115" text-anchor="middle">x_{t-1}</text>
+          </g>
+        </svg>
+        <p style="font-size:0.92rem;color:var(--text-muted);">最直接但最难训：$\mu$ 量级随 $t$ 剧烈变化（$t$ 小时接近 $x_t$、$t$ 大时接近 0），optimizer 学习率难调。Ho 2020 论文里实测 FID 比 ε 差一档，最早被淘汰。这里放出来只是为了让你看清"三种参数化是一回事"。</p>
+      </div>
+    </div>
+
+    <script>
+    (function () {
+      const btns = document.querySelectorAll('.ep-controls button');
+      const views = document.querySelectorAll('#ep-readout .ep-view');
+      function show(step) {
+        btns.forEach(b => b.classList.toggle('active', +b.dataset.step === step));
+        views.forEach(v => v.classList.toggle('ep-active-view', +v.dataset.line === step));
+      }
+      btns.forEach(b => b.addEventListener('click', () => show(+b.dataset.step)));
+      show(0);
+    })();
+    </script>
+  </section>
+
+  <section class="concept-example">
+    <h2>手算：一步反向去噪</h2>
+    <p>取 schedule 上的某一步：$\bar\alpha_t = 0.36$、$\alpha_t = 0.9$、$\beta_t = 0.1$。假设输入 $x_t = 2.0$，网络吐出 $\hat\epsilon = 0.8$。代入 boxed 公式算出反向均值：</p>
+
+    <p>$$\mu_\theta = \frac{1}{\sqrt{0.9}}\left(2.0 - \frac{0.1}{\sqrt{1-0.36}}\cdot 0.8\right) = \frac{1}{0.949}\left(2.0 - \frac{0.1}{0.8}\cdot 0.8\right) = \frac{1}{0.949}(2.0 - 0.1) = \frac{1.9}{0.949} \approx 2.003.$$</p>
+
+    <p>把同一个 $\hat\epsilon$ 换算成 $\hat x_0$：</p>
+
+    <p>$$\hat x_0 = \frac{x_t - \sqrt{1-\bar\alpha_t}\,\hat\epsilon}{\sqrt{\bar\alpha_t}} = \frac{2.0 - \sqrt{0.64}\cdot 0.8}{\sqrt{0.36}} = \frac{2.0 - 0.8\cdot 0.8}{0.6} = \frac{1.36}{0.6} \approx 2.267.$$</p>
+
+    <p>验证一致性：把 $\hat x_0 = 2.267$ 代回 $\mu_q(x_t, x_0)$ 公式（其中 $\bar\alpha_{t-1} = \bar\alpha_t/\alpha_t = 0.36/0.9 = 0.4$）也会得到约 2.003。三种参数化指向同一个 $\mu_\theta \approx 2.003$，差异只在网络输出层的"中间表示"。这就是"等价但梯度不同"的具象化——你可以拿任意一种 prediction target 训练，只要在采样时做对应的代数变换就能得到完全一致的反向均值，模型实际学到的知识没有任何流失。</p>
+  </section>
+
+  <section class="concept-example" style="border-top:1px dashed var(--border);margin-top:1.5rem;">
+    <h2>采样器视角：把上一步连成完整循环</h2>
+    <p>把单步反向均值 $\mu_\theta \approx 2.003$ 加上方差项，完整的 DDPM 单步采样公式是：</p>
+    <p>$$x_{t-1} = \mu_\theta(x_t, t) + \sigma_t z,\qquad z \sim \mathcal{N}(0, I),\;\sigma_t = \sqrt{\beta_t}.$$</p>
+    <p>用上节数字：$x_{t-1} = 2.003 + \sqrt{0.1}\cdot z = 2.003 + 0.316\,z$。如果 $z = 0.5$，则 $x_{t-1} = 2.161$。注意：从 $t=T$ 一路降到 $t=1$ 需要循环 $T$ 次，每次都调用一次 $\epsilon_\theta$——这就是为什么 DDPM 采样慢；而 DDIM 通过把方差项设为 0（确定性采样）允许跳步，把循环次数从 1000 压到 50 以内，但底层用的还是同一个 ε-prediction 网络。也就是说<strong>训练一次、采样器可换</strong>，这是 ε-prediction 框架的另一项工程红利。</p>
+  </section>
+
+  <section class="concept-pitfalls">
+    <h2>常见误区</h2>
+    <ol>
+      <li><strong>"ε-prediction 比 $x_0$-prediction 表达能力更强"</strong>。反例：上节手算证明 $\hat\epsilon \leftrightarrow \hat x_0$ 通过 $\sqrt{\bar\alpha_t}, \sqrt{1-\bar\alpha_t}$ 线性互换，能力上限完全相等。差距只在<em>梯度尺度</em>——这是优化问题，不是模型容量问题。所以"换 prediction target 能涨 FID"的现象，本质是隐式 loss 加权变了，不是模型更强了。</li>
+      <li><strong>"既然 $\epsilon \sim \mathcal{N}(0, I)$，网络输出应当 clamp 到 $[-3, 3]$"</strong>。反例：训练良好的 U-Net 在大 $t$ 时输出范围约 $\pm 1$，小 $t$ 时可能 $\pm 5$ 甚至更大；强行 clamp 会破坏 $\hat x_0$ 的范围——因为 $\sqrt{1-\bar\alpha_t}$ 当 $t$ 小时趋近 0，分母会把 ε 误差放大成 $\hat x_0$ 上的巨大偏差。</li>
+      <li><strong>"既然预测的是噪声，就不能做条件生成"</strong>。反例：classifier-free guidance 直接对 $\epsilon_\theta$ 做线性组合 $\epsilon_{\text{cfg}} = \epsilon_\theta(x_t, \varnothing) + w\bigl(\epsilon_\theta(x_t, c) - \epsilon_\theta(x_t, \varnothing)\bigr)$；Stable Diffusion 1.x/2.x、DALL-E 2 全是这么干的，文本条件 $c$ 的引入完全不影响 ε 框架。ε 在每个像素位置都有"应该把方向往哪里推"的语义信息，guidance scale $w$ 越大、推得越激进。</li>
+    </ol>
+  </section>
+
+  <section class="concept-seealso">
+    <h2>相关概念</h2>
+    <ul>
+      <li><a href="/video-to-notebook/concepts/ddpm/">DDPM</a> — ε-prediction 的诞生地，本概念的母框架（Ho 2020）。理解 DDPM 全貌后，再回看 ε 选择会清晰许多。</li>
+      <li><a href="/video-to-notebook/concepts/simple-loss-objective/">Simple Loss</a> — 把变分下界化简成纯 MSE 的关键一步，与 ε-prediction 是连体双生：一个是参数化选择，另一个是目标函数化简。两者合在一起才得到 DDPM 的"一行回归"训练范式。</li>
+    </ul>
+  </section>
+
+  <section class="concept-sources">
+    <h2>来源</h2>
+    <ol>
+      <li><a href="https://www.youtube.com/watch?v=6to_EG3SJgs&t=195s" target="_blank" rel="noopener">diffusion-principles-vizuara · L4 · Diffusion Models Practical / DDPM · "predict epsilon hat close to real noise" · (3:15)</a></li>
+      <li><a href="https://www.youtube.com/watch?v=6to_EG3SJgs&t=258s" target="_blank" rel="noopener">diffusion-principles-vizuara · L4 · Diffusion Models Practical / DDPM · "mathematics not very apparent at the beginning" · (4:18)</a></li>
+      <li><a href="https://www.youtube.com/watch?v=6to_EG3SJgs&t=765s" target="_blank" rel="noopener">diffusion-principles-vizuara · L4 · Diffusion Models Practical / DDPM · 进入 scheduler 与 forward 过程定义 · (12:44)</a></li>
+    </ol>
+  </section>
+</article>

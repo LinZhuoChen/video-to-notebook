@@ -1,0 +1,694 @@
+<style>
+  .consist-ch { line-height: 1.7; }
+  .consist-ch svg { display: block; margin: 1.2rem auto; max-width: 100%; height: auto; }
+  .consist-ch .clip-frame { max-width: 720px; margin: 1.4rem auto; }
+  .consist-ch .clip-frame iframe { width: 100%; aspect-ratio: 16/9; border: 0; border-radius: 6px; }
+  .consist-ch .clip-frame figcaption { color: var(--text-muted); font-size: 0.85rem; margin-top: 0.4rem; text-align: center; }
+  .consist-ch .tldr { background: var(--surface-soft); border-left: 4px solid var(--module-accent); padding: 1rem 1.2rem; border-radius: 0 6px 6px 0; margin: 1.4rem 0; }
+  .consist-ch .tldr h2 { margin-top: 0; font-size: 1.05rem; }
+  .consist-ch .callout { padding: 0.7rem 1rem; margin: 1rem 0; border-radius: 0 6px 6px 0; }
+  .consist-ch .callout-info { background: #eef6fc; border-left: 4px solid #2b80c4; }
+  .consist-ch .callout-note { background: #f3f0fa; border-left: 4px solid #6f4dd0; }
+  .consist-ch .callout-warning { background: #fff6e0; border-left: 4px solid #d4a017; }
+  .consist-ch .callout-tip { background: #e8f5e9; border-left: 4px solid #0b5; }
+  .consist-ch .callout-quote { background: var(--surface-soft); border-left: 3px solid var(--border-strong); padding: 0.5rem 1rem; margin: 0.8rem 0; font-style: italic; color: var(--text-muted); }
+  .consist-ch .my-addition { background: #fff7d6; border-left: 4px solid #b8860b; padding: 0.7rem 1rem; margin: 1rem 0; border-radius: 0 6px 6px 0; }
+  .consist-ch pre { background: #1f1f1f; color: #f6f4ee; padding: 1rem; border-radius: 6px; font-size: 0.86rem; line-height: 1.55; overflow-x: auto; }
+  .consist-ch code:not(pre code) { background: var(--surface-soft); padding: 0.1rem 0.35rem; border-radius: 3px; font-size: 0.9em; }
+  .consist-ch h2 { border-bottom: 1px solid var(--border); padding-bottom: 0.3rem; margin-top: 2.4rem; }
+  .consist-ch h3 { color: var(--module-accent); margin-top: 1.6rem; }
+  .consist-ch .deriv-step { margin: 0.8rem 0; padding: 0.6rem 0.8rem; background: var(--surface-soft); border-radius: 4px; }
+  .consist-ch .deriv-step strong { color: var(--module-accent); }
+  @keyframes consist-flow { 0% { offset-distance: 0%; } 100% { offset-distance: 100%; } }
+  .consist-ch .traj-dot { animation: consist-flow 4s ease-in-out infinite; }
+</style>
+
+<article class="consist-ch">
+
+<h1>15. Consistency Models：一步生成</h1>
+
+<p style="font-size:0.95rem; color:var(--text-muted);">主源：CMU 10799 Lecture 10《Distillation, Consistency Models &amp; Flow Maps》。副源：Song et al. 2023《Consistency Models》（教材外补充）。</p>
+
+<div class="tldr">
+  <h2>📌 TL;DR</h2>
+  <p><strong>Diffusion 慢，是因为采样 = 解 ODE = 一次接一次跑 U-Net</strong>。第 14 章我们学了把 SDE 转成 PF-ODE 之后，可以用更高级的 ODE 求解器把 1000 步压到 20-50 步；本章再激进一步：能不能<em>训练出一个直接一步到位</em>的模型？</p>
+  <p>答案是 <strong>Consistency Model</strong>。核心想法：训练一个网络 $f_\theta(x_t, t)$，让它把 PF-ODE 轨迹上的<em>任何一个点</em>都映射回轨迹起点 $x_0$（实际上是 $x_\epsilon$，一个非常接近 0 的小时间点）。它满足两个条件：</p>
+  <ul>
+    <li><strong>一致性</strong>：同一条轨迹上的两个点 $x_t$ 和 $x_s$，模型给出<em>同一个</em> $x_0$，即 $f_\theta(x_t, t) = f_\theta(x_s, s)$。</li>
+    <li><strong>边界条件</strong>：$f_\theta(x_\epsilon, \epsilon) = x_\epsilon$（轨迹起点处恒等）。</li>
+  </ul>
+  <p>训完之后采样 = <strong>从 $\mathcal{N}(0, I)$ 抽一个 $x_T$，跑一次 $f_\theta(x_T, T)$，结束</strong>。一次前向 = 一张图。CIFAR-10 一步 FID 约 3，对比 DDPM 要 100+ 步。</p>
+  <p><strong>为什么本章开篇要讲蒸馏（distillation）？</strong>因为 consistency model 是<em>从蒸馏的失败里逼出来的</em>。讲师在 CMU 课堂上用一连串提问把学生引到坑前——progressive distillation、4 步 / 8 步学生模型、xt 直接到 x0、为什么不行——最终落到"自洽性"这条<em>看起来完全不像损失函数</em>的优化目标。读完这一章你会知道：consistency 不是凭空想出来的，是<em>把所有别的路都堵死之后剩下的那条</em>。</p>
+</div>
+
+<h2>一、为什么 diffusion 慢？回顾一下"采样就是解 ODE"</h2>
+
+<p>讲师 Lecture 10 一上来就回顾前面的内容：</p>
+
+<div class="callout-quote">
+"Previously we have learned about fast sampling techniques, right? Things like DDIM. And we can also use a bunch of solvers because now everything is ODEs. But is there anything else we can do to accelerate inference?"
+</div>
+
+<p>把这段话翻译过来：diffusion 的采样本质上就是一个 ODE 求解过程（参见<a href="/video-to-notebook/textbook/14/">第 14 章</a> PF-ODE）。前面几章我们用了两个加速手段：</p>
+
+<ol>
+  <li><strong>DDIM 这类 sampling-only 技巧</strong>：不改模型，只改采样器，把 1000 步缩到 50 步；</li>
+  <li><strong>高阶 ODE solver</strong>：Heun、DPM-Solver、RK4，更精确地走每一步，进一步把 50 步缩到 20 步。</li>
+</ol>
+
+<p>但还有一类完全不同的思路——<strong>不改采样、改模型</strong>：</p>
+
+<div class="callout-quote">
+"Is it possible to train a model such that it takes less time to inference rather than changing the sampling of a pre-trained model?"
+</div>
+
+<p>这就是<strong>蒸馏（distillation）</strong>。讲师说的"sampling-only methods" 和 "model-side methods" 是一组对照——前者把已有模型用得更巧，后者干脆<em>训出一个新的、更快的模型</em>。Consistency model 属于后者中最极端的一类：一次前向就出图。</p>
+
+<p>为了让你对"慢"有量化的感觉：原始 DDPM 在 CIFAR-10 上需要 1000 次 U-Net 前向才能采一张图；DDIM 把它砍到 50 次；DPM-Solver-2 大约 20 次；progressive distillation 可以到 4-8 次；而本章的 consistency model，<strong>1 次就够</strong>。换算到墙上时钟：一张 1024×1024 的 SDXL 图像，50 步要 4 秒，1 步只要 50 毫秒——差了两个数量级。这就是为什么 Stable Diffusion 团队 2023 年要把 consistency 蒸馏作为 <strong>SD-Turbo</strong> 的核心技术。</p>
+
+<div class="callout callout-note">
+🔢 <strong>"NFE" 的术语习惯</strong>：在 diffusion 加速这条线里，论文经常用 <strong>NFE（Number of Function Evaluations）</strong>表示采样的耗时单位——也就是 U-Net 前向次数。DDPM = 1000 NFE，DDIM-50 = 50 NFE，consistency model 1-step = 1 NFE。横向比较各方法时这是公平的指标，因为不同方法每步内部计算量基本相同。</div>
+
+<div class="callout callout-info">
+🧭 <strong>本章在地图里的位置</strong>：第 9-12 章建立 DDPM；第 13 章 score-based SDE；第 14 章 PF-ODE 把 SDE 改造成可解的 ODE；本章把"一次解 ODE"压缩成"一次前向"。下一章会讲 flow matching，它和 consistency model 是同一拨思想的"姐妹流派"。
+</div>
+
+<h2>二、最朴素的蒸馏：让学生跳两步</h2>
+
+<p>讲师在课堂上没有直接抛出 consistency model，而是<em>从最朴素的蒸馏开始让学生猜</em>。这个 Socratic 过程很重要——你跟着走一遍，就知道为什么 consistency model 长成最后那个样子。多数论文 / 博客直接把 consistency 定义丢出来，读者很难看出"这哪冒出来的"。CMU 课堂的处理方式是反过来——<strong>先让所有别的路撞墙，consistency 自然就剩下了</strong>。</p>
+
+<p>设定：已经有一个训好的 diffusion 模型（教师 $\phi$），它需要跑 $T$ 步采样。能不能训一个学生模型 $\theta$，让它跑得更少？</p>
+
+<p>一位学生在课堂上给出第一个直觉：</p>
+
+<div class="callout-quote">
+"What if the original model takes skipped time steps rather than every time step?"
+</div>
+
+<p>讲师评价"very close to what I'm thinking"，然后细化成具体方案：</p>
+
+<blockquote>用教师做 DDIM 两步（从 $t$ 走到 $t - 2\Delta t$），训练学生让它一步就能从 $t$ 跳到 $t - 2\Delta t$。损失就是匹配教师两步后的结果。</blockquote>
+
+<p>形式化写出来：</p>
+
+$$L_{\text{distill}} = \mathbb{E}_{x_t, t} \big\| f_\theta(x_t, t) - \text{DDIM}_\phi^{(2)}(x_t, t) \big\|^2$$
+
+<p>其中 $\text{DDIM}_\phi^{(2)}$ 表示用教师跑两步 DDIM 的结果。学生一步 ≈ 教师两步 → <strong>2× 加速</strong>。这就是 <em>step distillation</em> 的最朴素版本。</p>
+
+<h3>2.1 递归：progressive distillation</h3>
+
+<p>讲师立刻把这个想法递归往下推：</p>
+
+<div class="callout-quote">
+"You can also have another new model V2 such that taking one step in V2 is equivalent to taking two steps in V1. Right? Does it make sense? OK, so now you have progressive distillation."
+</div>
+
+<p>这就是 Salimans &amp; Ho 2022 的 <strong>Progressive Distillation</strong>。每"代"都把步数砍一半：</p>
+
+<ul>
+  <li>教师：1024 步 → 学生 V1：512 步</li>
+  <li>V1（变教师）：512 步 → V2：256 步</li>
+  <li>... 一直递归 → 最后只剩几步</li>
+</ul>
+
+<p>讲师补了一句"log to t I guess"——意思是总共需要 $\log_2 T$ 代蒸馏。如果 $T = 1024$，就 10 代。</p>
+
+<div class="callout callout-note">
+📝 <strong>讲师顺手提到的论文八卦</strong>：Progressive Distillation 那篇论文还有一个副产品贡献——它告诉你 <strong>v-prediction（速度参数化）</strong>是最好的参数化方式（"this is the paper that tells you that you should do V prediction"）。如果你看 Imagen / Stable Diffusion 后续版本里那个 <code>v-parameterization</code>，就是从这里来的。
+</div>
+
+<h2>三、激进一点：能不能一步直接匹配 4 步？8 步？T 步？</h2>
+
+<p>课堂上一个学生立刻问：</p>
+
+<div class="callout-quote">
+"What if instead of going step by step, you completely skip V1 and just do four teacher steps directly?"
+</div>
+
+<p>讲师笑了，说"great question"——然后顺势把问题再放大：</p>
+
+<div class="callout-quote">
+"Why are we only matching two steps? Why can't we just directly match four steps? Even better, why can't we just directly match T steps? If you're dreaming already, why not dream bigger? Just directly go to the end!"
+</div>
+
+<p>这是讲师埋的<strong>认知陷阱</strong>。他故意让学生先把这条"激进路线"想出来，然后再一条条揭穿它的问题。我们跟着一步步揭：</p>
+
+<h3>3.1 问题 1：学习目标太难</h3>
+
+<p>一位学生说："resolution. You just jump that far that fast. Maybe it just wouldn't be as good of a model."</p>
+
+<p>讲师补充：原始 diffusion 的边缘 prior 永远是 Gaussian，<strong>如果让学生一次性把高斯映射到复杂数据分布</strong>——</p>
+
+<div class="callout-quote">
+"It's just the neural network's job to take this teeny tiny Gaussian to that complex version without getting enough. So it's very difficult essentially."
+</div>
+
+<p>本质上你逼神经网络做<em>分布层面的非线性</em>，难度爆炸。Diffusion 的成功就建立在"把一个难的生成问题拆成 T 个简单的去噪问题"上，你一刀把 T 砍回 1，难度立刻反弹。</p>
+
+<h3>3.2 问题 2：训练时间爆炸</h3>
+
+<p>第二个学生指出更现实的问题："sampling takes too long during training."</p>
+
+<p>讲师把这个问题展开：</p>
+
+<div class="callout-quote">
+"In order to take one training step you need to first take sampling step four times and then do the backpropagation. That's very expensive even if you're not back-propping through your original diffusion model. If you scale it up to T time steps, it's going to be very long."
+</div>
+
+<p>翻译：</p>
+
+<ul>
+  <li>要算学生的损失，每个 batch 都得让教师跑 $k$ 步采样作为 ground truth；</li>
+  <li>$k = 4$ 时已经很慢，$k = T = 1000$ 时直接训不动；</li>
+  <li>不同样本可能落在不同 $t$，<strong>同一个 batch 内 $t$ 不一样的话无法并行化</strong>——你得写 for-loop 套 batch，简直灾难。</li>
+</ul>
+
+<h3>3.3 问题 3：丢失多样性</h3>
+
+<p>一个学生补充："the output diversity would be limited because you're just taking one step without any steps in between."</p>
+
+<p>讲师承认这是<strong>至今未解决的根本问题</strong>："that's definitely an issue, and that's actually still an issue today, it's not going to get solved by any of the methods we're going to talk about." 一步生成的多样性确实差。但讲师认为，质量上"the quality may be great" 已经足够拿出来当 CFG-quality 的 fast preview 用了。</p>
+
+<div class="callout callout-warning">
+⚠️ <strong>讲师亲口承认的局限</strong>：consistency model 即使训得好，<em>样本多样性也不如多步 diffusion</em>。后续 Latent Consistency Models / SD-Turbo 等工作都是用 LoRA 把多样性"补"回来一些，但根本性问题没解决。这是一步生成至今的痛点之一。
+</div>
+
+<h3>3.4 一个学生的"聪明绕路"——offline dataset</h3>
+
+<p>课堂上还有个学生想了一个 hack：</p>
+
+<div class="callout-quote">
+"How do you create this dataset offline and then just train on it?"
+</div>
+
+<p>意思是：教师跑得慢，那就<em>离线先生成一个 (噪声 $x_t$, 终点 $x_0$) 配对数据集</em>，之后训学生时直接读。讲师评价"that could definitely work, but we actually have a more parallelizable way to do it. You just kind of trade training time with storage."</p>
+
+<p>这个"用存储换时间"的思路<em>不是 consistency model 的核心方案</em>，但它是后续 <strong>InstaFlow / Rectified Flow</strong> 的关键想法之一——把教师轨迹离线拉直再蒸馏。讲师在这里没展开，但他承认这条路也走得通。</p>
+
+<div class="my-addition">
+🟡 <strong>教材外补充</strong>：讲师没明说，但这位学生其实戳到了 <strong>Liu et al. 2022 Rectified Flow / InstaFlow</strong> 的核心：先用预训练扩散模型生成大量 (噪声, 图像) 配对，再训一个把噪声"直拉"到图像的 ODE。InstaFlow 1-step 的 FID 在 SD 上做到了 23.4。我们会在<a href="/video-to-notebook/textbook/16/">第 16 章 Flow Matching</a> 顺着这条思路讲。
+</div>
+
+<h2>四、从另一个角度看：换"轨迹"的视角</h2>
+
+<p>讲师卡在"一步匹配损失太丑"这里，然后说了一句关键的话：</p>
+
+<div class="callout-quote">
+"Let's take a look at this problem from a different angle. The new model that we're trying to learn here, besides being able to jump from $x_t$ to $x_0$, since this $t$ is arbitrary, you should also be able to jump from <em>any other</em> $t$ to $x_0$."
+</div>
+
+<p>这是<strong>整章的转折点</strong>。仔细嚼一下："$t$ 是任意的"意味着——</p>
+
+<ul>
+  <li>学生模型 $f_\theta(x_t, t)$ 需要对<em>所有</em>时间 $t \in [0, T]$ 都能给出 $x_0$；</li>
+  <li>每个 $t$ 处的输入 $x_t$ 都对应 PF-ODE 轨迹上的某个点；</li>
+  <li>同一条轨迹上的不同 $t$，对应的 $x_t$ 不同，但<strong>终点 $x_0$ 是同一个</strong>。</li>
+</ul>
+
+<p>所以把"$x_t \to x_0$"换个说法就是："<strong>同一条 PF-ODE 轨迹上的任何两个点，模型都应该输出同一个 $x_0$</strong>"。讲师给这个性质起了个名字：</p>
+
+<div class="callout-quote">
+"What we really want here is a new model that is what we call self-consistent."
+</div>
+
+<p>这就是 <strong>consistency（一致性）</strong>。注意视角的微妙转换：</p>
+
+<ul>
+  <li>蒸馏的视角：损失 = "学生 vs 教师跑 $k$ 步" 的距离 → 需要教师在线跑 $k$ 步 → 慢；</li>
+  <li>consistency 的视角：损失 = "学生在轨迹上不同点的输出彼此相等" → 只需要轨迹上<em>相邻两点</em>，教师跑<em>一步</em>就够。</li>
+</ul>
+
+<p><strong>把"教师跑 $k$ 步"这个昂贵的要求拆成了"相邻两点的一致性"——这就是 consistency model 的核心 trick。</strong></p>
+
+<h3>4.1 这个视角转换值得停下来嚼三遍</h3>
+
+<p>初学者读到这里很容易"飘过去"，但这一步其实是 Song et al. 2023 整篇论文的灵魂，值得反复咀嚼。让我用三种说法重复一遍同一个想法，确保你抓住：</p>
+
+<ol>
+  <li><strong>从损失函数看</strong>：蒸馏要求"学生终点 = 教师终点"，这是一个<em>全局</em>约束（端到端）；consistency 要求"学生在 $t$ 和 $t+\Delta t$ 的输出相等"，这是一个<em>局部</em>约束（相邻两点）。机器学习里全局约束几乎总是比局部约束难训——consistency 巧妙地把全局问题换成局部问题。</li>
+  <li><strong>从积分看</strong>：PF-ODE 是一个常微分方程，它的解是一条曲线。蒸馏想<em>直接学</em>"积分起点到终点的整体映射"；consistency 想学的是"积分曲线本身的不变量"——曲线上每个点都映到同一个终点，这是一个 invariant。学不变量通常比学映射容易。</li>
+  <li><strong>从物理类比看</strong>：想象一条河流从山顶汇入大海。蒸馏的目标是"输入山顶水滴坐标 → 预测它最终入海的位置"；consistency 的目标是"对河里任何一个水滴，无论上游下游，都预测它的入海位置"——并且要求所有水滴（如果属于同一条河）预测的入海位置一致。后者只需要观察相邻两个水滴是否"指向同一处"，前者需要追踪整条河。</li>
+</ol>
+
+<div class="callout callout-tip">
+💡 <strong>认知锚点</strong>：每次回想 consistency model，记住这句话——<em>"全局问题局部化"</em>。这不是 consistency model 独有的招数，而是 ML 里反复出现的母题（DDPM 把"一步生成"局部化成"$T$ 步去噪"，diffusion ELBO 把"$\log p(x)$"局部化成"逐时间步 KL"，都是同一个 spirit）。
+</div>
+
+<h2>五、Consistency Property 的形式化定义</h2>
+
+<p>讲师把"自洽"翻译成数学：</p>
+
+<div class="callout-quote">
+"For any two arbitrary points on the same ODE trajectory provided by the pre-trained diffusion model, the new model should predict the same clean data output. In math, the prediction from $x_t$ at $t$ is equivalent to the prediction from time $s$."
+</div>
+
+<p>形式化：</p>
+
+$$\boxed{\; f_\theta(x_t, t) = f_\theta(x_s, s), \quad \forall (x_t, t), (x_s, s) \text{ on the same PF-ODE trajectory} \;}$$
+
+<p><strong>Why 这个等式如此重要</strong>：它把"端到端蒸馏"的目标用<em>局部约束</em>表达出来。我们不必和"教师终点"对齐，只需要保证学生在<em>同一条轨迹的任何两点</em>给出同一个答案。一旦满足这个约束，<em>而且</em> $t = \epsilon$ 时输出等于输入（下一节的边界条件），学生就自动满足"$x_t \to x_0$"。</p>
+
+<p>读这个公式时要特别注意"on the same PF-ODE trajectory"这几个字。这<strong>不是</strong>说"对所有 $(x, t), (x', s)$ 都相等"——那是不可能的，不同样本的 $x_0$ 不同。只有<em>同一条轨迹</em>上的点才被约束相等。<strong>不同轨迹之间，模型必须给出不同的 $x_0$</strong>，否则就退化成"所有输入都映到一张图"——这就是讲师反复警告的 "garbage" 退化模式。</p>
+
+<svg viewBox="0 0 640 280" role="img" aria-label="consistency along PF-ODE trajectory">
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#6f4dd0"/>
+    </marker>
+  </defs>
+  <g font-family="ui-sans-serif" font-size="11" fill="var(--text)">
+    <text x="320" y="20" text-anchor="middle" font-weight="600">PF-ODE 轨迹上的 consistency 约束</text>
+
+    <!-- Curved trajectory from noise (right) to data (left) -->
+    <path d="M 580,140 Q 480,80 360,140 Q 240,200 80,140" stroke="#6f4dd0" stroke-width="2" fill="none" marker-end="url(#arr)"/>
+
+    <!-- Points along trajectory -->
+    <circle cx="540" cy="125" r="5" fill="#d4a017"/>
+    <text x="540" y="115" text-anchor="middle" font-size="10">$x_T$ (噪声)</text>
+    <text x="540" y="148" text-anchor="middle" font-size="10" fill="var(--text-muted)">t = T</text>
+
+    <circle cx="420" cy="105" r="5" fill="#2b80c4"/>
+    <text x="420" y="95" text-anchor="middle" font-size="10">$x_t$</text>
+    <text x="420" y="128" text-anchor="middle" font-size="10" fill="var(--text-muted)">t</text>
+
+    <circle cx="280" cy="170" r="5" fill="#2b80c4"/>
+    <text x="280" y="160" text-anchor="middle" font-size="10">$x_s$</text>
+    <text x="280" y="193" text-anchor="middle" font-size="10" fill="var(--text-muted)">s</text>
+
+    <circle cx="100" cy="138" r="6" fill="#0b5"/>
+    <text x="100" y="125" text-anchor="middle" font-size="10">$x_\epsilon$ ≈ $x_0$</text>
+    <text x="100" y="158" text-anchor="middle" font-size="10" fill="var(--text-muted)">t = ε</text>
+
+    <!-- Arrows from intermediate points to x0 -->
+    <path d="M 540,135 Q 360,260 110,148" stroke="#b8860b" stroke-width="1" stroke-dasharray="3,3" fill="none"/>
+    <path d="M 420,115 Q 260,250 110,142" stroke="#b8860b" stroke-width="1" stroke-dasharray="3,3" fill="none"/>
+    <path d="M 280,180 Q 195,240 110,148" stroke="#b8860b" stroke-width="1" stroke-dasharray="3,3" fill="none"/>
+
+    <text x="320" y="260" text-anchor="middle" font-size="11" fill="#b8860b" font-weight="600">$f_\theta$ 把轨迹上所有点都映到同一个 $x_\epsilon$</text>
+  </g>
+</svg>
+
+<h3>5.1 但这一条约束够吗？</h3>
+
+<p>讲师在课堂上立刻反问："Is this the only criteria that we need for this new model to generate something correct?"</p>
+
+<p>一位学生敏锐地指出：</p>
+
+<div class="callout-quote">
+"It says nothing about the output, right? We have no guarantee about what the output should look like. We're only talking about being consistent within ourselves, but it could be very consistent and generate something that is completely garbage."
+</div>
+
+<p>讲师拍手："exactly!" <strong>光有 consistency 不够</strong>——你完全可以让 $f_\theta$ 把任何输入都映射到全黑图像，这也是"自洽"的，但生成结果是垃圾。我们还需要一个"锚点"，把模型钉在<em>真实数据</em>上。这就是<strong>边界条件</strong>。</p>
+
+<h2>六、边界条件（Boundary Condition）：恒等映射钉死起点</h2>
+
+<p>讲师给出关键观察：</p>
+
+<div class="callout-quote">
+"Very curiously, when $t$ is very close to zero, this new model should be directly predicting the input. So it should just be an identity function. We're saying that if you're close enough to zero, you're just predicting whatever it is in the input. This is what we call a boundary condition."
+</div>
+
+<p>形式化：</p>
+
+$$\boxed{\; f_\theta(x_\epsilon, \epsilon) = x_\epsilon \;}$$
+
+<p>其中 $\epsilon$ 是一个非常小的正数（比如 0.002），不取 0 是为了数值稳定。<strong>Why 是 identity</strong>：</p>
+
+<ul>
+  <li>在 $t = \epsilon$ 时，$x_\epsilon$ 已经几乎是干净数据 $x_0$（PF-ODE 的<em>起点</em>，对应数据分布一侧）；</li>
+  <li>我们希望模型在此处的预测<em>就是 $x_\epsilon$ 本身</em>——也就是说"已经到家了就别再多走一步"；</li>
+  <li>把这个点钉死之后，结合 consistency 约束（同一条轨迹上所有点输出相等），<strong>整条轨迹的所有点都会被"拉"到 $x_\epsilon$ 这一点</strong>——这就是模型如何学到正确终点的来源。</li>
+</ul>
+
+<div class="callout callout-tip">
+💡 <strong>用一句话总结 5+6 两节</strong>：consistency 是"<em>横向</em>约束"（同轨迹各点彼此相等），boundary 是"<em>纵向</em>锚点"（轨迹起点处恒等映射）。两者缺一不可——缺 consistency 模型不知道"该一致"，缺 boundary 模型不知道"该一致到哪里"。
+</div>
+
+<h3>6.1 一个更直觉的理解：consistency + boundary = "拉链效应"</h3>
+
+<p>怎么从这两个约束推出"模型一定学到正确的 $x_0$"？想象一条轨迹被离散化成 $N$ 个点 $x_{t_1}, x_{t_2}, \dots, x_{t_N}$，$t_1 = \epsilon$，$t_N = T$。consistency 约束告诉我们：</p>
+
+$$f_\theta(x_{t_1}, t_1) = f_\theta(x_{t_2}, t_2) = \dots = f_\theta(x_{t_N}, t_N)$$
+
+<p>这是一条等式链——任何相邻两个相等，所以全都相等，<em>就像拉链一样把所有点拉到一起</em>。但这个"一起"的值是多少？没说！全部输出 0 也满足。</p>
+
+<p>边界条件这时候发挥作用："拉链链头"的值必须是 $f_\theta(x_{t_1}, t_1) = f_\theta(x_\epsilon, \epsilon) = x_\epsilon$。因为 $x_\epsilon \approx x_0$（PF-ODE 起点几乎就是干净数据），所以：</p>
+
+$$f_\theta(x_{t_2}, t_2) = f_\theta(x_{t_3}, t_3) = \dots = f_\theta(x_{t_N}, t_N) = x_\epsilon \approx x_0$$
+
+<p>整条轨迹被"钉"在 $x_0$ 上！这就是为什么 boundary + consistency 联合起来等价于"学到了正确的 $x_t \to x_0$ 映射"。</p>
+
+<h3>6.2 怎么让网络<em>结构上</em>满足边界条件？</h3>
+
+<p>讲师课堂上没展开实现细节，这里补充（教材外）。最聪明的办法是用<strong>参数化技巧</strong>，让 $f_\theta$ 在 $t = \epsilon$ 时<em>自动</em>等于 identity：</p>
+
+$$f_\theta(x, t) = c_{\text{skip}}(t) \cdot x + c_{\text{out}}(t) \cdot F_\theta(x, t)$$
+
+<p>其中 $F_\theta$ 是一个 U-Net，$c_{\text{skip}}, c_{\text{out}}$ 是预设的标量函数（依赖 $t$），满足：</p>
+
+<ul>
+  <li>$c_{\text{skip}}(\epsilon) = 1$，$c_{\text{out}}(\epsilon) = 0$ → 在 $t=\epsilon$ 时输出 $= 1 \cdot x + 0 \cdot F_\theta = x$（identity ✓）；</li>
+  <li>其他 $t$ 时 $c_{\text{out}} \neq 0$，让 U-Net 真正去预测。</li>
+</ul>
+
+<p>Song et al. 2023 给出的具体选择是：</p>
+
+$$c_{\text{skip}}(t) = \frac{\sigma_{\text{data}}^2}{(t-\epsilon)^2 + \sigma_{\text{data}}^2}, \quad c_{\text{out}}(t) = \frac{\sigma_{\text{data}}(t-\epsilon)}{\sqrt{\sigma_{\text{data}}^2 + t^2}}$$
+
+<p>$\sigma_{\text{data}}$ 是数据标准差，CIFAR-10 上取 0.5。</p>
+
+<div class="my-addition">
+🟡 <strong>教材外补充</strong>：这个 $c_{\text{skip}} / c_{\text{out}}$ 参数化是 Karras et al. 2022 在 EDM 论文里发明的"预条件化（preconditioning）"，原本是为了让网络在不同 $t$ 的输出方差稳定。Song et al. 把它复用过来，<em>顺便</em>解决了 consistency model 的边界条件问题——这就是好论文的复利效应。
+</div>
+
+<h2>七、两种训练范式：Consistency Distillation (CD) vs Consistency Training (CT)</h2>
+
+<p>讲师在课堂上主要讲 distillation 路线（用预训练 diffusion 当教师）。这里我们把两条路都列出来。</p>
+
+<h3>7.1 Consistency Distillation（CD）：有教师</h3>
+
+<p>核心想法：把 consistency 约束<strong>离散化到轨迹上的相邻两点</strong>。给定预训练 diffusion $\phi$：</p>
+
+<div class="deriv-step">
+<strong>步骤 1：采样数据和时间</strong>
+<p>采一个数据 $x_0 \sim p_{\text{data}}$ 和一个时刻索引 $n \in \{1, \dots, N-1\}$，对应时间网格上的 $t_{n+1}$。时间网格预设为 $\epsilon = t_1 &lt; t_2 &lt; \dots &lt; t_N = T$，通常按 Karras schedule（ρ=7 的非均匀分布）。</p>
+<em>Why</em>：网格点越靠近 $\epsilon$ 越密，因为接近数据分布的部分变化最剧烈，需要更细的离散。
+</div>
+
+<div class="deriv-step">
+<strong>步骤 2：正向加噪到 $x_{t_{n+1}}$</strong>
+$$x_{t_{n+1}} = x_0 + t_{n+1} \cdot z, \quad z \sim \mathcal{N}(0, I)$$
+<em>Why</em>：这是 EDM/Karras 的 noise schedule——直接用 $t$ 当噪声水平（$\sigma = t$），形式上比 DDPM 的 $\bar{\alpha}_t$ 更干净。
+</div>
+
+<div class="deriv-step">
+<strong>步骤 3：教师跑一步 PF-ODE 反向</strong>
+$$\hat{x}_{t_n}^\phi = x_{t_{n+1}} + (t_n - t_{n+1}) \cdot \Phi(x_{t_{n+1}}, t_{n+1}; \phi)$$
+<em>Why</em>：$\Phi$ 是 PF-ODE 的右端项（教师 score 加权后），$(t_n - t_{n+1}) &lt; 0$ 所以这是<strong>反向</strong>一步——从噪声多的点走到噪声少的点。教师只用了<em>一次</em>前向，这是 consistency model 比 progressive distillation 便宜的核心。
+</div>
+
+<div class="deriv-step">
+<strong>步骤 4：写出 consistency loss</strong>
+$$L_{\text{CD}} = \mathbb{E}\big[ \lambda(t_n) \cdot d\big(f_\theta(x_{t_{n+1}}, t_{n+1}), \; f_{\theta^-}(\hat{x}_{t_n}^\phi, t_n)\big) \big]$$
+<em>Why</em>：$d$ 是距离函数（$\ell_2$、$\ell_1$ 或 LPIPS），$\lambda(t_n)$ 是时间权重（通常取 1），$\theta^-$ 是 $\theta$ 的 <strong>EMA target network</strong>（更新规则 $\theta^- \leftarrow \mu \theta^- + (1-\mu) \theta$，$\mu \approx 0.999$）。<br>
+<em>核心理解</em>：左边是网络在<em>更晚的时间 $t_{n+1}$、更噪的输入 $x_{t_{n+1}}$</em> 上的预测，右边是网络（target 版本）在<em>更早的时间 $t_n$、更干净的输入 $\hat{x}_{t_n}^\phi$</em> 上的预测。loss 让两边相等 → 同轨迹相邻两点输出一致。
+</div>
+
+<p><strong>Why EMA target</strong>：如果两边都是 $f_\theta$，梯度会让网络 collapse 到 trivial 解（比如恒输出 0 或常数）。这是自蒸馏的经典坑——你既是裁判又是运动员，作弊是最优解。冻结一侧（target $\theta^-$ 不接收梯度）、让另一侧追，是 BYOL / SimSiam / DINO 等自监督方法反复验证过的稳定化技巧。Song et al. 2023 把它直接搬过来用，效果立竿见影。</p>
+
+<h3>7.2 Consistency Training（CT）：无教师</h3>
+
+<p>更进一步：连预训练 diffusion 都不要。直接用<strong>正向加噪过程</strong>替代教师：</p>
+
+<ul>
+  <li>$x_{t_{n+1}} = x_0 + t_{n+1} \cdot z$</li>
+  <li>$x_{t_n} = x_0 + t_n \cdot z$（<strong>同一个 $z$！</strong>）</li>
+</ul>
+
+<p>损失换成：</p>
+
+$$L_{\text{CT}} = \mathbb{E}\big[ d\big(f_\theta(x_{t_{n+1}}, t_{n+1}), \; f_{\theta^-}(x_{t_n}, t_n)\big) \big]$$
+
+<p><strong>Why 这个能 work</strong>：当 $t_{n+1} - t_n \to 0$ 时，正向加噪过程的相邻两点和 PF-ODE 轨迹上的相邻两点<em>方向上一致</em>（差异是 $O((\Delta t)^2)$）。<strong>不需要教师，也能近似 consistency 约束</strong>。</p>
+
+<div class="callout callout-warning">
+⚠️ <strong>CD vs CT 经验</strong>：CD（有教师）通常质量更高，但需要先训一个好 diffusion；CT 是 from-scratch，但收敛慢、需要更多 trick。Song et al. 在 CIFAR-10 上：CD 1-step FID ≈ 3.55，CT 1-step FID ≈ 8.70。后续 Song &amp; Dhariwal 2024 的 "Improved CT" 把 CT 拉到了 ≈ 2.83，反超 CD——这是 2024 年的事，超出本课范围。
+</div>
+
+<h2>八、采样：一次前向 vs 多步精修</h2>
+
+<h3>8.1 单步采样</h3>
+
+<p>训完之后，采样就是<strong>三行代码</strong>：</p>
+
+$$x_T \sim \mathcal{N}(0, T^2 I), \quad x_0 \approx f_\theta(x_T, T)$$
+
+<p>没有循环，没有 solver——一次 U-Net 前向。在 H100 上 1 张图大概 30-50 ms。对比 DDIM-50，相当于 50 倍加速；对比 DDPM-1000，相当于 1000 倍加速。<strong>整个 diffusion 加速史，这是最激进的一步</strong>。</p>
+
+<h3>8.2 多步"consistency sampling"</h3>
+
+<p>如果觉得一步质量不够，可以用 $N$ 步精修（$N \in \{2, 4, 8\}$）。算法是"加噪-去噪"反复横跳：</p>
+
+<ol>
+  <li>$x \leftarrow f_\theta(x_T, T)$（一步出初稿）</li>
+  <li>For $n = 1, \dots, N-1$:
+    <ul>
+      <li>选一个中间时间 $\tau_n$；</li>
+      <li>$x \leftarrow x + \sqrt{\tau_n^2 - \epsilon^2} \cdot z$（手动加回一些噪声）；</li>
+      <li>$x \leftarrow f_\theta(x, \tau_n)$（再用 consistency 函数去噪到 $\epsilon$）。</li>
+    </ul>
+  </li>
+</ol>
+
+<p><strong>Why 这能提高质量</strong>：一次前向逼网络做"高斯 → 数据"的整个大跳跃，难度大；多步把跳跃拆成"小高斯偏移 → 修回轨迹"的几次小动作，等于让网络"自我修正"了几次。每次"加噪 → 去噪"都让样本在数据流形附近<em>松动一下、重新落位</em>，避免单次预测里那些没修干净的伪影一直挂着。Song et al. 给出的经验：CIFAR-10 上 1-step FID ≈ 3.55，2-step ≈ 2.93，4-step ≈ 2.83——多步带来的提升是<em>非线性递减</em>的，多数任务用 2-4 步就够。</p>
+
+<div class="callout callout-warning">
+⚠️ <strong>多步采样的一个反直觉点</strong>：你可能想"既然 consistency 保证轨迹上所有点都映到 $x_0$，那随便多走几步应该完全没变化才对"——但<em>训练完的网络只是近似</em>满足 consistency，每次前向都有小误差。多步精修利用的正是这点：在中间加噪让样本回到训练时见过的数据分布附近，再去噪一次能"抹掉"上一步的误差。这和 SDE 采样里"噪声有自我修正能力"是同一个直觉。
+</div>
+
+<svg viewBox="0 0 640 240" role="img" aria-label="single vs multi-step sampling">
+  <g font-family="ui-sans-serif" font-size="11" fill="var(--text)">
+    <text x="160" y="20" text-anchor="middle" font-weight="600">单步采样（1 NFE）</text>
+    <text x="480" y="20" text-anchor="middle" font-weight="600">多步精修（4 NFE）</text>
+
+    <!-- Single-step: one big arrow from noise to data -->
+    <g transform="translate(40, 40)">
+      <circle cx="20" cy="100" r="15" fill="#d4a017" opacity="0.6"/>
+      <text x="20" y="135" text-anchor="middle" font-size="10">$x_T$</text>
+      <text x="20" y="148" text-anchor="middle" font-size="9" fill="var(--text-muted)">noise</text>
+
+      <path d="M 40,100 L 220,100" stroke="#0b5" stroke-width="3" marker-end="url(#arr2)"/>
+      <text x="130" y="92" text-anchor="middle" font-size="10" fill="#0b5">$f_\theta(x_T, T)$</text>
+
+      <circle cx="240" cy="100" r="15" fill="#0b5" opacity="0.6"/>
+      <text x="240" y="135" text-anchor="middle" font-size="10">$x_0$</text>
+    </g>
+
+    <!-- Multi-step: zigzag -->
+    <g transform="translate(340, 40)">
+      <circle cx="20" cy="100" r="12" fill="#d4a017" opacity="0.6"/>
+      <text x="20" y="135" text-anchor="middle" font-size="10">$x_T$</text>
+
+      <path d="M 35,100 L 80,100" stroke="#0b5" stroke-width="2"/>
+      <circle cx="80" cy="100" r="6" fill="#0b5" opacity="0.4"/>
+      <path d="M 85,100 L 110,75" stroke="#b8860b" stroke-width="2" stroke-dasharray="3,3"/>
+      <text x="100" y="68" text-anchor="middle" font-size="9" fill="#b8860b">+noise</text>
+      <circle cx="115" cy="72" r="5" fill="#d4a017" opacity="0.5"/>
+
+      <path d="M 120,75 L 160,100" stroke="#0b5" stroke-width="2"/>
+      <circle cx="160" cy="100" r="6" fill="#0b5" opacity="0.5"/>
+      <path d="M 165,100 L 190,75" stroke="#b8860b" stroke-width="2" stroke-dasharray="3,3"/>
+      <circle cx="195" cy="72" r="5" fill="#d4a017" opacity="0.5"/>
+
+      <path d="M 200,75 L 240,100" stroke="#0b5" stroke-width="2"/>
+      <circle cx="240" cy="100" r="12" fill="#0b5" opacity="0.7"/>
+      <text x="240" y="135" text-anchor="middle" font-size="10">$x_0$ (更精)</text>
+    </g>
+
+    <text x="320" y="200" text-anchor="middle" font-size="11" fill="var(--text-muted)">绿实线 = $f_\theta$ 去噪；橙虚线 = 手动加噪</text>
+  </g>
+  <defs>
+    <marker id="arr2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#0b5"/>
+    </marker>
+  </defs>
+</svg>
+
+<h2>九、PyTorch 训练骨架（CD 版本）</h2>
+
+<p>下面是 consistency distillation 最小可跑骨架，对应上面的形式化定义：</p>
+
+<pre><code>import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+# ===== 0. 预设 =====
+sigma_min, sigma_max, sigma_data = 0.002, 80.0, 0.5  # EDM 默认
+N = 18  # 时间离散数
+rho = 7.0  # Karras schedule 指数
+
+def get_sigmas(N):
+    """Karras schedule：sigma_i 按 ρ 次方非均匀分布"""
+    i = torch.arange(N)
+    sigmas = (sigma_max ** (1/rho) +
+              i / (N-1) * (sigma_min ** (1/rho) - sigma_max ** (1/rho))) ** rho
+    return sigmas  # 从 sigma_max 到 sigma_min
+
+# ===== 1. 参数化：保证边界条件 f(x, ε) = x =====
+def c_skip(t):
+    return sigma_data ** 2 / ((t - sigma_min) ** 2 + sigma_data ** 2)
+
+def c_out(t):
+    return sigma_data * (t - sigma_min) / torch.sqrt(sigma_data ** 2 + t ** 2)
+
+def consistency_fn(F_theta, x, t):
+    """f_θ(x, t) = c_skip(t)*x + c_out(t)*F_θ(x, t)"""
+    return c_skip(t).view(-1,1,1,1) * x + \
+           c_out(t).view(-1,1,1,1) * F_theta(x, t)
+
+# ===== 2. CD 单步训练 =====
+def cd_step(F_theta, F_theta_ema, teacher, x0, sigmas):
+    B = x0.shape[0]
+    n = torch.randint(0, N-1, (B,))  # 采一个时间索引
+    t_next, t_curr = sigmas[n+1], sigmas[n]  # t_next > t_curr
+
+    # 加噪到 x_{t+1}
+    z = torch.randn_like(x0)
+    x_tnext = x0 + t_next.view(-1,1,1,1) * z
+
+    # 教师跑一步 PF-ODE solver（这里用最简单的 Euler）
+    with torch.no_grad():
+        score = teacher(x_tnext, t_next)  # 教师预测 score
+        d = -t_next.view(-1,1,1,1) * score  # ODE 右端项
+        x_tcurr_hat = x_tnext + (t_curr - t_next).view(-1,1,1,1) * d
+
+    # 学生在两点的预测
+    pred_next = consistency_fn(F_theta, x_tnext, t_next)
+    with torch.no_grad():
+        pred_curr = consistency_fn(F_theta_ema, x_tcurr_hat, t_curr)
+
+    # consistency loss
+    loss = F.mse_loss(pred_next, pred_curr)
+    return loss
+
+# ===== 3. 主循环 =====
+F_theta = UNet(...)
+F_theta_ema = UNet(...)  # 同结构，EMA target
+F_theta_ema.load_state_dict(F_theta.state_dict())
+
+teacher = load_pretrained_diffusion()  # 冻结的教师
+opt = torch.optim.AdamW(F_theta.parameters(), lr=1e-4)
+
+for x0 in dataloader:
+    sigmas = get_sigmas(N).to(x0.device)
+    loss = cd_step(F_theta, F_theta_ema, teacher, x0, sigmas)
+    opt.zero_grad(); loss.backward(); opt.step()
+
+    # EMA 更新 target
+    with torch.no_grad():
+        mu = 0.999
+        for p, p_ema in zip(F_theta.parameters(), F_theta_ema.parameters()):
+            p_ema.data.mul_(mu).add_(p.data, alpha=1-mu)
+
+# ===== 4. 一步采样 =====
+@torch.no_grad()
+def sample_one_step(F_theta):
+    x_T = torch.randn(1, 3, 32, 32) * sigma_max
+    t = torch.tensor([sigma_max])
+    return consistency_fn(F_theta, x_T, t)</code></pre>
+
+<div class="callout callout-note">
+🛠️ <strong>实现要点</strong>：<br>
+• <strong>EMA target 必不可少</strong>——少了它训练 collapse；<br>
+• <strong>距离函数</strong>：实践中 LPIPS 比 MSE 显著好（捕捉感知差异）；<br>
+• <strong>时间网格 N</strong>：Karras 等用 ρ=7 的非均匀 schedule（噪声大的地方密、噪声小的地方稀）；<br>
+• <strong>教师只跑 1 步 PF-ODE</strong>——这就是 consistency model 比 progressive distillation 便宜的根本原因（progressive distillation 要跑 2 步、4 步、8 步...）。
+</div>
+
+<h2>十、横向对比：所有"加速 diffusion"的方法</h2>
+
+<table style="width:100%; border-collapse:collapse; font-size:0.9rem;">
+  <thead style="background:var(--surface-soft);">
+    <tr>
+      <th style="padding:0.5rem; text-align:left; border:1px solid var(--border);">方法</th>
+      <th style="padding:0.5rem; text-align:left; border:1px solid var(--border);">改采样还是改模型？</th>
+      <th style="padding:0.5rem; text-align:left; border:1px solid var(--border);">典型步数</th>
+      <th style="padding:0.5rem; text-align:left; border:1px solid var(--border);">需要教师？</th>
+      <th style="padding:0.5rem; text-align:left; border:1px solid var(--border);">是否引入新损失</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td style="padding:0.5rem; border:1px solid var(--border);">DDIM</td>
+      <td style="padding:0.5rem; border:1px solid var(--border);">采样</td>
+      <td style="padding:0.5rem; border:1px solid var(--border);">50</td>
+      <td style="padding:0.5rem; border:1px solid var(--border);">否</td>
+      <td style="padding:0.5rem; border:1px solid var(--border);">否</td>
+    </tr>
+    <tr>
+      <td style="padding:0.5rem; border:1px solid var(--border);">DPM-Solver / Heun</td>
+      <td style="padding:0.5rem; border:1px solid var(--border);">采样</td>
+      <td style="padding:0.5rem; border:1px solid var(--border);">20</td>
+      <td style="padding:0.5rem; border:1px solid var(--border);">否</td>
+      <td style="padding:0.5rem; border:1px solid var(--border);">否</td>
+    </tr>
+    <tr>
+      <td style="padding:0.5rem; border:1px solid var(--border);">Progressive Distillation</td>
+      <td style="padding:0.5rem; border:1px solid var(--border);">模型（递归）</td>
+      <td style="padding:0.5rem; border:1px solid var(--border);">4-8</td>
+      <td style="padding:0.5rem; border:1px solid var(--border);">是</td>
+      <td style="padding:0.5rem; border:1px solid var(--border);">MSE 到教师 $k$ 步终点</td>
+    </tr>
+    <tr style="background:#fff7d6;">
+      <td style="padding:0.5rem; border:1px solid var(--border);"><strong>Consistency Distillation</strong></td>
+      <td style="padding:0.5rem; border:1px solid var(--border);">模型</td>
+      <td style="padding:0.5rem; border:1px solid var(--border);"><strong>1-4</strong></td>
+      <td style="padding:0.5rem; border:1px solid var(--border);">是</td>
+      <td style="padding:0.5rem; border:1px solid var(--border);"><strong>同轨迹两点输出一致</strong></td>
+    </tr>
+    <tr>
+      <td style="padding:0.5rem; border:1px solid var(--border);">Consistency Training</td>
+      <td style="padding:0.5rem; border:1px solid var(--border);">模型</td>
+      <td style="padding:0.5rem; border:1px solid var(--border);">1-4</td>
+      <td style="padding:0.5rem; border:1px solid var(--border);">否（from scratch）</td>
+      <td style="padding:0.5rem; border:1px solid var(--border);">同上，用正向加噪近似</td>
+    </tr>
+    <tr>
+      <td style="padding:0.5rem; border:1px solid var(--border);">Rectified Flow / InstaFlow</td>
+      <td style="padding:0.5rem; border:1px solid var(--border);">模型</td>
+      <td style="padding:0.5rem; border:1px solid var(--border);">1-2</td>
+      <td style="padding:0.5rem; border:1px solid var(--border);">是（造 offline 配对）</td>
+      <td style="padding:0.5rem; border:1px solid var(--border);">回归到拉直后的 ODE</td>
+    </tr>
+  </tbody>
+</table>
+
+<div class="callout callout-info">
+🧭 <strong>读这张表的方式</strong>：DDIM/DPM-Solver 是"用已有模型用得更巧"；progressive distillation / consistency model / rectified flow 是"训一个新模型让它更快"。Consistency model 的特别之处是<strong>把"端到端 $k$ 步蒸馏"问题改写成"相邻两点一致性"问题</strong>——教师只需要跑 1 步，训练就能并行化、可 scale。
+</div>
+
+<h2>十一、Consistency Model 之后的故事（教材外）</h2>
+
+<div class="my-addition">
+🟡 <strong>教材外补充：2023-2024 的后续工作</strong>
+
+<ul>
+  <li><strong>Improved Consistency Training</strong>（Song &amp; Dhariwal 2024）：把 CT 的时间网格从离散改成连续、距离函数换成 Pseudo-Huber、去掉 EMA target，单步 FID 从 8.70 提到 2.83，<em>反超 CD</em>。这是 2024 年的关键进展。</li>
+  <li><strong>Latent Consistency Models (LCM)</strong>（Luo et al. 2023）：把 consistency distillation 套在 Stable Diffusion 的 latent space 上，4 步出图，质量接近 50 步 SD。配套的 <strong>LCM-LoRA</strong> 可以以 LoRA 的方式加载到任何 SD 模型上，工程性极强。</li>
+  <li><strong>SD-Turbo / SDXL-Turbo</strong>（Sauer et al. 2023, Stability AI）：consistency distillation + adversarial loss，1 步出 1024×1024 图。这是 ChatGPT/Discord 上"打字即出图"体验的技术基础之一。</li>
+  <li><strong>Multi-step CM as ODE solver</strong>：consistency function $f_\theta(x_t, t)$ 可以解释为 PF-ODE 的"非线性 solver"——给定任意 $(x_t, t)$，直接给出轨迹的<em>未来</em>。这把它和 flow matching 的"learn the velocity field" 路线连了起来。</li>
+</ul>
+
+<p>纵观这条路线：<strong>diffusion → DDIM → PF-ODE → consistency model → LCM → SD-Turbo</strong>，整个 2022-2024 年的扩散加速史就是"如何把 1000 步的 sampling 压到 1 步"的接力赛。本章是这场接力赛的<em>关键一棒</em>。</p>
+</div>
+
+<figure class="clip-frame">
+  <iframe src="https://www.youtube.com/embed/L9nsCHHMv-c?start=750" title="CMU 10799 Lecture 10: consistency property 的引入" allowfullscreen></iframe>
+  <figcaption>📺 CMU 10799 Lecture 10（12:30 处）—— 讲师从蒸馏失败一步步推出 "self-consistent" 概念</figcaption>
+</figure>
+
+<h2>十二、本章和前后章节的连接</h2>
+
+<ul>
+  <li>本章依赖：<a href="/video-to-notebook/textbook/13/">第 13 章 Score-based SDE</a>（score 是教师的产物）；<a href="/video-to-notebook/textbook/14/">第 14 章 PF-ODE</a>（"轨迹"这个概念的载体）。</li>
+  <li>下一步：<a href="/video-to-notebook/textbook/16/">第 16 章 Flow Matching</a> 会把"学一个 ODE"这条线推到更普适的版本——consistency model 和 flow matching 是同一波想法的两种实现。</li>
+  <li>横向：<a href="/video-to-notebook/concepts/consistency-models/">概念页：Consistency Models</a> 汇总了 CD / CT / LCM / 改进 CT 等所有变体。</li>
+</ul>
+
+<p>回头看本章的认知路径：我们从"diffusion 慢"出发，走过了"step distillation → progressive distillation → 直接 T 步蒸馏"的失败之路，然后<em>换个角度</em>发现"自洽性"这个本来藏在 ODE 轨迹里的不变量，再用一个简单的边界条件把它钉住——consistency model 就长出来了。理解了这个推导路径，你以后看任何"$N$-step 蒸馏"或"flow map" 类工作（比如 2024 年的 Improved CT、Shortcut Models、Mean Flow 等等），都能很快定位它和经典 consistency model 的差异点在哪里。这就是<strong>掌握一个领域的标志</strong>：不是记住每个论文的方法，而是认得清那条把它们串起来的故事线。</p>
+
+<div class="takeaways" style="background:#0b5; color:#fff; padding:1.4rem; border-radius:8px; margin-top:2rem;">
+  <h3 style="margin-top:0; color:#fff;">本章要记住的（讲师亲口给的核心）</h3>
+  <ol>
+    <li><strong>问题</strong>：diffusion 慢，本质上是因为采样 = 解 ODE，需要多次 NFE。讲师原话："Is there anything else we can do to accelerate inference?"</li>
+    <li><strong>蒸馏 = 改模型的加速路线</strong>。Progressive distillation 让学生一步顶教师两步、递归 $\log T$ 代 → 4 步模型；但<em>不能直接训"一步顶 T 步"</em>。</li>
+    <li><strong>直接一步匹配的三个问题</strong>（讲师课堂上揭穿）：(a) 神经网络很难一步把高斯映到复杂分布；(b) 训练时每个 batch 要跑 T 步教师，慢且无法并行；(c) 多样性会下降。</li>
+    <li><strong>转角度</strong>："$t$ 是任意的" → 学生需要从<em>任何</em> $t$ 都能跳到 $x_0$ → 同一轨迹上所有点输出相等 → "self-consistent"。这就是 consistency model 的核心。</li>
+    <li><strong>Consistency Property</strong>：$f_\theta(x_t, t) = f_\theta(x_s, s)$，$(x_t, t)$ 和 $(x_s, s)$ 在同一条 PF-ODE 轨迹上。这是横向约束。</li>
+    <li><strong>Boundary Condition</strong>：$f_\theta(x_\epsilon, \epsilon) = x_\epsilon$（轨迹起点恒等）。这是纵向锚点。两者缺一不可。讲师警告："consistent itself could still generate garbage."</li>
+    <li><strong>实现技巧</strong>：参数化 $f_\theta = c_{\text{skip}}(t) x + c_{\text{out}}(t) F_\theta(x, t)$ 让边界条件自动满足；EMA target 防 collapse；用 LPIPS 比 MSE 好；Karras Schedule 离散时间。</li>
+    <li><strong>采样</strong>：一次前向（1 NFE）出图；可选多步"加噪-去噪"精修提质量。CIFAR-10 1-step FID ≈ 3，对比 DDPM 100+ 步。</li>
+  </ol>
+</div>
+
+</article>

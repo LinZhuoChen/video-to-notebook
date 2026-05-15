@@ -1,0 +1,181 @@
+<style>
+/* prefix: cm- */
+.cm-quickref{background:var(--surface-soft);border-left:3px solid var(--module-accent);padding:0.8rem 1rem;border-radius:0 4px 4px 0;margin:1rem 0;font-size:0.92rem;}
+.cm-quickref div{margin:0.3rem 0;}
+.cm-svg{display:block;margin:1.2rem auto;max-width:100%;height:auto;}
+.cm-pitfalls ol{padding-left:1.4rem;} .cm-pitfalls li{margin:0.5rem 0;}
+.cm-source{font-style:italic;color:var(--text-muted);border-left:2px solid var(--border);padding:0.3rem 0.8rem;margin:0.6rem 0;font-size:0.9rem;}
+.my-addition{background:var(--accent-soft);border-left:3px solid var(--accent);padding:0.4rem 0.8rem;margin:0.6rem 0;font-size:0.92rem;border-radius:0 4px 4px 0;}
+.cm-callout{background:var(--module-accent-soft);border:1px solid var(--border);padding:0.6rem 0.9rem;margin:0.8rem 0;border-radius:4px;font-size:0.93rem;}
+.cm-controls{display:flex;gap:0.4rem;flex-wrap:wrap;margin:0.6rem 0;}
+.cm-controls button{background:var(--surface-soft);border:1px solid var(--border);color:var(--text);padding:0.4rem 0.8rem;border-radius:4px;cursor:pointer;font-size:0.88rem;}
+.cm-controls button.active{background:var(--module-accent);color:var(--surface);border-color:var(--module-accent);}
+.cm-readout{background:var(--surface-soft);padding:0.6rem 0.9rem;border-radius:4px;margin-top:0.4rem;font-size:0.92rem;min-height:3em;}
+.cm-readout .cm-line{opacity:0.35;margin:0.3rem 0;transition:opacity 0.2s;}
+.cm-readout .cm-line.cm-active-line{opacity:1;color:var(--module-accent);font-weight:500;}
+@keyframes cm-traj{0%{stroke-dashoffset:600;}100%{stroke-dashoffset:0;}}
+.cm-trajectory{stroke-dasharray:600;animation:cm-traj 3s ease-in-out infinite alternate;}
+@keyframes cm-pulse-dot{0%,100%{r:5;}50%{r:8;}}
+.cm-endpoint{animation:cm-pulse-dot 2s ease-in-out infinite;}
+@keyframes cm-arrow-fade{0%{opacity:0.2;}50%{opacity:1;}100%{opacity:0.2;}}
+.cm-collapse-arrow{animation:cm-arrow-fade 2.4s ease-in-out infinite;}
+</style>
+
+<article class="concept-entry">
+  <header class="concept-header">
+    <span class="concept-eyebrow">概念 · Module 4 / Flow Matching</span>
+    <h1>Consistency Models</h1>
+    <p class="concept-tagline">— 把整条 PF-ODE 轨迹折叠到同一个端点：一步出图。</p>
+  </header>
+
+  <aside class="cm-quickref">
+    <div><strong>定义</strong> · 学一个函数 $f_\theta(x_t, t)$，把 PF-ODE 同一条轨迹上的任何点都映到同一个起点 $x_\epsilon$。一次前向就采样完毕。</div>
+    <div><strong>公式</strong> · 一致性属性 $f_\theta(x_t, t) = f_\theta(x_{t'}, t')$（$(x_t, t), (x_{t'}, t')$ 同轨迹）；边界条件 $f_\theta(x_\epsilon, \epsilon) = x_\epsilon$。</div>
+    <div><strong>易错</strong> · 不是 progressive distillation 的"再多压一级"——它压的是<em>整条轨迹</em>，目标值由 EMA 自指给出，不需要逐级蒸馏。</div>
+  </aside>
+
+  <section class="concept-intuition">
+    <p>很多人以为 Consistency Models 就是"把蒸馏推到极致——从 2 步压到 1 步"。这是把它和 progressive distillation（Salimans &amp; Ho, 2022）混了。CMU 10799 Lecture 10 的讲师明确把这条思路提出来当<em>反例</em>：先逐级砍半（1000→500→…→1），可行但<strong>训练代价随步数爆炸</strong>；Consistency Models 的真正洞见是"为什么只压两步？干脆一口气压到底"。</p>
+    <div class="cm-source">「为什么只匹配两步？为什么不直接匹配四步？再 dream bigger，为什么不直接跳到终点？」—— CMU L10 @05:11</div>
+    <p>讲师当场把这个"梦更大"的提议交给学生讨论，学生答出来三种困难：分布太复杂、缺少中间监督、训练采样过贵。Consistency Models（Song et al. 2023）正是为这三件事而生。</p>
+    <p class="my-addition">🟡 教材外补充：可以把 PF-ODE 想成一条"从噪声 $x_T$ 流向数据 $x_\epsilon$"的河道。Diffusion 是<em>逐节顺流而下</em>；Consistency Models 训练的是一个"传送函数"——你从河道上任何一个位置 $x_t$ 出发，它都把你<em>瞬间</em>送到河口 $x_\epsilon$。"同一条河上、传送终点必须一致" 就是 consistency 这个词的字面意思。</p>
+  </section>
+
+  <section class="concept-deepdive">
+    <h2>从 Progressive Distillation 到一步生成</h2>
+    <p>讲师在 Lecture 10 把整条思路按这个梯度推进——你要先抓住这个梯度，才能看懂 Consistency Models 是<em>哪一步</em>的解法。</p>
+
+    <div class="cm-callout">
+      <strong>蒸馏阶梯（CMU L10 现场推导）</strong>
+      <ol style="margin:0.4rem 0 0 1.2rem;padding:0;">
+        <li>原模型 1000 步 → 新模型 V1 一步顶 2 步 DDIM；速度 ×2。</li>
+        <li>再蒸 V2 一步顶 V1 的 2 步 → ×4；再蒸 V3 → ×8；共 $\log_2 T$ 轮 → Progressive Distillation。</li>
+        <li>"为什么不直接一步顶 $T$ 步？"——这就是 Consistency Models 想做的事。</li>
+      </ol>
+    </div>
+
+    <h2>一致性属性</h2>
+    <p>设 PF-ODE 解出的一条轨迹经过 $\{x_t : t \in [\epsilon, T]\}$。Consistency Models 学函数 $f_\theta(x_t, t)$ 满足：</p>
+    <p>$$f_\theta(x_t, t) = f_\theta(x_{t'}, t') = x_\epsilon, \quad \forall (x_t, t), (x_{t'}, t') \text{ on the same trajectory.}$$</p>
+    <p><strong>Why</strong>：这条等式才是"一步采样"的真身——任意一个噪声点 $x_T$ 都应该被 $f_\theta(x_T, T)$ 直接送回它对应的 $x_\epsilon$，<em>无需</em>沿 ODE 数值积分。</p>
+
+    <h2>边界条件与参数化</h2>
+    <p>函数 $f_\theta$ 不是凭空学出来的。必须钉死一个锚点——<strong>边界条件</strong>：</p>
+    <p>$$f_\theta(x_\epsilon, \epsilon) = x_\epsilon.$$</p>
+    <p><strong>Why</strong>：如果 $f_\theta$ 在 $t=\epsilon$ 处都偏离恒等映射，整条轨迹的"终点估计"就会系统性地漂移；钉死边界后，$f_\theta$ 就被约束成"PF-ODE 轨迹的端点投影"而不是任意一个函数。</p>
+    <p>实现边界条件不靠正则项，而靠<strong>参数化</strong>：</p>
+    <p>$$f_\theta(x, t) = c_{\text{skip}}(t)\,x + c_{\text{out}}(t)\,F_\theta(x, t),$$</p>
+    <p>其中 $c_{\text{skip}}(\epsilon) = 1, c_{\text{out}}(\epsilon) = 0$。<strong>Why</strong>：在 $t = \epsilon$ 处，$f_\theta$ 自动塌缩成 $x$ 本身，神经网络 $F_\theta$ 输出多少都不影响——边界条件被代数地<em>内置</em>了，而不是被 loss 慢慢学出来。</p>
+
+    <h2>两种训练范式</h2>
+    <p>论文给了两条路，区别只在"PF-ODE 上相邻两点怎么来"：</p>
+    <ul>
+      <li><strong>CD（Consistency Distillation）</strong>：已有预训练的 diffusion 教师 $\phi$。用 $\phi$ 跑一步 ODE solver 拿到 $\hat x_t = \text{ODESolve}(x_{t+1}, t+1, t; \phi)$。<strong>Why</strong>：教师定义了"同一条轨迹"，学生只学一致性。</li>
+      <li><strong>CT（Consistency Training）</strong>：完全不要教师。直接用前向加噪 $x_t = x_0 + t \cdot z, x_{t+1} = x_0 + (t+1) \cdot z$ 同一个 $z$ 同一个 $x_0$。<strong>Why</strong>：同一个 $(x_0, z)$ 决定一条 PF-ODE 轨迹（在 Karras EDM 公式下严格成立），所以两个点天然同轨迹——免去教师网络。</li>
+    </ul>
+
+    <h2>EMA 目标网络 + 损失</h2>
+    <p>训练目标用一个<strong>慢更新的目标网络</strong> $\theta^-$（EMA of $\theta$）当"老师"，自己监督自己：</p>
+    <p>$$\mathcal{L} = \mathbb{E}\left[ d\big(f_\theta(x_{t+1}, t+1),\; f_{\theta^-}(x_t, t)\big) \right],$$</p>
+    <p>$d$ 一般是 $\ell_2$ 或 LPIPS。<strong>Why</strong>：如果用 $\theta$ 自己监督自己，相当于在拟合自己的输出，梯度方向不稳定，会塌成常数函数。EMA 把"老师"冻在过去几千步的平均权重上，提供一个准平稳的回归目标，类似 RL 里的 target network。</p>
+
+    <svg class="cm-svg" viewBox="0 0 600 260" role="img" aria-label="Consistency Models 把同一 PF-ODE 轨迹上不同时刻的点都映到同一端点 x_epsilon">
+      <g font-family="ui-sans-serif" font-size="11" fill="var(--text)">
+        <text x="40" y="22" fill="var(--text-muted)">x_T（纯噪声）</text>
+        <text x="500" y="22" fill="var(--text-muted)">x_ε（数据端）</text>
+        <path d="M 80 60 C 200 30, 380 220, 540 130" fill="none" stroke="var(--module-accent)" stroke-width="2" class="cm-trajectory"/>
+        <path d="M 80 100 C 220 70, 380 240, 540 130" fill="none" stroke="var(--module-accent)" stroke-width="1.2" opacity="0.4"/>
+        <path d="M 80 150 C 240 130, 380 250, 540 130" fill="none" stroke="var(--module-accent)" stroke-width="1.2" opacity="0.4"/>
+        <circle cx="80" cy="60" r="5" fill="var(--text-muted)"/>
+        <text x="60" y="55" fill="var(--text-muted)" font-size="10">x_T</text>
+        <circle cx="200" cy="58" r="5" fill="var(--text-muted)"/>
+        <text x="185" y="50" fill="var(--text-muted)" font-size="10">x_{t'}</text>
+        <circle cx="340" cy="155" r="5" fill="var(--text-muted)"/>
+        <text x="320" y="175" fill="var(--text-muted)" font-size="10">x_t</text>
+        <path d="M 80 60 Q 300 250, 530 130" stroke="var(--red)" stroke-width="1" fill="none" stroke-dasharray="3 3" class="cm-collapse-arrow" marker-end="url(#cm-ah)"/>
+        <path d="M 200 58 Q 360 230, 530 130" stroke="var(--red)" stroke-width="1" fill="none" stroke-dasharray="3 3" class="cm-collapse-arrow" marker-end="url(#cm-ah)"/>
+        <path d="M 340 155 Q 440 200, 530 130" stroke="var(--red)" stroke-width="1" fill="none" stroke-dasharray="3 3" class="cm-collapse-arrow" marker-end="url(#cm-ah)"/>
+        <circle cx="540" cy="130" r="7" fill="var(--module-accent)" class="cm-endpoint"/>
+        <text x="555" y="135" fill="var(--text)" font-size="11" font-weight="600">x_ε</text>
+        <text x="300" y="240" text-anchor="middle" fill="var(--text-muted)" font-size="11">同一条 PF-ODE 轨迹上的任意 (x_t, t) → 同一个 x_ε</text>
+        <defs>
+          <marker id="cm-ah" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+            <path d="M0,0 L10,5 L0,10 z" fill="var(--red)"/>
+          </marker>
+        </defs>
+      </g>
+    </svg>
+
+    <h2>多步 Consistency Sampling</h2>
+    <p>一步生成质量不够时，可以"加噪 + 再投回"反复几轮：</p>
+    <p>$$\hat x_0 = f_\theta(x_T, T);\quad x_{t_k} = \hat x_0 + \sigma_{t_k} z;\quad \hat x_0 \leftarrow f_\theta(x_{t_k}, t_k).$$</p>
+    <p><strong>Why</strong>：每一轮重新注入噪声，让 $f_\theta$ 在不同位置都做一次"折回端点"。2–4 步通常就能把 FID 再压一截，这是 LCM 在 SD 1.5 上 4 步出图的核心机制。</p>
+  </section>
+
+  <section class="concept-interact">
+    <p><strong>注意看什么不变量</strong>：点击下面任一个 $(x_t, t)$，红色箭头都会把它送到<em>同一个</em>绿色端点 $x_\epsilon$——这就是 consistency 的字面定义。曲线（PF-ODE 轨迹）只是参考，$f_\theta$ 并不沿曲线走。</p>
+    <div class="cm-controls">
+      <button data-step="0" class="active">① 从 x_T（纯噪声）出发</button>
+      <button data-step="1">② 从 x_{t'}（早期）</button>
+      <button data-step="2">③ 从 x_t（中期）</button>
+      <button data-step="3">④ 边界点 x_ε</button>
+    </div>
+    <div class="cm-readout" id="cm-readout">
+      <div class="cm-line" data-line="0">$f_\theta(x_T, T) = x_\epsilon$ —— 一步从最高噪声跳回数据端。</div>
+      <div class="cm-line" data-line="1">$f_\theta(x_{t'}, t') = x_\epsilon$ —— 早期点也映到同一终点。</div>
+      <div class="cm-line" data-line="2">$f_\theta(x_t, t) = x_\epsilon$ —— 中期点同样映到同一终点。</div>
+      <div class="cm-line" data-line="3">$f_\theta(x_\epsilon, \epsilon) = x_\epsilon$ —— 边界条件：在端点处就是恒等映射。</div>
+    </div>
+    <script>
+      (function () {
+        const btns = document.querySelectorAll('.cm-controls button');
+        const lines = document.querySelectorAll('#cm-readout .cm-line');
+        function show(step) {
+          btns.forEach(b => b.classList.toggle('active', +b.dataset.step === step));
+          lines.forEach(l => l.classList.toggle('cm-active-line', +l.dataset.line === step));
+        }
+        btns.forEach(b => b.addEventListener('click', () => show(+b.dataset.step)));
+        show(0);
+      })();
+    </script>
+  </section>
+
+  <section class="concept-example">
+    <h2>手算 CT 一步训练</h2>
+    <p>设 $x_0 = 2.0, z = 1.0$，时间步取 $t = 0.5, t+1 = 1.5$（EDM-style 连续时间）。先构造同一条轨迹上两个点：</p>
+    <p>$x_t = x_0 + t \cdot z = 2.0 + 0.5 \cdot 1.0 = 2.5$；$x_{t+1} = x_0 + (t+1) \cdot z = 2.0 + 1.5 \cdot 1.0 = 3.5$。</p>
+    <p>假设当前 $\theta$ 给出 $f_\theta(3.5, 1.5) = 1.8$、EMA 网络给出 $f_{\theta^-}(2.5, 0.5) = 2.05$。则：</p>
+    <p>$\mathcal{L} = (f_\theta(x_{t+1}, t+1) - f_{\theta^-}(x_t, t))^2 = (1.8 - 2.05)^2 = (-0.25)^2 = 0.0625$。</p>
+    <p>梯度只穿过 $f_\theta$（在线网络），不穿过 $f_{\theta^-}$（EMA 目标，<code>.detach()</code>）。训练若干步后两端会一起收敛到真实端点 $x_0 = 2.0$。</p>
+  </section>
+
+  <section class="cm-pitfalls concept-pitfalls">
+    <h2>常见误区</h2>
+    <ol>
+      <li><strong>"Consistency Models 就是把 progressive distillation 推到 1 步。"</strong>反例：PD 需要 $\log_2 T$ 轮、每轮一个新教师，CIFAR-10 上 $T=1000$ 要训 10 个学生模型；Consistency Models 一轮端到端搞定，且 CT 模式连教师都不要——是<em>结构</em>不同，不是<em>步数</em>不同。</li>
+      <li><strong>"边界条件 $f_\theta(x_\epsilon, \epsilon) = x_\epsilon$ 是损失里加一项罚出来的。"</strong>反例：实际靠参数化 $f = c_{\text{skip}}(t) x + c_{\text{out}}(t) F_\theta$ 配合 $c_{\text{skip}}(\epsilon)=1, c_{\text{out}}(\epsilon)=0$ 代数内置。$L_{\text{boundary}}$ 这一项<em>不存在</em>。</li>
+      <li><strong>"一步生成的 FID 一定比多步差很多。"</strong>反例：Song et al. 2023 在 CIFAR-10 上 1 步 FID ≈ 3.55（CD），DDPM 同模型用完整 1000 步 ≈ 3.17——差距只在 0.4 个 FID。质量退化没有想象中悬崖式。</li>
+    </ol>
+  </section>
+
+  <section class="concept-seealso">
+    <h2>相关概念</h2>
+    <ul>
+      <li><a href="/video-to-notebook/concepts/rectified-flow/">Rectified Flow</a> · 另一条"把曲线轨迹拉直成一步"的思路</li>
+      <li><a href="/video-to-notebook/concepts/ddim/">DDIM</a> · Consistency Models 的多步采样基于 DDIM 的 ODE 视角</li>
+      <li><a href="/video-to-notebook/concepts/probability-flow-ode/">Probability Flow ODE</a> · "同一条轨迹"的形式化载体</li>
+      <li><a href="/video-to-notebook/concepts/v-prediction/">v-Prediction</a> · Progressive Distillation 推荐的参数化，常与 Consistency 联用</li>
+    </ul>
+  </section>
+
+  <section class="concept-sources">
+    <h2>来源</h2>
+    <ol>
+      <li><a href="https://www.youtube.com/watch?v=L9nsCHHMv-c&t=4s" target="_blank" rel="noopener">cmu-10799-diffusion-flow · L10 · Distillation, Consistency Models &amp; Flow Maps · 为什么需要蒸馏 · (0:04)</a></li>
+      <li><a href="https://www.youtube.com/watch?v=L9nsCHHMv-c&t=120s" target="_blank" rel="noopener">cmu-10799-diffusion-flow · L10 · 1 步顶 2 步 DDIM → Progressive Distillation · (2:00)</a></li>
+      <li><a href="https://www.youtube.com/watch?v=L9nsCHHMv-c&t=311s" target="_blank" rel="noopener">cmu-10799-diffusion-flow · L10 · "dream bigger：直接跳 t 步"动机段 · (5:11)</a></li>
+      <li><a href="https://www.youtube.com/watch?v=L9nsCHHMv-c&t=443s" target="_blank" rel="noopener">cmu-10799-diffusion-flow · L10 · 训练采样代价 $T$ 次前向问题 · (7:23)</a></li>
+    </ol>
+    <p class="my-addition">🟡 教材外补充：Song et al. 《Consistency Models》ICML 2023，arXiv:2303.01469。下游工程化：<strong>LCM</strong>（Latent Consistency Models, Luo et al. 2023）把它搬到 Stable Diffusion latent space；<strong>SDXL Turbo</strong>（Sauer et al. 2023）和 <strong>Flash Diffusion</strong> 进一步把 ADD（adversarial diffusion distillation）和 consistency 思路结合，实现 1–4 步出图，是今天实时图像生成产品（如 Krea、Fal、Replicate Lightning）的技术底座。</p>
+  </section>
+</article>

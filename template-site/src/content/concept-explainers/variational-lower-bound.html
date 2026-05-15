@@ -1,86 +1,241 @@
 <style>
-/* prefix: vl- */
-.vl-quickref{background:var(--surface-soft);border-left:3px solid var(--module-accent);padding:0.8rem 1rem;border-radius:0 4px 4px 0;margin:1rem 0;font-size:0.92rem;}
-.vl-quickref div{margin:0.3rem 0;}
-.vl-pitfalls ol{padding-left:1.4rem;} .vl-pitfalls li{margin:0.5rem 0;}
-.vl-source{font-style:italic;color:var(--text-muted);border-left:2px solid var(--border);padding:0.2rem 0.8rem;margin:0.5rem 0;font-size:0.9rem;}
-.vl-svg{display:block;margin:1.2rem auto;max-width:100%;height:auto;}
+/* prefix: vlb- */
+.vlb-quickref{background:var(--surface-soft);border-left:3px solid var(--module-accent);padding:0.85rem 1.1rem;border-radius:0 4px 4px 0;margin:1rem 0;font-size:0.92rem;}
+.vlb-quickref div{margin:0.35rem 0;}
+.vlb-source{font-style:italic;color:var(--text-muted);border-left:2px solid var(--border);padding:0.3rem 0.9rem;margin:0.6rem 0;font-size:0.9rem;}
+.vlb-source strong{font-style:normal;color:var(--text);}
+.vlb-svg{display:block;margin:1.3rem auto;max-width:100%;height:auto;background:var(--surface-soft);border-radius:6px;padding:0.6rem;}
+.vlb-pitfalls ol{padding-left:1.4rem;}
+.vlb-pitfalls li{margin:0.55rem 0;}
+.vlb-callout{background:var(--module-accent-soft);border-left:3px solid var(--module-accent);padding:0.6rem 0.9rem;border-radius:0 4px 4px 0;margin:0.8rem 0;font-size:0.93rem;}
+.vlb-eqchain{background:var(--surface-soft);border:1px solid var(--border);border-radius:6px;padding:0.6rem 0.9rem;margin:0.7rem 0;font-size:0.95rem;}
+.vlb-eqchain .vlb-why{display:block;margin-top:0.35rem;color:var(--text-muted);font-size:0.88rem;}
+.vlb-controls{display:flex;gap:0.4rem;flex-wrap:wrap;margin:0.6rem 0;}
+.vlb-controls button{padding:0.35rem 0.7rem;border:1px solid var(--border);background:var(--surface);color:var(--text);border-radius:4px;cursor:pointer;font-size:0.88rem;}
+.vlb-controls button.active{background:var(--module-accent);color:var(--surface);border-color:var(--module-accent);}
+.vlb-decomp{display:flex;gap:0.6rem;flex-wrap:wrap;margin:0.8rem 0;}
+.vlb-decomp > div{flex:1;min-width:200px;background:var(--surface-soft);border:1px solid var(--border);border-radius:5px;padding:0.6rem 0.8rem;font-size:0.9rem;}
+.vlb-decomp strong{color:var(--module-accent);}
 </style>
 
 <article class="concept-entry">
   <header class="concept-header">
     <span class="concept-eyebrow">概念</span>
-    <h1>Variational Lower Bound</h1>
-    <p class="concept-tagline">— ELBO；VAE / diffusion / flow matching 共同的训练目标。</p>
+    <h1>Variational Lower Bound（ELBO）</h1>
+    <p class="concept-tagline">— $\log p(x)$ 这把天花板算不动，ELBO 是你能算的地板。</p>
   </header>
 
-  <aside class="vl-quickref">
-    <div><strong>定义</strong> · $\log p_\theta(x) \geq \mathbb{E}_{q(z|x)}[\log p(x, z) - \log q(z|x)] = \mathrm{ELBO}$。</div>
-    <div><strong>公式</strong> · 拆分：$\mathrm{ELBO} = \mathbb{E}[\log p(x|z)] - D_{\text{KL}}(q(z|x) \| p(z))$。</div>
-    <div><strong>易错</strong> · 最大化 ELBO 同时提升 $\log p(x)$ 和压紧 gap——两件事都好。</div>
+  <aside class="vlb-quickref">
+    <div><strong>定义</strong> · 对任意分布 $q(z|x)$，$\log p(x) \geq \mathbb{E}_{q}[\log p(x|z)] - D_{\mathrm{KL}}(q(z|x)\|p(z)) \triangleq \mathcal{L}(x)$。</div>
+    <div><strong>公式</strong> · $\log p(x) - \mathcal{L}(x) = D_{\mathrm{KL}}\big(q(z|x)\,\|\,p(z|x)\big) \geq 0$。</div>
+    <div><strong>易错</strong> · ELBO 不是"为了凑可微而硬造的近似"——它是 $\log p(x)$ 和"你能写出的最大下界"之间天然存在的<em>缺口</em>。</div>
   </aside>
 
   <section class="concept-intuition">
-    <p>Vizuara Dr. Raj 用"传送猫"作直觉：</p>
-    <div class="vl-source">「想算 p(x)——一只猫的概率。但 p(x) is intractable，因为算它要做积分。这就像把猫从地球传送到火星——你不可能把每个原子都传过去，太多了。所以找一个 L always ≤ p(x)，最大化 L，p(x) 也跟着顶上去。」—— Vizuara L8 #11-12</div>
+    <p>很多人第一次读到 ELBO 都会想：「这不就是把一个算不动的对数似然换成一个能算的下界，凑一个能反向传播的损失而已嘛——一个数学小聪明。」<strong>这个理解从一开始就错了。</strong>ELBO 不是为了让数学更容易而发明的<em>技巧</em>，也不是某种近似公式——它是 $\log p(x)$ 与你<em>实际能计算的量</em>之间那条客观存在的<strong>缝隙</strong>本身。换句话说，ELBO 不是"我们决定用什么来代替 $\log p(x)$"，而是"$\log p(x)$ 减去 ELBO，刚好等于你选错后验的代价"。你不是在「逼近」一个似然，你是在<strong>抬升一块叫做下界的地板</strong>，直到它顶到了那个叫真实对数似然的天花板。</p>
+
+    <p>Vizuara 的 Dr. Raj 在 Lecture 2 用了一个极朴素的物理比喻——<em>「猫被瞬移走了」</em>。你想求一个完整的 $\log p(x) = \log \int p(x, z) dz$，但这个积分在高维（比如一张 32×32 图所有可能的潜变量 $z$，几千维的连续空间）上根本算不出来——就像猫从你眼前被瞬移走，你抓不到它本身，只能在它原本的位置周围设法<em>探出</em>它的轮廓。怎么办？<strong>找一个能算的下界</strong>，然后想办法<strong>把这个下界一步步往上推</strong>。下界推得越高，离真正的猫越近；如果你能把下界抬到与天花板贴齐，那等价于<em>你已经知道了真后验</em>。</p>
+
+    <div class="vlb-source"><strong>Dr. Raj（Vizuara L2）：</strong>「积分算不动？那就找一个能算的 lower bound，然后想办法把这个 bound 往上 push。push 得越高，你就越接近真实的 log-likelihood。」</div>
+
+    <p>CMU 的 Kelly Hu 则把同样的事情称作<strong>「有史以来最伟大的数学小把戏」</strong>——在那个让人窒息的积分里<em>乘上、再除以同一个 $q(z|x)$</em>。这个看上去毫无意义、像是数学课上小学生才会做的「乘 1」操作，恰恰是整套变分推断的引擎：它把一个不可计算的高维积分，变成了一个对 $q$ 的期望；只要你能从 $q$ 采样、能算 $\log p(x,z)$ 和 $\log q(z|x)$，整件事就变成一个普通的可微目标函数。再配合 Jensen 不等式，地板就出现了。</p>
+
+    <div class="vlb-source"><strong>Kelly Hu（CMU 10-799 L1）：</strong>「The greatest mathematical trick of all time — multiply and divide by $q$. 你什么都没改变，但你刚刚把一个高维积分变成了一个可以蒙特卡洛估计的期望。」</div>
+
+    <p>这两位讲师用了截然不同的比喻——一个偏物理直觉（瞬移的猫、抬地板），一个偏代数手法（乘 1 除 1 的把戏）——但它们指向同一件事：<strong>对数似然不能直接算，但可以围攻</strong>。在训练里，这件事对应：VAE 不是直接极大化 $\log p(x)$（不可能），而是极大化 ELBO；扩散模型把这个 ELBO 沿着 $T$ 步展开成 $\sum_t L_t$，每一步都是一个高斯之间的 KL；流匹配则更进一步，连 $q$ 都不显式定义、直接学速度场。它们都在做同一件事——<strong>把一块叫做 ELBO 的地板，朝那块叫 $\log p(x)$ 的天花板抬升</strong>。理解这一点，你就理解了 VAE、扩散、流匹配在数学上为何是同一族算法，理解了为何"重建 + KL"会从一个看似无关的不等式里自然冒出来，理解了为何 DDPM 那行 $\|\epsilon - \epsilon_\theta\|^2$ 不是工程妥协而是<em>原则导出</em>。这是整个生成模型理论的入口。</p>
   </section>
 
   <section class="concept-deepdive">
-    <h2>Jensen 推导</h2>
-    <p>$\log p(x) = \log \int p(x, z) dz = \log \int q(z|x) \frac{p(x, z)}{q(z|x)} dz$（Kelly "the greatest trick"）。Jensen ($\log$ 凹)：</p>
-    $$\log p(x) \geq \mathbb{E}_{q(z|x)}\!\left[\log \frac{p(x, z)}{q(z|x)}\right] = \mathrm{ELBO}$$
-    <p>gap = $D_{\text{KL}}(q \| p_\theta(\cdot|x))$。</p>
+    <h2>从「算不动」到「能算」：Jensen 风格推导</h2>
 
-    <h2>拆成 重建 − KL</h2>
-    $$\mathrm{ELBO} = \mathbb{E}_q[\log p(x|z)] - D_{\text{KL}}(q(z|x) \| p(z))$$
-    <p>VAE 损失就是 negative ELBO。</p>
+    <p>下面这四步推导，是 1990 年代以来变分推断的核心、是 VAE 论文（Kingma & Welling 2013）半页内容、是 DDPM 论文附录 A 的展开起点。请一行一行跟着读，不要跳——每一步都附了一段 <strong>Why</strong> 注解，告诉你这一步在干什么、为什么合法、它把你带到了哪里。</p>
 
-    <svg class="vl-svg" viewBox="0 0 500 180" role="img" aria-label="ELBO vs log p">
+    <p>潜变量模型把数据看作 $x \sim p_\theta(x) = \int p_\theta(x, z) \, dz$。$z$ 是你设想的「秘密配方」——Dr. Raj 在 Lecture 2 的术语是<em>笔压、倾斜度、字宽、书写速度、整洁度</em>等隐藏特征——它们组合在一起决定了"这位同学写的 hello 长什么样"。问题在于：每个数据点 $x$ 背后都对应着<em>无穷多种</em>合理的 $z$，所以你必须把所有 $z$ 积出来才能得到 $x$ 的边缘概率。高维下这个积分是不可解析的，朴素蒙特卡洛也会方差爆炸（绝大多数 $z$ 对当前 $x$ 的贡献近似为零，采到一个高贡献样本是天文级低概率）。下面的四步推导是<em>整个变分推断的发动机</em>，VAE、扩散、流匹配的损失都从这里长出来。请仔细看每一步的 <strong>Why</strong> 注解——前两步是恒等变形（值不变），第三步是 Jensen（出现 $\geq$，这是<em>唯一的</em>不等号来源），第四步是合并整理。</p>
+
+    <div class="vlb-eqchain">
+      <strong>① 引入任意 $q(z|x)$（"乘 1 除 1"的把戏）</strong>
+      $$\log p(x) = \log \int p(x, z)\, dz = \log \int q(z|x) \cdot \frac{p(x, z)}{q(z|x)}\, dz$$
+      <span class="vlb-why"><strong>Why：</strong>$q(z|x)$ 是<em>任意</em>满足 $\int q\, dz = 1$ 且支撑集覆盖 $p(x,z)$ 支撑集的分布——你完全没有改变积分的值，只是凭空乘了一个 1。但这个 1 是关键：它把"对 $z$ 的盲目积分"换成了"对 $q$ 期望"的形式，等式右边已经长得像 $\log \mathbb{E}_q[\cdot]$ 了。这一步是 Kelly Hu 所说"最伟大的小把戏"的全部内容——它没有给你新东西，但它给了你新视角。</span>
+    </div>
+
+    <div class="vlb-eqchain">
+      <strong>② 改写为期望</strong>
+      $$\log p(x) = \log \mathbb{E}_{q(z|x)}\!\left[\frac{p(x, z)}{q(z|x)}\right]$$
+      <span class="vlb-why"><strong>Why：</strong>$\int q(z|x) f(z) dz$ 就是期望的定义——形式没变，意义变了：现在它是一个"采 $z$、算比值、取平均"的过程。</span>
+    </div>
+
+    <div class="vlb-eqchain">
+      <strong>③ Jensen 不等式（$\log$ 是凹函数）</strong>
+      $$\log \mathbb{E}_q\!\left[\frac{p(x, z)}{q(z|x)}\right] \geq \mathbb{E}_q\!\left[\log \frac{p(x, z)}{q(z|x)}\right] \triangleq \mathcal{L}(x)$$
+      <span class="vlb-why"><strong>Why：</strong>$\log$ 是凹函数，对凹函数 Jensen 给出 $\log \mathbb{E}[X] \geq \mathbb{E}[\log X]$（凸函数则相反）。直观上，"先取期望再取 $\log$"会比"先取 $\log$ 再取期望"高一截，差出来的那一截就是 ELBO 与对数似然之间的 gap。等号成立的条件——也是整个变分推断的目标——是 $X$ 退化为常数，即 $\frac{p(x,z)}{q(z|x)}$ 对所有 $z$ 都相等；换言之 $q(z|x) \propto p(x,z)$，即 $q$ 等于真后验 $p(z|x)$。</span>
+    </div>
+
+    <div class="vlb-eqchain">
+      <strong>④ 重建 / KL 分解</strong>
+      $$\mathcal{L}(x) = \mathbb{E}_{q(z|x)}[\log p(x|z)] - D_{\mathrm{KL}}\big(q(z|x)\,\|\,p(z)\big)$$
+      <span class="vlb-why"><strong>Why：</strong>用 $p(x,z) = p(x|z)p(z)$ 把联合密度拆开，$\log$ 把乘法变成加法：$\log\frac{p(x|z)p(z)}{q(z|x)} = \log p(x|z) + \log p(z) - \log q(z|x)$。对 $q$ 取期望后，第一项就是<em>重建对数似然</em>；后两项 $\mathbb{E}_q[\log p(z) - \log q(z|x)] = -\mathbb{E}_q[\log\frac{q(z|x)}{p(z)}] = -D_{\mathrm{KL}}(q\|p(z))$，正好是 KL 散度的负数。这就是 VAE loss 的真身：<em>重建项 − KL 正则项</em>。两项各有清晰物理含义：重建项要求 $z$ 必须保留足够信息以复原 $x$；KL 项要求 $q(z|x)$ 不能离先验太远，保证 latent space 的连续性。</span>
+    </div>
+
+    <h2>那条「缝隙」到底是什么？</h2>
+
+    <p>到现在你已经知道：ELBO 是 $\log p(x)$ 的下界，下界什么时候紧、什么时候松？把 ELBO 与 $\log p(x)$ 之间的差<em>直接展开</em>，会发现一个惊艳的等式：</p>
+    $$\log p(x) - \mathcal{L}(x) = D_{\mathrm{KL}}\big(q(z|x)\,\|\,p(z|x)\big)$$
+
+    <p>这是整个变分框架最重要的一行公式，请记住它。它说：<strong>地板和天花板之间的距离，恰好等于你选的 $q(z|x)$ 离真后验 $p(z|x)$ 的 KL 距离</strong>。这条等式让"近似推断"这件事第一次有了量纲——你不再是模糊地"逼近"什么，而是在<em>定量地</em>把 $q$ 推向 $p(z|x)$，每减少一个 nat 的 KL，地板就升高一个 nat。它也解释了为什么 ELBO 是<em>下</em>界而不是上界——KL 散度永远非负，所以缝隙永远朝同一个方向，永远是 ELBO 在下、$\log p(x)$ 在上。</p>
+
+    <div class="vlb-callout">
+      <strong>三个直接推论：</strong>
+      <ul style="margin:0.3rem 0 0 1rem;padding:0;">
+        <li>$q$ = 真后验 ⇒ KL = 0 ⇒ ELBO = $\log p(x)$（地板顶到天花板，bound is tight）。在数学上等价于"你已经解决了推断问题"——但真后验在高维下通常算不出来，所以这是一个理想极限。</li>
+        <li>极大化 ELBO 同时做<strong>两件事</strong>：(a) 把生成模型参数 $\theta$ 推向"让数据 $x$ 更可能"的方向（间接提高真实 $\log p(x)$），(b) 把变分参数 $\phi$（$q$ 的参数）推向真后验 $p(z|x)$。一个目标函数，两组参数，同时优化——这是 VAE 训练能 work 的核心。</li>
+        <li>用过度受限的 $q$（比如 mean-field 高斯：假设各维度独立、单峰、各向同性）得到 loose ELBO——这是一个<em>有偏</em>的似然估计，可能永远顶不到天花板，但工程上可训、可微、可批量化。这就是经典的"训练可行性 vs 紧性"权衡。</li>
+      </ul>
+    </div>
+
+    <h2>抬地板的几何图景</h2>
+
+    <p>不妨用一张图把这件事彻底固化。横轴是训练步数，纵轴是对数似然的取值。<strong>天花板 $\log p(x)$ 是一条水平直线</strong>——它由数据和模型族 $\{p_\theta\}$ 一起决定，对当前 $\theta$ 来说是<em>固定值</em>，是你"理论上能达到的最佳分数"。<strong>地板 ELBO 是一条向上凸起的曲线</strong>，初始时压得很低（因为随机初始化的 $q$ 离真后验十万八千里、KL 散度爆炸），随着训练它一步步向天花板靠拢。两者之间的<em>缝</em>就是 $D_{\mathrm{KL}}(q\|p(z|x))$——你可以从 TensorBoard 的 ELBO 曲线斜率读出"今天你的近似后验质量改善了多少"。</p>
+
+    <p>但要注意一个微妙的点：极大化 ELBO 时，<strong>天花板本身也在动</strong>。每一步 SGD 同时更新生成模型参数 $\theta$（影响天花板的高度）和变分参数 $\phi$（影响地板和缝的大小）。这是 EM 算法在连续优化里的推广——经典 EM 把这两步分开：E-step 把 $q$ 推近 $p(z|x)$（地板向上贴），M-step 把 $\theta$ 推到让 ELBO（也即下界）更大（天花板和地板一起向上抬）。VAE 的训练把两步混在同一个梯度里，一次反传<em>同时</em>改 $\theta$ 和 $\phi$。这种"amortized inference"是 Kingma & Welling 2013 的核心贡献，它让原本要每个数据点跑一次推断的代价，被一个共享的 encoder 网络摊销掉。</p>
+
+    <h2>扩散模型里的 ELBO：T 步链式分解</h2>
+
+    <p>把 VAE 推广到 $T$ 步的 Markov chain $x_0 \to x_1 \to \cdots \to x_T$（其中 $x_T \approx \mathcal{N}(0, I)$ 是纯噪声），<em>完全相同的</em> Jensen 推导给出：</p>
+    $$\log p_\theta(x_0) \geq \mathbb{E}_q\!\left[\log p(x_T) + \sum_{t \geq 1} \log \frac{p_\theta(x_{t-1}|x_t)}{q(x_t|x_{t-1})}\right] = -\underbrace{L_0}_\text{recon} - \sum_{t=1}^{T-1} \underbrace{L_t}_\text{KL} - \underbrace{L_T}_\text{prior}$$
+
+    <p>每一项 $L_t$ 都是两个高斯之间的 KL，可以闭式写出（不需要采样近似）。Ho et al. 2020 在 DDPM 论文里把它进一步化简成"预测噪声的 MSE"——所有归一化常数、$\beta_t$ 权重在适当的参数化下要么消失、要么被吸收到 loss 权重里，剩下的就是那行<em>简单到不可思议</em>的损失 $\|\epsilon - \epsilon_\theta\|^2$。从这个视角看，DDPM 的"简单 loss" <strong>并不是工程上的妥协</strong>，而是一个完整 T 步 ELBO 在合适参数化下的天然结果。这也是为什么扩散模型有<em>真正的</em>概率解释——它的训练目标是一个严格的对数似然下界，不是某种启发式重建误差。</p>
+
+    <h2>tight 与 loose：训练可行性的代价</h2>
+
+    <p>有两个极端值得记住。<strong>极端一</strong>：$q$ 等于真后验 $p(z|x)$。此时 ELBO = $\log p(x)$，下界紧到顶。但真后验在高维下通常无法解析，所以这种"紧 ELBO"只在玩具问题里见过。<strong>极端二</strong>：$q$ 取 mean-field 高斯（各维独立、单峰、参数仅由 $x$ 通过一个神经网络决定）。这种 $q$ 表达力很弱，永远无法贴合真后验，所以 ELBO 永远低于 $\log p(x)$——你得到的是一个<em>有偏的</em>对数似然估计。但好处是：可微、可批量、可 GPU 加速。这就是工程取舍。</p>
+
+    <p>现代研究的整条进步轨迹，几乎就是在<strong>把 $q$ 做得更像真后验</strong>：normalizing flow 让 $q$ 拥有任意复杂的密度；IWAE 用多采样 + log-sum-exp 拉紧下界；hierarchical VAE 把 $z$ 分层，每层条件高斯，整体表达力远超单层；diffusion 干脆放弃<em>显式</em> $q$，而用一个固定的 forward 噪声过程构造它——而由于 forward 是可控的，KL 项总能闭式算出来。所有这些技巧都在做同一件事：<strong>抬高地板</strong>。当你下次看到一篇论文宣称"我们改进了 ELBO"时，几乎总可以翻译成"我们让 $q$ 更接近真后验"。这是判断生成模型工作是否扎实的快速 sanity check。</p>
+
+    <svg class="vlb-svg" viewBox="0 0 600 320" role="img" aria-label="ELBO 地板随训练向 log p(x) 天花板抬升">
       <g font-family="ui-sans-serif" font-size="11" fill="var(--text)">
-        <line x1="40" y1="150" x2="450" y2="150" stroke="var(--text-muted)"/>
-        <rect x="80" y="40" width="50" height="110" fill="var(--module-accent)"/>
-        <text x="105" y="170" text-anchor="middle">log p(x)</text>
-        <rect x="170" y="80" width="50" height="70" fill="var(--blue)"/>
-        <text x="195" y="170" text-anchor="middle">ELBO</text>
-        <path d="M 130 50 L 220 90" stroke="var(--red)" stroke-dasharray="3,3"/>
-        <text x="180" y="55" font-size="10" fill="var(--red)">gap = KL(q‖真后验)</text>
-        <text x="270" y="80" font-size="11">最大化 ELBO →</text>
-        <text x="270" y="100" font-size="11">log p 上升 + gap 缩小</text>
+        <!-- 天花板 log p(x) -->
+        <line x1="60" y1="60" x2="540" y2="60" stroke="var(--text)" stroke-width="2" stroke-dasharray="6 4"/>
+        <text x="550" y="64" font-size="11" fill="var(--text)">$\log p(x)$（天花板）</text>
+
+        <!-- ELBO 曲线：从底部上升逼近天花板 -->
+        <path d="M 60 280 Q 180 220 280 140 T 540 75" fill="none" stroke="var(--module-accent)" stroke-width="2.5"/>
+        <text x="300" y="125" fill="var(--module-accent)">ELBO 地板（训练中抬升）</text>
+
+        <!-- 缝隙箭头标注 -->
+        <line x1="200" y1="60" x2="200" y2="205" stroke="var(--red)" stroke-width="1.5" marker-end="url(#vlb-arr)"/>
+        <line x1="200" y1="205" x2="200" y2="60" stroke="var(--red)" stroke-width="1.5" marker-end="url(#vlb-arr)"/>
+        <text x="210" y="135" fill="var(--red)" font-size="10">gap = $D_{\mathrm{KL}}(q\|p(z|x))$</text>
+
+        <line x1="460" y1="60" x2="460" y2="90" stroke="var(--red)" stroke-width="1.5" stroke-dasharray="3 3"/>
+        <text x="465" y="80" fill="var(--red)" font-size="10">gap → 0</text>
+
+        <!-- 横轴 -->
+        <line x1="60" y1="295" x2="540" y2="295" stroke="var(--text-muted)" stroke-width="1"/>
+        <text x="300" y="312" text-anchor="middle" fill="var(--text-muted)">训练步数 →</text>
+
+        <!-- 纵轴 -->
+        <line x1="60" y1="50" x2="60" y2="295" stroke="var(--text-muted)" stroke-width="1"/>
+        <text x="30" y="170" fill="var(--text-muted)" transform="rotate(-90 30 170)">对数似然</text>
+
+        <!-- 起点终点标注 -->
+        <circle cx="60" cy="280" r="3" fill="var(--module-accent)"/>
+        <text x="68" y="278" font-size="10" fill="var(--text-muted)">起步：loose</text>
+        <circle cx="540" cy="75" r="3" fill="var(--module-accent)"/>
+        <text x="470" y="55" font-size="10" fill="var(--text-muted)">tight</text>
+
+        <defs>
+          <marker id="vlb-arr" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--red)"/>
+          </marker>
+        </defs>
       </g>
     </svg>
   </section>
 
   <section class="concept-interact">
-    <p>蓝 ELBO 顶绿 log p——<strong>不变量</strong> ELBO ≤ log p；两者一起上升。</p>
+    <p>下面把 ELBO 的四步推导拆成按钮——点击按顺序展开。这里有一个特别重要的<strong>不变量</strong>需要你盯住：从 ① 到 ②，每一步等号两边的值<em>都没有变</em>，变的只是"这件事看起来像什么"——直到第 ③ 步才出现真正的不等号 $\geq$，那一步是<em>整套理论里唯一的"近似"</em>。换句话说，ELBO 这块地板与 $\log p(x)$ 天花板之间的缝隙，<em>完全</em>来自 Jensen 不等式那一步。理解了这一点，你就理解了"为什么改进 $q$ 等于抬高 ELBO"。</p>
+
+    <div class="vlb-controls" role="group" aria-label="ELBO 推导按钮">
+      <button data-step="0" class="active">① 乘 1 除 1</button>
+      <button data-step="1">② 改写期望</button>
+      <button data-step="2">③ Jensen</button>
+      <button data-step="3">④ 分解</button>
+    </div>
+
+    <div id="vlb-readout" style="background:var(--surface-soft);border:1px solid var(--border);border-radius:5px;padding:0.8rem 1rem;min-height:80px;font-size:0.95rem;">
+      <div class="vlb-line" data-line="0" style="display:block;">
+        $\log p(x) = \log \int q(z|x) \cdot \dfrac{p(x,z)}{q(z|x)}\, dz$ — 引入任意 $q$，等式严格相等。
+      </div>
+      <div class="vlb-line" data-line="1" style="display:none;">
+        $\log p(x) = \log \mathbb{E}_{q}\!\left[\dfrac{p(x,z)}{q(z|x)}\right]$ — 积分就是期望，仍然严格相等。
+      </div>
+      <div class="vlb-line" data-line="2" style="display:none;">
+        $\log p(x) \geq \mathbb{E}_q\!\left[\log \dfrac{p(x,z)}{q(z|x)}\right] = \mathcal{L}(x)$ — Jensen 不等式，首次出现 $\geq$。
+      </div>
+      <div class="vlb-line" data-line="3" style="display:none;">
+        $\mathcal{L}(x) = \underbrace{\mathbb{E}_q[\log p(x|z)]}_\text{重建} - \underbrace{D_{\mathrm{KL}}(q(z|x)\|p(z))}_\text{KL 正则}$ — 这就是 VAE loss 的真身。
+      </div>
+    </div>
+
+    <script>
+      (function () {
+        const btns = document.querySelectorAll('.vlb-controls button');
+        const lines = document.querySelectorAll('#vlb-readout .vlb-line');
+        function show(step) {
+          btns.forEach(b => b.classList.toggle('active', +b.dataset.step === step));
+          lines.forEach(l => l.style.display = (+l.dataset.line === step ? 'block' : 'none'));
+        }
+        btns.forEach(b => b.addEventListener('click', () => show(+b.dataset.step)));
+        show(0);
+      })();
+    </script>
   </section>
 
   <section class="concept-example">
-    <h2>简化算</h2>
-    <p>$p(x|z) = \mathcal{N}(z, 1), p(z) = \mathcal{N}(0, 1), q(z|x) = \mathcal{N}(0.5, 1), x=1$. 采 $z=0.5$. 重建 = $\log \mathcal{N}(1; 0.5, 1) \approx -1.04$；KL = $\frac{1}{2}(\mu^2) = 0.125$. ELBO ≈ $-1.17$.</p>
+    <h2>手算：一个最小的 ELBO</h2>
+
+    <p>来做一个能拿铅笔跟着算的例子，把抽象公式落到具体数字。设 $z$ 是一维标量；真模型 $p(x|z) = \mathcal{N}(z, 1)$（给定 $z$，数据是单位方差高斯），先验 $p(z) = \mathcal{N}(0, 1)$；变分后验 $q(z|x) = \mathcal{N}(\mu, \sigma^2)$，取 $\mu = 0.5, \sigma = 1.2$。给定一个数据点 $x = 1$，用 reparameterization 采到一次 $\epsilon = 0.1$。下面把这个数据点上的单样本 ELBO 完整算出来——总共三步，每一步都是小学算术加一个对数。</p>
+
+    <div class="vlb-eqchain">
+      <strong>重建项 $\mathbb{E}_q[\log p(x|z)]$</strong>
+      $z = \mu + \sigma\epsilon = 0.5 + 1.2 \cdot 0.1 = 0.62$；代入高斯对数密度：
+      $\log p(x|z) = -\tfrac{1}{2}(x - z)^2 - \tfrac{1}{2}\log 2\pi = -\tfrac{1}{2}(1 - 0.62)^2 - 0.919 = -\tfrac{1}{2}(0.144) - 0.919 = -0.072 - 0.919 = -0.991$。
+    </div>
+
+    <div class="vlb-eqchain">
+      <strong>KL 项（两个 1D 高斯之间，闭式）</strong>
+      $D_{\mathrm{KL}}\big(\mathcal{N}(\mu, \sigma^2) \| \mathcal{N}(0, 1)\big) = \tfrac{1}{2}\big(\mu^2 + \sigma^2 - 1 - \log\sigma^2\big) = \tfrac{1}{2}(0.25 + 1.44 - 1 - \log 1.44) = \tfrac{1}{2}(0.69 - 0.365) = \tfrac{1}{2}(0.325) = 0.163$。
+    </div>
+
+    <div class="vlb-eqchain">
+      <strong>ELBO</strong>
+      $\mathcal{L}(x) = -0.991 - 0.163 = -1.154$。地板就在 $-1.154$ 这里；天花板 $\log p(x)$ 至少 $\geq -1.154$。<em>差距</em>是多少？等于 $D_{\mathrm{KL}}(q\|p(z|x))$——你选的 $q$ 离真后验越远，缝隙越大。训练（即极大化 ELBO）就是同时把这个数往上推、把 $q$ 推向真后验。
+    </div>
   </section>
 
   <section class="concept-pitfalls">
-    <h2>常见误区</h2>
+    <h2>三个反直觉的常见误区</h2>
     <ol>
-      <li><strong>"ELBO = −loss"。</strong>反例：通常对，但实现里 loss = recon + β·KL，β 可调。</li>
-      <li><strong>"gap 固定"。</strong>反例：gap 随 q 变化，最大化 ELBO 间接逼近真后验。</li>
-      <li><strong>"扩散 ELBO 太多项不能用"。</strong>反例：DDPM 简化成 L_simple MSE。</li>
+      <li><strong>"ELBO 就是 $\log p(x)$ 的近似"——错。</strong>反例：取 $q(z|x) = \mathcal{N}(0, 100)$（一个荒唐的"平坦"后验，几乎不依赖 $x$），ELBO 可能是 $-50$ 而真实 $\log p(x) = -2$——差出 48 个 nats。ELBO 是严格的<em>下界</em>，不是<em>无偏估计</em>；只有当 $q$ 接近真后验 $p(z|x)$ 时它才会"接近"对数似然。报告"我的 VAE ELBO 是 -120"≠"我的对数似然是 -120"，后者可能高得多。</li>
+      <li><strong>"只要重建好，ELBO 就高"——错。</strong>反例：把变分后验的 $\sigma$ 压到 $10^{-6}$，重建误差几乎完美 $\approx 0$ 没错，但 KL 项 $\tfrac{1}{2}(\mu^2 + 10^{-12} - 1 - \log 10^{-12}) \approx \tfrac{1}{2}(- 1 + 27.6) = 13.3$ 直接爆炸——ELBO 反而骤降，远不如让 $\sigma$ 稍大、重建稍差的方案。两项必须协同优化，KL 不是"装饰性正则"，它是 ELBO 公式里不可拆解的一半。$\beta$-VAE 故意把 KL 权重调大调小，就是在这条曲线上选不同的点。</li>
+      <li><strong>"loose ELBO 也是无偏似然估计，多采样平均就好了"——错。</strong>反例：用 mean-field 高斯（各维独立）作为 $q$，它永远捕捉不到双峰真后验的形状；任何单峰 $q$ 在双峰 $p(z|x)$ 下都有非零 KL，ELBO 永远低于 $\log p(x)$。Burda et al. 2016（IWAE 论文）证明，单样本 ELBO 系统性低估 $\log p(x)$，即使训到收敛、平均无穷次样本，结果依然有偏——这是<em>偏差</em>（bias）不是<em>方差</em>（variance）。要修，需要 importance-weighted ELBO（多采样、log-sum-exp，等价于把 bound 拉紧）、normalizing flow（让 $q$ 表达力变强），或者干脆放弃 $q$ 走 score-based 路线。</li>
     </ol>
   </section>
 
   <section class="concept-seealso">
     <h2>相关概念</h2>
     <ul>
-      <li><a href="/video-to-notebook/concepts/vae-encoder/">VAE Encoder</a></li>
-      <li><a href="/video-to-notebook/concepts/reparameterization-trick/">Reparameterization Trick</a></li>
+      <li><a href="/video-to-notebook/concepts/vae-encoder/">VAE Encoder</a> — ELBO 中 $q(z|x)$ 的具体参数化网络，输出 $\mu(x), \sigma(x)$ 让你能从 $q$ 采样并算 KL。</li>
+      <li><a href="/video-to-notebook/concepts/reparameterization-trick/">Reparameterization Trick</a> — 让 ELBO 里那个对 $q$ 的期望对 $\phi$ 可微的工程把戏，是 ELBO 能用 SGD 训练的前提。</li>
     </ul>
   </section>
 
   <section class="concept-sources">
     <h2>来源</h2>
     <ol>
-      <li><a href="https://www.youtube.com/watch?v=UNNUQ2WzU30&t=679s" target="_blank" rel="noopener">diffusion-principles-vizuara · L8 · "传送猫" ELBO 直觉 · (11:19)</a></li>
-      <li><a href="https://www.youtube.com/watch?v=H-RbhdiWzto&t=2150s" target="_blank" rel="noopener">cmu-10799-diffusion-flow · L3 · "greatest mathematical trick" · (35:50)</a></li>
+      <li><a href="https://www.youtube.com/watch?v=Yyir7-OAnlA&t=5s" target="_blank" rel="noopener">diffusion-principles-vizuara · L2 · Variational Autoencoders Explained From Scratch · (00:05)</a></li>
+      <li><a href="https://www.youtube.com/watch?v=Yyir7-OAnlA&t=405s" target="_blank" rel="noopener">diffusion-principles-vizuara · L2 · 「猫被瞬移走 / secret recipe / push the bound up」 · (06:45)</a></li>
+      <li><a href="https://www.youtube.com/watch?v=p7Q77S_ZhdA&t=2s" target="_blank" rel="noopener">cmu-10799-diffusion-flow · L1 · "the greatest mathematical trick of all time" · (00:02)</a></li>
     </ol>
   </section>
 </article>

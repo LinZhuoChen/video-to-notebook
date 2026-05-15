@@ -1,0 +1,264 @@
+<style>
+/* prefix: fm- */
+.fm-quickref{background:var(--surface-soft);border-left:3px solid var(--module-accent);padding:0.8rem 1rem;border-radius:0 4px 4px 0;margin:1rem 0;font-size:0.92rem;}
+.fm-quickref div{margin:0.3rem 0;}
+.fm-svg{display:block;margin:1.2rem auto;max-width:100%;height:auto;}
+.fm-pitfalls ol{padding-left:1.4rem;} .fm-pitfalls li{margin:0.55rem 0;}
+.fm-source{font-style:italic;color:var(--text-muted);border-left:2px solid var(--border);padding:0.2rem 0.8rem;margin:0.5rem 0;font-size:0.9rem;}
+.callout-quote{background:var(--surface-soft);border-left:3px solid var(--module-accent);padding:0.5rem 0.9rem;margin:0.8rem 0;font-style:italic;color:var(--text);font-size:0.93rem;}
+.my-addition{display:inline-block;background:var(--module-accent-soft);color:var(--text);border-left:3px solid var(--module-accent);padding:0.15rem 0.55rem;margin:0.3rem 0 0.1rem 0;border-radius:2px;font-size:0.85rem;font-weight:600;}
+.fm-why{background:var(--surface-soft);border-left:3px solid var(--blue);padding:0.4rem 0.8rem;margin:0.4rem 0 0.8rem 0;font-size:0.92rem;color:var(--text);}
+.fm-why strong{color:var(--blue);}
+.fm-controls{display:flex;gap:0.4rem;flex-wrap:wrap;margin:0.6rem 0;}
+.fm-controls button{background:var(--surface-soft);border:1px solid var(--border);color:var(--text);padding:0.35rem 0.7rem;border-radius:4px;cursor:pointer;font-size:0.88rem;}
+.fm-controls button.active{background:var(--module-accent);color:var(--surface);border-color:var(--module-accent);}
+.fm-readout{font-size:0.9rem;color:var(--text-muted);margin-top:0.4rem;}
+.fm-interp{transition:cx 0.3s ease, cy 0.3s ease;}
+</style>
+
+<article class="concept-entry">
+  <header class="concept-header">
+    <span class="concept-eyebrow">概念</span>
+    <h1>Flow Matching</h1>
+    <p class="concept-tagline">— 直接回归一个速度场把噪声推向数据，绕开"每个噪声层级都学一遍"。</p>
+  </header>
+
+  <aside class="fm-quickref">
+    <div><strong>定义</strong> · 在先验 $p_0$ 与数据 $p_1$ 之间挑一条概率路径 $p_t$，训练神经网络 $v_\theta(x,t)$ 拟合驱动该路径的向量场 $u_t$。采样时把 ODE $\dot x = v_\theta(x,t)$ 从 $t{=}0$ 积到 $t{=}1$。</div>
+    <div><strong>公式</strong> · 条件 Flow Matching 目标 $$\mathcal{L}_{\mathrm{CFM}}(\theta) = \mathbb{E}_{t,\,x_1,\,x\sim p_t(\cdot|x_1)}\bigl\|v_\theta(x,t) - u_t(x|x_1)\bigr\|^2$$</div>
+    <div><strong>易错</strong> · CFM ≠ "更简单的 score matching"。它直接学速度，不需要知道 marginal $u_t$，也不需要在每个噪声层级单独训一遍 score。</div>
+  </aside>
+
+  <section class="concept-intuition">
+    <p>很多人初看 Flow Matching 会以为它"只是 DDPM 换了个 loss"——既然结果差不多，何必再起一个名字？这是被论文里的等价定理误导了。<strong>Flow Matching 的真正立场是：不再把"加噪—去噪"当作建模出发点</strong>，而是先在先验 $p_0$（一般是 $\mathcal{N}(0, I)$）和数据 $p_1$ 之间钦定一条概率路径 $p_t$，然后训一个速度场把质点沿这条路径搬运。它解决的核心痛点是：score matching 必须"在每个噪声层级都学一遍" $\nabla \log p_t(x)$，路径的形状、$\beta$ 调度、参数化方式（$\epsilon$ 还是 $x_0$ 还是 $v$）全都耦合到模型上；Flow Matching 把这层耦合<em>切开</em>：你先挑路径，再回归速度，路径设计与模型训练彻底解耦。这就是 Lipman、Chen、Le 等人 2023 年那篇 ICLR 论文（"Flow Matching for Generative Modeling"）真正贡献的东西。</p>
+
+    <div class="callout-quote">"我们上一节课讲了扩散如何把噪声变成数据——通过逐步加噪、再逐步去噪。我们又学了 score-based models，它做的事情非常非常相似。如果你把时间步推到无穷，两者其实就是同一种连续时间随机过程，可以写成随机微分方程。"<br>—— CMU 10-799 S26 · L5 @00:02</div>
+
+    <p>Vizuara 课程的 Dr. Raj 在 Lecture 9 / 10 选了一个更朴素的物理图像：盒子里很多粒子 $P_1, P_2, \dots$ 在按各自轨迹运动；每个粒子有它自己的轨迹，但只要你能写出"每个位置在每个时刻的速度"——也就是<strong>速度场 $u_t(x)$</strong>——你就等价于知道了所有粒子的去向。Flow Matching 把数据生成翻译成这件物理事：噪声样本是粒子初始位置，目标是设计一个让所有粒子"恰好流到数据分布"的速度场。这套粒子语言是 Vizuara 选择把 Flow Matching 拆成四节课讲的原因——它要从连续介质力学的最朴素直觉一步步爬上来，最后落到和 CMU 同一套公式。这两条路径——CMU 的"SDE → ODE → 速度场"和 Vizuara 的"粒子 → 轨迹 → 速度场"——殊途同归，是不同教学风格在同一概念上的两种入口。</p>
+
+    <div class="callout-quote">"关于流模型理论有一件有意思的事：同一个主题可以用两种方式讲。你可以用一节课讲完，也可以用四节课讲。看似矛盾，但走难走的四节课路线，你最后到达的地方非常简单——简单到你会问，为什么一开始不直接告诉我这个公式？"<br>—— Vizuara · L9（Introduction to Flow Models）@00:04</div>
+
+    <p>CMU 的 Tianqi 在 Lecture 13 把同一件事推到离散域时说得更直白——他指着白板上的转移率矩阵 $Q_t$ 说：</p>
+
+    <div class="callout-quote">"这个 $Q_t$ 就是流——本质上就是速度。它告诉你：从这个状态跳到那个状态的可能性有多大。所有流加起来必须为零——这就是质量守恒。"<br>—— CMU 10-799 S26 · L13 @07:03</div>
+
+    <p>在训练里，这件事对应一个朴素的 L2 回归损失：采样 $(t, x_1, x)$、查表得到条件向量场 $u_t(x|x_1)$ 的闭式值、用 L2 拟合 $v_\theta$。代码改动量小到一行——把 DDPM 训练循环里"预测噪声 $\epsilon$" 换成"预测速度 $x_1 - x_0$" 就完事。Stable Diffusion 3、Rectified Flow、Meta Movie Gen、Black Forest Labs 的 Flux 系列，全部在用这条骨架。在机器学习的上下文里，这件事对应的训练目标可以这样总结：<em>不再学"哪里该减噪"，而是学"质点此刻应该往哪走、走多快"</em>，把生成问题从概率密度估计退化成最优传输式的回归问题。</p>
+
+    <p>为什么这层语言切换重要？因为它把"diffusion 必须从 Gaussian 噪声出发"这条隐含假设给打破了。score matching 需要 $\sigma \to 0$ 的极限来定义噪声层级，必然以 Gaussian 为起点；速度场则不挑先验——只要你能在 $p_0$ 和 $p_1$ 之间画一条概率路径，就有对应的速度场可学。这就是为什么 image-to-image translation、protein backbone 生成、3D shape generation 等任务在 2024 年后大量切到 Flow Matching：它们的"先验"本来就不是 Gaussian 噪声，是另一份数据。</p>
+  </section>
+
+  <section class="concept-deepdive">
+    <h2>第一步：概率路径与连续性方程</h2>
+    <p>钦定一条<strong>概率路径</strong> $\{p_t\}_{t \in [0,1]}$，满足 $p_0 = \mathcal{N}(0, I)$（或任何易采样先验）、$p_1 \approx p_{\text{data}}$。再找一个时变向量场 $u_t(x)$，使 $p_t$ 是 ODE $\dot x = u_t(x)$ 的边际分布。这两件事由<strong>连续性方程</strong>串起来：</p>
+    <p>$$\frac{\partial p_t(x)}{\partial t} + \nabla \cdot \bigl(p_t(x)\, u_t(x)\bigr) = 0.$$</p>
+    <div class="fm-why"><strong>Why</strong>：连续性方程就是物理里的"质量守恒"——单位时间内流出某区域的概率等于该区域内概率的下降速率。CMU 在 L13 用一整张幻灯片强调流模型必须满足两件事——概率加总恒等于 1、变化必须连续；连续性方程正是这两件事的微分形式。如果你训出来的 $v_\theta$ 近似满足它，把先验质点沿 ODE 推到 $t=1$，得到的样本边际就是 $p_{\text{data}}$。这里有个微妙之处值得点出：连续性方程并不唯一确定 $u_t$——同一个概率路径 $p_t$ 可以由无数个速度场驱动（差一个"无散度"的旋转项），Flow Matching 隐含地通过 L2 回归挑出其中"L2 模长最小"的那一个，对应物理上的最小动能传输。</div>
+
+    <h2>第二步：直接学 marginal $u_t$ 行不行？</h2>
+    <p>最朴素的想法是写一个 marginal loss：$\mathbb{E}_{t, x \sim p_t}\|v_\theta(x,t) - u_t(x)\|^2$。问题在于 $u_t(x)$ 是 marginal——它涉及对整个数据分布积分</p>
+    <p>$$u_t(x) = \mathbb{E}_{x_1 \sim p(x_1 | x_t = x)}\bigl[u_t(x|x_1)\bigr],$$</p>
+    <p>这个期望写不出闭式、也没法用 Monte Carlo 估计（你不知道后验 $p(x_1|x_t=x)$）。这正是 score matching 当年踩到的同一个坑：marginal score $\nabla \log p_t(x)$ 也不可知，必须靠 denoising score matching 的"加噪—预测原 $x$"trick 绕开。Flow Matching 也需要一个类似的绕开技巧——这就是<strong>条件化</strong>。</p>
+
+    <h2>第三步：条件 Flow Matching（CFM）</h2>
+    <p>Lipman et al. 2023 的关键想法：不直接学 marginal，而学<em>每一对端点 $(x_0, x_1)$ 的条件路径</em>。固定一个数据点 $x_1$，沿"从噪声到 $x_1$ 的直线插值"定义条件概率路径 $p_t(x|x_1)$，对应的条件向量场 $u_t(x|x_1)$ 是这条直线的<strong>导数</strong>——闭式、好算。最常用的<em>独立耦合 + 线性插值</em>路径写作</p>
+    <p>$$x_t = (1-t)\, x_0 + t\, x_1, \qquad x_0 \sim \mathcal{N}(0, I),\; x_1 \sim p_{\text{data}}.$$</p>
+    <p>对 $t$ 求导得到条件速度 $u_t(x_t|x_1) = \frac{d x_t}{dt} = x_1 - x_0$——和 $t$ 无关、和 $x_t$ 无关，仅是端点之差。代入 CFM 损失：</p>
+    <p>$$\mathcal{L}_{\mathrm{CFM}}(\theta) = \mathbb{E}_{t \sim \mathcal{U}[0,1],\, x_0 \sim p_0,\, x_1 \sim p_1}\bigl\|v_\theta\!\bigl((1-t)x_0 + tx_1,\,t\bigr) - (x_1 - x_0)\bigr\|^2.$$</p>
+    <div class="fm-why"><strong>Why</strong>：每次梯度更新只需要采一对 $(x_0, x_1)$、一个 $t$，做一次 forward——和 DDPM 同样的复杂度，但 target 是端点差而不是噪声。代码改动只有 loss 一行。这是 Flow Matching"简单到不可思议"的根源——CMU L5 的 Tianqi 在白板上一句话就写完了整个训练循环。值得注意的是 $u_t(x_t|x_1) = x_1 - x_0$ 这个表达式里<em>没有出现 $x_t$</em>——这意味着同一对 $(x_0, x_1)$ 在任何 $t$ 的速度都相同。你在训练时给 $v_\theta$ 喂的输入是 $x_t$ 和 $t$，但回归 target 与 $t$ 无关；正是这种"target 与 $t$ 解耦"的简洁结构，让 Flow Matching 的优化曲面比 DDPM（噪声 target 随 $\sigma_t$ 缩放）更平坦、训练更稳。</div>
+
+    <h2>第四步：核心定理——CFM ≡ FM（梯度相同）</h2>
+    <p>看似 CFM 学的是<em>条件</em>速度 $u_t(x|x_1)$，跟 marginal $u_t(x)$ 不是一回事。Lipman 等人证明：</p>
+    <p>$$\nabla_\theta \mathcal{L}_{\mathrm{CFM}}(\theta) = \nabla_\theta \mathcal{L}_{\mathrm{FM}}(\theta),$$</p>
+    <p>两者梯度完全相同，差一个与 $\theta$ 无关的常数。直觉是：marginal 向量场恰好是条件向量场对后验 $p(x_1|x_t = x)$ 的<strong>条件期望</strong>，而 L2 回归 $v_\theta \to u_t(\cdot|x_1)$ 在最优解处自然收敛到这个条件期望。这和 denoising score matching 通过 Tweedie 公式吃掉 marginal score 是同一个数学魔法的两面。</p>
+    <div class="fm-why"><strong>Why</strong>：你训练的明明是"每对 $(x_0, x_1)$ 的直线速度"，最后却得到了 marginal 速度场。这件事的代价是：网络输出在数据空间的每个交叉点上做"平均化"，得到的 marginal 轨迹不再是直线，而是被"平均"过的弯曲路径。这就是为什么 CFM 训完直接采样仍需要 5～10 步——marginal 轨迹弯了，大步长 Euler 误差就出来了。Rectified Flow 解决的恰好是这个问题：用模型 sample 出来的成对 $(x_0, x_1^{\text{pred}})$ 作为新的训练对再训一次，新模型对应的 marginal 轨迹被拉得更直，2-step 甚至 1-step 推理变得可行。所以"条件期望吃掉 marginal 不可知"这件事不是免费午餐——它把不可知问题转化成了"轨迹弯曲"问题，留给 reflow 收尾。</div>
+
+    <svg class="fm-svg" viewBox="0 0 600 280" role="img" aria-label="概率路径与速度场：左侧噪声样本通过插值流向右侧数据，速度箭头沿路径分布">
+      <defs>
+        <marker id="fm-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+          <path d="M0,0 L10,5 L0,10 z" fill="var(--module-accent)"/>
+        </marker>
+        <path id="fm-track1" d="M 70 80 Q 300 60 530 70" fill="none"/>
+        <path id="fm-track2" d="M 70 130 Q 300 130 530 130" fill="none"/>
+        <path id="fm-track3" d="M 70 180 Q 300 200 530 190" fill="none"/>
+      </defs>
+      <g font-family="ui-sans-serif" font-size="11" fill="var(--text)">
+        <text x="70" y="35" text-anchor="middle" fill="var(--text-muted)">$t=0$ · 噪声 $p_0$</text>
+        <text x="300" y="35" text-anchor="middle" fill="var(--text-muted)">$p_t$ 概率路径</text>
+        <text x="530" y="35" text-anchor="middle" fill="var(--text-muted)">$t=1$ · 数据 $p_1$</text>
+
+        <circle cx="70" cy="80" r="4" fill="var(--text-muted)"/>
+        <circle cx="70" cy="130" r="4" fill="var(--text-muted)"/>
+        <circle cx="70" cy="180" r="4" fill="var(--text-muted)"/>
+
+        <circle cx="530" cy="70" r="6" fill="var(--module-accent)"/>
+        <circle cx="530" cy="130" r="6" fill="var(--module-accent)"/>
+        <circle cx="530" cy="190" r="6" fill="var(--module-accent)"/>
+
+        <use href="#fm-track1" stroke="var(--border)" fill="none" stroke-dasharray="3 3"/>
+        <use href="#fm-track2" stroke="var(--border)" fill="none" stroke-dasharray="3 3"/>
+        <use href="#fm-track3" stroke="var(--border)" fill="none" stroke-dasharray="3 3"/>
+
+        <circle r="5" fill="var(--module-accent)">
+          <animateMotion dur="4s" repeatCount="indefinite"><mpath href="#fm-track1"/></animateMotion>
+        </circle>
+        <circle r="5" fill="var(--module-accent)">
+          <animateMotion dur="4s" repeatCount="indefinite" begin="-0.8s"><mpath href="#fm-track2"/></animateMotion>
+        </circle>
+        <circle r="5" fill="var(--module-accent)">
+          <animateMotion dur="4s" repeatCount="indefinite" begin="-1.6s"><mpath href="#fm-track3"/></animateMotion>
+        </circle>
+        <circle r="5" fill="var(--module-accent)">
+          <animateMotion dur="4s" repeatCount="indefinite" begin="-2.4s"><mpath href="#fm-track1"/></animateMotion>
+        </circle>
+        <circle r="5" fill="var(--module-accent)">
+          <animateMotion dur="4s" repeatCount="indefinite" begin="-3.2s"><mpath href="#fm-track3"/></animateMotion>
+        </circle>
+
+        <g stroke="var(--module-accent)" stroke-width="1.5" marker-end="url(#fm-arrow)" fill="none" opacity="0.55">
+          <path d="M 180 100 L 215 95"/>
+          <path d="M 180 145 L 215 142"/>
+          <path d="M 180 195 L 215 195"/>
+          <path d="M 320 90 L 355 85"/>
+          <path d="M 320 138 L 355 138"/>
+          <path d="M 320 200 L 355 198"/>
+          <path d="M 440 80 L 475 75"/>
+          <path d="M 440 132 L 475 131"/>
+          <path d="M 440 195 L 475 192"/>
+        </g>
+
+        <text x="300" y="240" text-anchor="middle" font-size="10" fill="var(--text-muted)">速度场 $v_\theta(x,t)$（箭头方向 = 局部速度）</text>
+        <text x="300" y="260" text-anchor="middle" font-size="10" fill="var(--text-muted)">5 个粒子沿三条概率路径流动，端点不变，仅中间位置随 $t$ 变化</text>
+      </g>
+    </svg>
+
+    <h2>第五步：训练与采样</h2>
+    <p><strong>训练（一行伪代码可写完）</strong>：每个 minibatch 采 $(t \sim \mathcal{U}[0,1],\, x_0 \sim \mathcal{N}(0,I),\, x_1 \sim \mathcal{D})$，把插值点 $x_t = (1-t)x_0 + tx_1$ 和 $t$ 送进 $v_\theta$，L2 回归 target $x_1 - x_0$。反向传播、更新。完成。<em>没有 KL，没有 ELBO，没有噪声预测</em>——只有一个最小二乘回归。</p>
+    <p><strong>采样</strong>：固定 $x_0 \sim \mathcal{N}(0, I)$，按 ODE $\dot x = v_\theta(x, t)$ 从 $t=0$ 积到 $t=1$。Euler 步长 $\Delta t = 0.1$ 通常已经够好——<strong>5～10 步 Euler 就能出可看的样本</strong>，是 DDPM 1000 步、DDIM 50 步之后的又一次提速。如果用 Heun、RK4 等高阶 ODE 积分器，4 步就够。注意采样过程是完全确定性的——只有初始 $x_0$ 带随机性，ODE 积分本身没有噪声项；这和 DDPM 反向 SDE 每步都加噪声形成对比，也是 Flow Matching 推理可复现性优于 DDPM 的根因。</p>
+    <div class="fm-why"><strong>Why</strong>：线性插值路径下，每个粒子的"真值轨迹"是直线，速度恒定。训出来的 $v_\theta$ 是 marginal 速度场——它在轨迹交叉点会被平均化、有点弯曲，但整体仍接近分段直线。直线 ODE 用大步长 Euler 误差很小，这就是 5 步采样可行的几何原因。Rectified Flow（Liu et al. 2023）顺着这条直觉做"reflow"——用模型生成的 $(x_0, x_1)$ 对作为新的训练数据再训一遍，把轨迹进一步拉直，把推理步数推到 1～4。值得一提的工程细节：训练时 $t$ 的采样分布不一定取均匀分布——SD3 用 logit-normal 把更多权重放在 $t \approx 0.5$，因为中间段的速度场更难拟合（端点附近被 $x_0, x_1$ 牢牢锚定，中段不确定性最大）；这种"采样重加权"是 Flow Matching 时代的小型调参艺术。</div>
+
+    <h2>第六步：和 score matching 的等价</h2>
+    <p>当概率路径选成<strong>高斯扩散路径</strong> $p_t(x|x_1) = \mathcal{N}(\alpha_t x_1, \sigma_t^2 I)$（DDPM 前向过程的反向取向），CFM 的条件速度场可以写成</p>
+    <p>$$u_t(x|x_1) = \frac{\dot \alpha_t}{\alpha_t} x - \Bigl(\dot \sigma_t - \frac{\dot \alpha_t}{\alpha_t}\sigma_t\Bigr) \frac{x - \alpha_t x_1}{\sigma_t},$$</p>
+    <p>这是 score $\nabla \log p_t(x|x_1) = -(x - \alpha_t x_1)/\sigma_t^2$ 的仿射函数。换句话说：DDPM 的 $\epsilon$-prediction、score matching 的 score-prediction、Flow Matching 的 velocity-prediction，<em>在高斯扩散路径下的最优解处互相等价</em>，只是参数化和路径设计自由度不同。这就是 Tianqi 在 L5 开篇说"两者其实就是同一种连续时间随机过程"的精确含义。线性插值路径并不在 DDPM 的"variance-preserving"或"variance-exploding"两个标准家族里——它对应 $\alpha_t = t,\, \sigma_t = 1-t$ 这种"variance-blowing-up-then-zero"的非标准 schedule，传统 score matching 不会自然选到，但 Flow Matching 视角下它反而最自然，因为速度场是常数。这种"路径选择的自由度"是 score matching 框架下被遮蔽、Flow Matching 框架下被暴露的设计空间。</p>
+
+    <div class="my-addition">🟡 教材外补充：</div>
+    <p>实践层面，SD3、Movie Gen、Flux 之所以全部转向 Flow Matching + 线性路径，不是因为它"理论更优"——理论上 DDPM、EDM、Flow Matching 在无限步极限下是同一个对象。真正的工程理由有三个：(1) <strong>路径与模型解耦</strong>：团队可以独立调路径形状（线性、cosine、optimal-transport-aware），不必牵扯模型架构；(2) <strong>大步长 Euler 几乎无损</strong>：线性路径下推理 5 步即可，把 H100 上的视频生成成本压到原来的 1/10；(3) <strong>训练数值更稳</strong>：DDPM 在 $t \to 0$ 处 score $\propto 1/\sigma$ 爆炸，必须 clip；Flow Matching 速度 $x_1 - x_0$ 是有界的，不需要 clip。这些是 2023 年之后的工程沉淀，Lipman 原论文里并未强调。</p>
+    <p><strong>另一条 my-addition</strong>：Flow Matching 不局限于 Gaussian 先验。Pooladian et al. 2023 的 "Multisample Flow Matching"、Tong et al. 2023 的 "OT-CFM" 都把 $p_0$ 换成任意可采分布（包括另一份图像数据集），训练出来的模型直接做 image-to-image translation。这点把 Flow Matching 推到了比 score matching 更通用的位置——score 的 $\sigma \to 0$ 极限只能从 $\mathcal{N}$ 出发，速度没有这个限制。在蛋白质结构生成、3D 点云、分子构象、视频帧预测这些"先验分布天然非 Gaussian"的任务上，Flow Matching 几乎是默认选择。</p>
+
+    <p><strong>再一条 my-addition</strong>：CMU L13 关心的"离散 Flow Matching"是把速度场换成<strong>连续时间 Markov 链的转移率矩阵 $Q_t$</strong>。每个状态向其他状态跳的速率构成一个矩阵，对角元为负、非对角元为正、行和为零（"all the flows will add up to zero"）。它和连续 Flow Matching 共享同一套语言：先选概率路径（mask diffusion 选"逐渐把 token 换成 [MASK]"），再回归条件转移率。这套统一视角让 SEDD（Score Entropy Discrete Diffusion）、Discrete Flow Matching、Edit Flow 都能写在同一个白板上——这是 Tianqi 在 L13 用整堂课打通的事情。</p>
+  </section>
+
+  <section class="concept-interact">
+    <p>拖动滑块改变时间 $t$。<strong>不变量</strong>：每条轨迹的<em>起点（左）和终点（右）不动</em>，只有蓝色粒子的位置沿直线按 $t$ 滑动，速度箭头方向恒定——这正是线性插值路径下"条件速度场 $u_t = x_1 - x_0$ 与 $t$ 无关"的几何含义。</p>
+    <label for="fm-slider">时间 $t$：</label>
+    <input type="range" id="fm-slider" min="0" max="100" step="1" value="30" style="width:60%;">
+    <span id="fm-readout" class="fm-readout">t = 0.30</span>
+    <svg viewBox="0 0 600 220" role="img" aria-label="概率路径插值动画" style="display:block;margin:0.8rem auto;">
+      <defs>
+        <marker id="fm-arrow2" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+          <path d="M0,0 L10,5 L0,10 z" fill="var(--module-accent)"/>
+        </marker>
+      </defs>
+      <g font-family="ui-sans-serif" font-size="11" fill="var(--text)">
+        <text x="60" y="25" text-anchor="middle" fill="var(--text-muted)">x₀（噪声，t=0）</text>
+        <text x="540" y="25" text-anchor="middle" fill="var(--text-muted)">x₁（数据，t=1）</text>
+
+        <line x1="60" y1="60" x2="540" y2="50" stroke="var(--border)" stroke-dasharray="3 3"/>
+        <line x1="60" y1="110" x2="540" y2="115" stroke="var(--border)" stroke-dasharray="3 3"/>
+        <line x1="60" y1="160" x2="540" y2="180" stroke="var(--border)" stroke-dasharray="3 3"/>
+
+        <circle cx="60" cy="60" r="5" fill="var(--text-muted)"/>
+        <circle cx="60" cy="110" r="5" fill="var(--text-muted)"/>
+        <circle cx="60" cy="160" r="5" fill="var(--text-muted)"/>
+        <circle cx="540" cy="50" r="6" fill="var(--module-accent)"/>
+        <circle cx="540" cy="115" r="6" fill="var(--module-accent)"/>
+        <circle cx="540" cy="180" r="6" fill="var(--module-accent)"/>
+
+        <circle id="fm-pt1" class="fm-interp" cx="204" cy="57" r="5" fill="var(--blue)"/>
+        <circle id="fm-pt2" class="fm-interp" cx="204" cy="111.5" r="5" fill="var(--blue)"/>
+        <circle id="fm-pt3" class="fm-interp" cx="204" cy="166" r="5" fill="var(--blue)"/>
+
+        <line id="fm-v1" x1="204" y1="57" x2="264" y2="55.75" stroke="var(--module-accent)" stroke-width="2" marker-end="url(#fm-arrow2)"/>
+        <line id="fm-v2" x1="204" y1="111.5" x2="264" y2="112.125" stroke="var(--module-accent)" stroke-width="2" marker-end="url(#fm-arrow2)"/>
+        <line id="fm-v3" x1="204" y1="166" x2="264" y2="168.5" stroke="var(--module-accent)" stroke-width="2" marker-end="url(#fm-arrow2)"/>
+
+        <text x="300" y="210" text-anchor="middle" font-size="10" fill="var(--text-muted)">xₜ = (1−t)x₀ + t·x₁；速度 uₜ = x₁ − x₀（方向恒定）</text>
+      </g>
+    </svg>
+    <script>
+      (function () {
+        var s = document.getElementById('fm-slider');
+        var r = document.getElementById('fm-readout');
+        var pts = [
+          {id:'fm-pt1', x0:60, y0:60, x1:540, y1:50},
+          {id:'fm-pt2', x0:60, y0:110, x1:540, y1:115},
+          {id:'fm-pt3', x0:60, y0:160, x1:540, y1:180}
+        ];
+        var vs = [
+          {id:'fm-v1', x0:60, y0:60, x1:540, y1:50},
+          {id:'fm-v2', x0:60, y0:110, x1:540, y1:115},
+          {id:'fm-v3', x0:60, y0:160, x1:540, y1:180}
+        ];
+        function render() {
+          var t = (+s.value) / 100;
+          r.textContent = 't = ' + t.toFixed(2);
+          pts.forEach(function(p){
+            var el = document.getElementById(p.id);
+            el.setAttribute('cx', p.x0 + t*(p.x1 - p.x0));
+            el.setAttribute('cy', p.y0 + t*(p.y1 - p.y0));
+          });
+          vs.forEach(function(v){
+            var el = document.getElementById(v.id);
+            var cx = v.x0 + t*(v.x1 - v.x0);
+            var cy = v.y0 + t*(v.y1 - v.y0);
+            var dx = (v.x1 - v.x0) * 0.12;
+            var dy = (v.y1 - v.y0) * 0.12;
+            el.setAttribute('x1', cx);
+            el.setAttribute('y1', cy);
+            el.setAttribute('x2', cx + dx);
+            el.setAttribute('y2', cy + dy);
+          });
+        }
+        s.addEventListener('input', render);
+        render();
+      })();
+    </script>
+  </section>
+
+  <section class="concept-example">
+    <h2>手算一步 Flow Matching</h2>
+    <p>设数据点 $x_1 = 4$、噪声 $x_0 = -1$、采样时间 $t = 0.3$。插值点 $x_t = (1-0.3)\cdot(-1) + 0.3 \cdot 4 = -0.7 + 1.2 = 0.5$。条件速度 $u_t(x_t|x_1) = x_1 - x_0 = 4 - (-1) = 5$。若网络当前预测 $v_\theta(0.5, 0.3) = 3.5$，则单点 CFM 损失：</p>
+    <p>$$\ell = \bigl(v_\theta - u_t\bigr)^2 = (3.5 - 5)^2 = (-1.5)^2 = 2.25.$$</p>
+    <p>训练梯度推 $v_\theta(0.5, 0.3)$ 朝 $5$ 走。<strong>采样反过来</strong>：从 $x_0 = -1$ 开始，Euler 步长 $\Delta t = 0.2$ 共 5 步，假设理想情况下每步 $v_\theta \approx 5$，则 $x_{0.2} = -1 + 0.2 \cdot 5 = 0$、$x_{0.4} = 0 + 0.2 \cdot 5 = 1$、$x_{0.6} = 2$、$x_{0.8} = 3$、$x_{1.0} = 4$——正好命中目标 $x_1 = 4$。这就是"5 步 Euler 出图"的最小工作例子。</p>
+  </section>
+
+  <section class="concept-pitfalls">
+    <h2>常见误区</h2>
+    <ol>
+      <li><strong>"Flow Matching 是更简单的 score matching"。</strong>反例：CFM 学的是 $u_t = x_1 - x_0$，单位是<em>速度</em>（量纲 $[x]/[t]$）；score 学的是 $\nabla \log p_t$，单位是<em>对数密度梯度</em>（量纲 $1/[x]$）。两者只有在高斯扩散路径下才能仿射互换；路径换成 optimal transport coupling 或非高斯先验，关系就不成立。把 Flow Matching 仅仅当作 score matching 的代数变形，就错过了"路径可设计"这个核心自由度。</li>
+      <li><strong>"训练目标里出现的 $u_t(x|x_1)$ 是 marginal 速度"。</strong>反例：固定 $x_1 = 4$、$x_0 = -1$，条件速度恒为 $5$；但同一个插值点 $x_t = 0.5$ 在 marginal 视角下既可能来自 $(x_0, x_1) = (-1, 4)$，也可能来自 $(x_0, x_1) = (0.36, 0.6)$，对应的条件速度分别是 $5$ 和 $0.24$。marginal $u_t(0.5)$ 是对所有这些条件速度按后验 $p(x_1|x_t=0.5)$ 加权平均，<em>不是</em>任何单条直线的速度。CFM 之所以工作，正是因为 L2 回归在最优解处恰好逼出这个条件期望——这一点和 denoising score matching 用同一种数学技巧，但 Flow Matching 框架下表达更直白。</li>
+      <li><strong>"线性路径就是 Flow Matching 的定义、换路径就不是 Flow Matching 了"。</strong>反例：线性插值只是<em>最常用</em>的路径，并非定义本身。Flow Matching 的定义是"在任意概率路径 $p_t$ 上回归对应的条件向量场"——线性路径下 Euler 5 步、CIFAR-10 FID ≈ 6；换成 $x_t = \alpha_t x_1 + \sigma_t x_0$ 配合 cosine schedule 得到的是和 DDPM 等价的 variance-preserving 路径；换成 spherical 插值得到的是 OT-CFM 的球面路径。线性路径只是因为速度恒定、最容易推导，才被原论文选作入门版本；把"步数多 = 质量好"也是从 DDPM 1000 步训练目标遗留下来的偏见，Flow Matching 的速度场近似分段直线，结构性允许大步长，Rectified Flow 一次 reflow 后 1 步采样 FID 仍能 < 10。</li>
+    </ol>
+  </section>
+
+  <section class="concept-seealso">
+    <h2>相关概念</h2>
+    <ul>
+      <li><a href="/video-to-notebook/concepts/velocity-field/">Velocity Field</a></li>
+      <li><a href="/video-to-notebook/concepts/continuous-normalizing-flow/">Continuous Normalizing Flow</a></li>
+      <li><a href="/video-to-notebook/concepts/rectified-flow/">Rectified Flow</a></li>
+      <li><a href="/video-to-notebook/concepts/discrete-diffusion/">Discrete Diffusion</a></li>
+    </ul>
+  </section>
+
+  <section class="concept-sources">
+    <h2>来源</h2>
+    <ol>
+      <li><a href="https://www.youtube.com/watch?v=_OOITDB2VCY&t=2s" target="_blank" rel="noopener">cmu-10799-diffusion-flow · L5 · Flow Matching 引入：从 SDE 到 ODE · (0:02)</a></li>
+      <li><a href="https://www.youtube.com/watch?v=bK-LfpKLv0g&t=3s" target="_blank" rel="noopener">cmu-10799-diffusion-flow · L13 · Discrete Flow Matching 与 Edit Flow 开场 · (0:03)</a></li>
+      <li><a href="https://www.youtube.com/watch?v=bK-LfpKLv0g&t=166s" target="_blank" rel="noopener">cmu-10799-diffusion-flow · L13 · 概率路径与 velocity 在离散域的类比 · (2:46)</a></li>
+      <li><a href="https://www.youtube.com/watch?v=bK-LfpKLv0g&t=369s" target="_blank" rel="noopener">cmu-10799-diffusion-flow · L13 · "Q_t 就是流，本质上就是速度" · (6:09)</a></li>
+      <li><a href="https://www.youtube.com/watch?v=qwXaD03IHqw&t=3s" target="_blank" rel="noopener">diffusion-principles-vizuara · L9 · 介绍 Flow Models：粒子轨迹直觉 · (0:03)</a></li>
+      <li><a href="https://www.youtube.com/watch?v=JyblttMM9-c&t=4s" target="_blank" rel="noopener">diffusion-principles-vizuara · L10 · Flow Models 训练目标构造 · (0:04)</a></li>
+    </ol>
+  </section>
+</article>

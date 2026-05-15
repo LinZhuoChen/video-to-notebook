@@ -1,0 +1,203 @@
+<style>
+/* prefix: sf- */
+.sf-quickref{background:var(--surface-soft);border-left:3px solid var(--module-accent);padding:0.8rem 1rem;border-radius:0 4px 4px 0;margin:1rem 0;font-size:0.92rem;}
+.sf-quickref div{margin:0.3rem 0;}
+.sf-svg{display:block;margin:1.2rem auto;max-width:100%;height:auto;}
+.sf-pitfalls ol{padding-left:1.4rem;} .sf-pitfalls li{margin:0.5rem 0;}
+.sf-source{font-style:italic;color:var(--text-muted);border-left:2px solid var(--border);padding:0.2rem 0.8rem;margin:0.5rem 0;font-size:0.9rem;}
+.sf-why{background:var(--module-accent-soft);border-left:3px solid var(--module-accent);padding:0.4rem 0.8rem;margin:0.6rem 0;border-radius:0 4px 4px 0;font-size:0.92rem;}
+.sf-why strong{color:var(--module-accent);}
+.my-addition{background:var(--surface-soft);border-left:3px solid var(--blue);padding:0.4rem 0.8rem;margin:0.6rem 0;border-radius:0 4px 4px 0;font-size:0.9rem;color:var(--text-muted);}
+@keyframes sf-flow{0%{stroke-dashoffset:0;}100%{stroke-dashoffset:-30;}}
+.sf-arrow-anim{stroke-dasharray:4,3;animation:sf-flow 1.8s linear infinite;}
+@keyframes sf-pulse{0%,100%{opacity:0.45;}50%{opacity:1;}}
+.sf-mode{animation:sf-pulse 2.4s ease-in-out infinite;}
+</style>
+
+<article class="concept-entry">
+  <header class="concept-header">
+    <span class="concept-eyebrow">概念</span>
+    <h1>Score Function</h1>
+    <p class="concept-tagline">— $\nabla_x \log p(x)$，<em>对输入求导</em>而非对参数。绕开归一化常数的指南针。</p>
+  </header>
+
+  <aside class="sf-quickref">
+    <div><strong>定义</strong> · $s(x) = \nabla_x \log p(x)$——对数密度<em>关于输入 $x$</em> 的梯度，是一个与 $x$ 同维度的向量场。</div>
+    <div><strong>公式</strong> · 对 $p(x) = \tilde p(x)/Z$（未归一化）：$\nabla_x \log p(x) = \nabla_x \log \tilde p(x)$——配分函数 $Z$ 自动消失。</div>
+    <div><strong>易错</strong> · 不是「网络的得分」也不是「损失梯度」；是<em>密度</em>本身的梯度。维度 = 数据维度，不是 1。</div>
+  </aside>
+
+  <section class="concept-intuition">
+    <p>第一道拦路虎是名字。很多人第一次见 "score function" 会把它脑补成「模型给样本打的分数」——像 GAN discriminator 输出的 logit、或者分类器的 softmax 概率。或者更糟——把它和反向传播里「梯度对参数」混为一谈，以为「score」就是某种 loss 的梯度。<strong>都不对。</strong>这里的 "score" 是统计学里 Fisher 的历史术语（1922 年），指的是<em>对数密度关于输入变量的梯度</em>：</p>
+    <p>$$s(x) \;=\; \nabla_x \log p(x), \qquad s : \mathbb{R}^d \to \mathbb{R}^d.$$</p>
+    <p>注意下标：$\nabla_x$，对<strong>输入 $x$</strong> 求导，<strong>不是</strong>对网络参数 $\theta$ 求导。它和 loss、和反向传播、和「打分」没有任何关系。它是一个<em>纯几何对象</em>——给你一个密度 $p(x)$，它就是标量场 $\log p$ 的梯度向量场，<em>与是否存在神经网络无关</em>。即便没人训练任何东西，一维高斯 $\mathcal{N}(0, 1)$ 在 $x = 2$ 处的 score 也是确定的（等于 $-2$），由公式给出。神经网络的工作只是在我们不知道真实 $p$ 时，去<em>逼近</em>这个本已存在的向量场。</p>
+    <div class="sf-source">Vizuara 的 Dr. Raj 在 Lecture 7 用一个特别朴实的比喻把它讲清楚——「想象一张桌子上散着一堆磁铁，你只能看到其中几颗，另外许多颗藏在桌面下方看不见。问：站在桌子任意一点，最近的那颗磁铁正在把你往哪里拽？这个方向，就是 score。问题难，是因为你不知道隐藏磁铁的位置，但如果知道了，你就能算出任何一点上的合力。」—— Vizuara L7 @00:04</div>
+    <p>磁铁就是数据点，「被拽的方向」就是 $\nabla_x \log p_{\text{data}}(x)$。它告诉你：要让样本更像数据分布，应该往哪里挪。这个比喻还说明了一件容易忽略的事——score 是个<em>向量场</em>，每一点上都有一个箭头，不是单一标量。在训练里，这件事对应——网络 $s_\theta(x, t)$ 学的不是「这是几号样本」也不是「噪声多大」，而是<em>「在这个位置、这个噪声水平下，往哪挪一小步会让对数密度更高」</em>。后面我们会看到，这恰好是 Anderson 1982 反向 SDE 唯一需要的量；diffusion 的整个数学骨架就是建立在 score 这一个对象之上的。</p>
+    <div class="sf-source">CMU 10-799 的讲师在 Lecture 4 用另一个角度切入：「我们之前讲的是 diffusion 把噪声变成数据。今天换个视角——任何把数据建模成 score field 的方法，都和 diffusion 等价。score function is the central object.」—— CMU 10-799 L4 @00:04</div>
+    <p>两位讲师的入口不同但结论相同：<em>Vizuara 从「绕开能量模型的归一化常数」推过来</em>，<em>CMU 从「diffusion 反向过程就是在跟一个 score 场走」切入</em>。两条线在「$\nabla \log p$ 是统一对象」这一点合流。本词条会把两条线都讲完，并显式标出哪段属于哪门课。读完之后，你应该能在三个层面同时持有这个概念：<em>统计学的</em>（Fisher score）、<em>物理的</em>（势能场的负梯度）、<em>几何的</em>（指向数据流形的箭头场）。这三个视角在 diffusion 训练 / 采样的每一步里都同时在起作用。</p>
+  </section>
+
+  <section class="concept-deepdive">
+    <h2>关键性质：归一化常数消失</h2>
+    <p>这是 score 在生成模型里地位的根源。考虑一个未归一化的密度 $\tilde p(x)$——也就是任何「形状对、但积分不等于 1」的函数。要把它变成合法概率密度，要除以配分函数 $Z = \int \tilde p(x)\,dx$：</p>
+    <p>$$p(x) \;=\; \frac{\tilde p(x)}{Z}.$$</p>
+    <p>对高维数据（比如 $256 \times 256 \times 3$ 的图像，$d \approx 2\times 10^5$），$Z$ 是一个 $d$ 维积分——<strong>没法算</strong>，没法采样估计，没法反向传梯度。这是能量模型（EBM）半个世纪卡在「只能做小图」的根本原因。</p>
+    <p>但是看 score 怎么处理：</p>
+    <p>$$\nabla_x \log p(x) \;=\; \nabla_x \big[\log \tilde p(x) - \log Z\big] \;=\; \nabla_x \log \tilde p(x) - 0 \;=\; \nabla_x \log \tilde p(x).$$</p>
+    <p>$\log Z$ 是<em>不依赖 $x$</em> 的常数，对 $x$ 求导直接归零。<strong>归一化常数完全消失。</strong></p>
+    <div class="sf-why"><strong>Why：</strong>这一条性质是 score-based generative model 整套范式的起点。它把「学一个密度函数」（要 $Z$）转化成「学一个向量场」（不要 $Z$）。EBM 那堵墙被绕过去了。</div>
+
+    <h2>与能量模型的桥</h2>
+    <p>能量模型（Energy-Based Model, EBM）把密度写成 Boltzmann 形式：$p(x) = e^{-E(x)}/Z$，$E_\theta : \mathbb{R}^d \to \mathbb{R}$ 是网络输出的标量「能量」——能量越低、概率越高。Vizuara L5 整节课就在讲这个范式。取对数：</p>
+    <p>$$\log p(x) \;=\; -E(x) - \log Z.$$</p>
+    <p>再对 $x$ 求导：</p>
+    <p>$$\nabla_x \log p(x) \;=\; -\nabla_x E(x).$$</p>
+    <p>所以 score 就是<em>能量函数的负梯度</em>——在物理直觉上正是「力场」（势能场的梯度反向给出受力方向）。这把 score-based 模型和 1980s 的 Hopfield / Boltzmann machine 直接接上了：那些早期模型也是「定义能量、低能量 = 高概率」，但训练它们要算 $Z$（partition function），高维下完全做不了。Vizuara L5 把这段历史展开讲：「EBM 在小图、低维问题上可以用 contrastive divergence、persistent CD 等近似方法训练，但在自然图像上崩。原因就是 $Z$。」</p>
+    <p>score matching 的<em>原始动机</em>（Hyvärinen 2005）就是<strong>给 EBM 提供一个不依赖 $Z$ 的训练目标</strong>：训练时让 $-\nabla_x E_\theta(x)$ 匹配数据 $\nabla_x \log p_{\text{data}}(x)$，整个过程 $Z$ 从未出现。Yang Song 等人 2019 之后的工作（NCSN、Score-SDE）干脆把 $E_\theta$ 也省了，直接让网络输出 $s_\theta(x)$ 是个<em>向量</em>，不再要求它是某个标量势的梯度——更宽松、更好训。但代价是失去了「显式能量」可用于异常检测等场景；这是一个有意识的工程取舍。</p>
+    <div class="my-addition">🟡 教材外补充：如果坚持让 $s_\theta = -\nabla E_\theta$（即先输出标量再求梯度），等价于强制 score 场<em>无旋</em>（curl-free）；不强制时 $s_\theta$ 可能有非零旋度，这是和真实 score 的微小偏离。Salimans & Ho (2021) 讨论过；实践上 diffusion 不在意，因为反向 SDE 的不变量是边缘分布而非路径。</div>
+
+    <h2>几何直觉：流向数据流形</h2>
+    <p>把 $p_{\text{data}}$ 想成地形——数据多的地方是山顶，没数据的地方是低谷。score $\nabla_x \log p$ 是<em>每一点上指向最近山顶的箭头</em>。注意是<em>对数</em>密度的梯度而不是密度本身：取对数让远场的小密度差异被放大，使方向信息在概率近 0 处仍然清晰；这是技术上选 $\log p$ 而不是 $p$ 的一个隐藏好处。</p>
+    <ul>
+      <li>在数据流形<strong>上</strong>（高密度区）：箭头较短，指向密度局部更大的方向；mode 处恰好是零向量（local maximum）。</li>
+      <li>在数据流形<strong>附近</strong>但不在上面：箭头长，指向流形——Vizuara L7 称之为<em>「back to data」</em>。这正是去噪一步的方向。</li>
+      <li>远离数据流形（纯噪声区）：理论上 $p$ 趋近 0，$\nabla \log p$ 不稳定甚至发散；估出来的方向几乎是噪声。<strong>这是为什么必须用一族被噪声卷积过的 $p_t$、而不能只用 $p_{\text{data}}$——Song &amp; Ermon 2019 的核心发现。</strong></li>
+      <li>多 mode 之间的鞍点：score 散度为正、方向歧义。Langevin 在这种区域容易左右摇摆，单一噪声水平往往跨不过去。</li>
+    </ul>
+
+    <svg class="sf-svg" viewBox="0 0 600 360" role="img" aria-label="二维混合高斯的 score 向量场">
+      <g font-family="ui-sans-serif" font-size="11" fill="var(--text)">
+        <defs>
+          <marker id="sf-ah" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+            <path d="M0,0 L6,3 L0,6 Z" fill="var(--module-accent)"/>
+          </marker>
+          <marker id="sf-ah-r" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+            <path d="M0,0 L6,3 L0,6 Z" fill="var(--red)"/>
+          </marker>
+          <radialGradient id="sf-mode-a" cx="0.5" cy="0.5" r="0.5">
+            <stop offset="0%" stop-color="var(--module-accent)" stop-opacity="0.55"/>
+            <stop offset="100%" stop-color="var(--module-accent)" stop-opacity="0"/>
+          </radialGradient>
+          <radialGradient id="sf-mode-b" cx="0.5" cy="0.5" r="0.5">
+            <stop offset="0%" stop-color="var(--module-accent)" stop-opacity="0.55"/>
+            <stop offset="100%" stop-color="var(--module-accent)" stop-opacity="0"/>
+          </radialGradient>
+        </defs>
+
+        <rect x="40" y="20" width="520" height="300" rx="6" fill="var(--surface-soft)" stroke="var(--border)"/>
+
+        <!-- two Gaussian modes -->
+        <circle cx="200" cy="120" r="100" fill="url(#sf-mode-a)" class="sf-mode"/>
+        <circle cx="400" cy="220" r="100" fill="url(#sf-mode-b)" class="sf-mode"/>
+        <circle cx="200" cy="120" r="3" fill="var(--module-accent)"/>
+        <circle cx="400" cy="220" r="3" fill="var(--module-accent)"/>
+        <text x="200" y="108" text-anchor="middle" font-size="10" fill="var(--text-muted)">mode A</text>
+        <text x="400" y="208" text-anchor="middle" font-size="10" fill="var(--text-muted)">mode B</text>
+
+        <!-- vector field: arrows pointing toward nearest mode -->
+        <!-- near mode A -->
+        <line x1="130" y1="60" x2="170" y2="98" stroke="var(--module-accent)" stroke-width="1.6" marker-end="url(#sf-ah)"/>
+        <line x1="270" y1="70" x2="230" y2="100" stroke="var(--module-accent)" stroke-width="1.6" marker-end="url(#sf-ah)"/>
+        <line x1="110" y1="180" x2="160" y2="142" stroke="var(--module-accent)" stroke-width="1.6" marker-end="url(#sf-ah)"/>
+        <line x1="260" y1="180" x2="225" y2="145" stroke="var(--module-accent)" stroke-width="1.6" marker-end="url(#sf-ah)"/>
+        <!-- near mode B -->
+        <line x1="330" y1="160" x2="375" y2="198" stroke="var(--module-accent)" stroke-width="1.6" marker-end="url(#sf-ah)"/>
+        <line x1="470" y1="160" x2="425" y2="200" stroke="var(--module-accent)" stroke-width="1.6" marker-end="url(#sf-ah)"/>
+        <line x1="330" y1="280" x2="375" y2="245" stroke="var(--module-accent)" stroke-width="1.6" marker-end="url(#sf-ah)"/>
+        <line x1="480" y1="280" x2="430" y2="245" stroke="var(--module-accent)" stroke-width="1.6" marker-end="url(#sf-ah)"/>
+        <!-- far-field arrows: weaker, longer, pointing to the basin -->
+        <line x1="80" y1="40" x2="120" y2="80" stroke="var(--module-accent)" stroke-width="1.2" marker-end="url(#sf-ah)" opacity="0.7"/>
+        <line x1="520" y1="40" x2="475" y2="80" stroke="var(--module-accent)" stroke-width="1.2" marker-end="url(#sf-ah)" opacity="0.6"/>
+        <line x1="80" y1="290" x2="125" y2="250" stroke="var(--module-accent)" stroke-width="1.2" marker-end="url(#sf-ah)" opacity="0.6"/>
+        <line x1="540" y1="295" x2="490" y2="265" stroke="var(--module-accent)" stroke-width="1.2" marker-end="url(#sf-ah)" opacity="0.7"/>
+        <!-- between-modes saddle: divergence -->
+        <line x1="300" y1="170" x2="270" y2="140" stroke="var(--red)" stroke-width="1.4" marker-end="url(#sf-ah-r)" class="sf-arrow-anim"/>
+        <line x1="300" y1="170" x2="330" y2="200" stroke="var(--red)" stroke-width="1.4" marker-end="url(#sf-ah-r)" class="sf-arrow-anim"/>
+        <text x="300" y="160" text-anchor="middle" font-size="9" fill="var(--red)">鞍点：方向歧义</text>
+
+        <text x="300" y="340" text-anchor="middle" font-size="11" fill="var(--text-muted)">两团高斯混合上的 $\nabla_x \log p(x)$ 向量场——箭头指向最近的 mode</text>
+      </g>
+    </svg>
+
+    <h2>为什么用 score 而不是 $p$ 本身</h2>
+    <p>这是初学者最容易问的一个问题——「为什么要绕一圈学梯度，不直接学密度？」三条理由叠加：</p>
+    <ol>
+      <li><strong>避开 $Z$。</strong>$p$ 需要归一化；$\nabla \log p$ 不需要。这是结构上的胜利，也是 score-based 这条线能在高维图像上突破的<em>第一根支柱</em>。</li>
+      <li><strong>可以从样本估计。</strong>score matching（Hyvärinen 2005）+ denoising score matching（Vincent 2011）给出了不需要密度真值、只需要数据样本的训练目标——具体说，把「学 score」化成「学去噪」，可以用普通 MSE 训。具体见 <a href="/video-to-notebook/concepts/score-matching/">score-matching</a>。</li>
+      <li><strong>直接驱动采样。</strong>有了 $s(x) \approx \nabla \log p$，<a href="/video-to-notebook/concepts/langevin-dynamics/">Langevin dynamics</a> $x_{k+1} = x_k + \tau s(x_k) + \sqrt{2\tau}\,z_k$ 就能从任意起点收敛到 $p$。不需要拒绝采样、不需要 MCMC 平衡、不需要 ancestral sampling 的链式分解——直接 SDE 数值积分一条龙跑通。</li>
+    </ol>
+
+    <div class="sf-why"><strong>Why：</strong>所有「为什么 score-based 这条线在 2019–2020 突然能 work」都能追到这三件事的合力——score matching 学得到、Langevin 采样得动、噪声多尺度（NCSN）解决远场不准。三个都缺一不可。</div>
+
+    <h2>和扩散模型的接口（最重要的一段）</h2>
+    <p>这里是 score 真正进入 diffusion 的地方。前向 SDE 把数据 $p_{\text{data}}$ 慢慢扩散成噪声 $p_T \approx \mathcal{N}(0, I)$：</p>
+    <p>$$d x \;=\; f(x, t)\,dt + g(t)\,dw.$$</p>
+    <p>设 $t$ 时刻边缘分布 $p_t(x)$——也就是把所有 $x_0 \sim p_{\text{data}}$ 都做完 $t$ 步前向后的<em>整体</em>分布。Anderson (1982) 的反向时间公式给出：</p>
+    <p>$$d x \;=\; \big[f(x, t) - g(t)^2 \nabla_x \log p_t(x)\big]\,dt + g(t)\,d\bar w.$$</p>
+    <p>关键观察：唯一的「学习项」就是 $\nabla_x \log p_t(x)$——<strong>每一个噪声水平 $t$ 上、被噪声扰动过的<em>边缘</em>分布的 score</strong>。$f, g$ 是用户挑的（VP / VE / sub-VP 等不同 SDE 设计），$d\bar w$ 是反向 Brownian motion，这两者都不用学。<em>整个反向过程的全部「难处」浓缩在一个对象上：$s_\theta(x, t) \approx \nabla_x \log p_t(x)$</em>。</p>
+    <p>这就是为什么训练时网络的输入是 $(x, t)$ 两个量：你不是学一个 score，是学一<em>族</em> score——$t$ 从 0 到 $T$ 上每一个噪声水平各一个 score 场。一个 U-Net / DiT 用 time embedding 把 $t$ 输进去，权重共享地拟合整族。</p>
+    <p>$t$ 越大，$p_t$ 越平滑（被高斯卷积过），score 越好估也越能从远场指回数据流形；$t$ 越小，$p_t$ 越接近原数据，score 在数据点之外几乎没意义。<em>这正是 NCSN / Song-Ermon 2019 多噪声尺度的设计动机：用大 $t$ 解决「远场指向不准」，用小 $t$ 解决「贴近数据的细节」，反向过程从大到小 anneal 走一遍。</em>这件事在 Vizuara L7 用同一个磁铁比喻继续讲——「单一噪声水平就像只看一颗磁铁，远处感受不到吸引；多噪声水平就是同时摆多颗强弱不同的磁铁，远处由强磁铁牵引，近处由弱磁铁微调。」</p>
+
+    <h2>与 $\epsilon$-prediction 的换算</h2>
+    <p>DDPM 类工作输出 $\epsilon_\theta$（直接预测「加进去的那团高斯噪声」）。两种参数化其实是<em>一回事</em>，只差一个尺度。在前向 $x_t = \sqrt{\bar\alpha_t}\, x_0 + \sigma_t\, \epsilon$ 下，给定 $x_0$ 时 $x_t$ 是高斯，所以条件 score 就能写出：</p>
+    <p>$$\nabla_{x_t} \log p_t(x_t \mid x_0) \;=\; -\frac{x_t - \sqrt{\bar\alpha_t}\, x_0}{\sigma_t^2} \;=\; -\frac{\epsilon}{\sigma_t}.$$</p>
+    <p>训练目标对应（边缘 score 通过 Vincent 2011 denoising score matching 化为条件 score 的期望）：</p>
+    <p>$$\boxed{\;s_\theta(x_t, t) \;\approx\; -\frac{\epsilon_\theta(x_t, t)}{\sigma_t}\;}$$</p>
+    <p>所以 DDPM 的「噪声预测」和 score-based 的「score 预测」是同一个网络的两种<em>读法</em>。Score-based 视角强调几何（向量场、Langevin、SDE），$\epsilon$-视角强调统计（去噪 MSE、ELBO 化简）。两边写出来的训练 loss 在加权系数上等价——这一点在 Vizuara L6 用 MSE 推导，CMU 10-799 L4 用 score matching 推导，殊途同归（详见 <a href="/video-to-notebook/concepts/epsilon-prediction/">epsilon-prediction</a> 和 <a href="/video-to-notebook/concepts/score-matching/">score-matching</a>）。</p>
+
+    <div class="my-addition">🟡 教材外补充：Yang Song et al. 2021 ICLR (Score-SDE 论文) 正式把 DDPM 和 NCSN 统一成同一个 SDE 框架的两种离散化——DDPM 是 VP-SDE 的离散化，NCSN 是 VE-SDE 的离散化。这是「diffusion = score-based」这条等价的标准出处，也是为什么今天讲 diffusion 一定要讲 score function。</div>
+
+    <h2>退化情形：单一噪声水平为什么不够</h2>
+    <p>一个自然问题：既然 score 这么强，干嘛非要在所有 $t$ 上学？直接学 $p_{\text{data}}$ 的 score 然后跑 Langevin 不行吗？答案是<em>不行</em>，Song & Ermon 2019 的 motivation 部分专门讨论：</p>
+    <ul>
+      <li><strong>流形假设的诅咒。</strong>自然图像在 $\mathbb{R}^d$ 里占一个低维流形（$d_{\text{intrinsic}} \ll d$）。流形<em>外</em>的点 $p_{\text{data}}(x) \approx 0$，$\log p_{\text{data}}(x) \to -\infty$，$\nabla \log p$ 估计极度不稳。Langevin 从高斯起点出发，几乎肯定在流形外，<em>没有信号指回去</em>。</li>
+      <li><strong>多 mode 之间无法跨越。</strong>真实数据是多 mode 混合（猫/狗/车…）。两个 mode 之间是低密度走廊，score 在那里近似为零或方向乱，Langevin 一旦走进某个 mode 就被困住，混合性极差。</li>
+      <li><strong>加噪声解决两件事。</strong>把数据卷积一个 $\sigma$ 大的高斯：$p_\sigma(x) = \int p_{\text{data}}(y)\,\mathcal{N}(x;y,\sigma^2 I)\,dy$。$\sigma$ 大 → $p_\sigma$ 在整个空间都非零 → score 处处有定义且指向数据；$\sigma$ 小 → $p_\sigma \approx p_{\text{data}}$，保留细节。同时学一组 $\sigma$，反向时从大到小 anneal——这就是 NCSN，也是 diffusion 反向过程的本质。</li>
+    </ul>
+  </section>
+
+  <section class="concept-interact">
+    <p>上面 SVG：橙色箭头是 score 向量场，指向两团高斯的中心；红色箭头标记鞍点附近的方向歧义（mode 之间的「分水岭」）。<strong>不变量</strong>：每个 mode 是一个 score 的<em>零点 + 周围向内指</em>的稳定吸引子；mode 之间出现方向反转（散度为正的鞍点）。这就是为什么 Langevin 从随机起点出发，最终落到某个 mode——score field 长得就像「向数据流形塌缩」的引力场。</p>
+  </section>
+
+  <section class="concept-example">
+    <h2>手算：一维高斯的 score</h2>
+    <p>设 $p(x) = \mathcal{N}(x; \mu, \sigma^2)$。先写对数密度：</p>
+    <p>$$\log p(x) \;=\; -\tfrac{1}{2}\log(2\pi\sigma^2) - \frac{(x-\mu)^2}{2\sigma^2}.$$</p>
+    <p>对 $x$ 求导，常数项 $-\tfrac{1}{2}\log(2\pi\sigma^2)$ 归零（它不依赖 $x$）：</p>
+    <p>$$s(x) \;=\; \nabla_x \log p(x) \;=\; -\frac{x - \mu}{\sigma^2}.$$</p>
+    <p>验算几何直觉：$x > \mu$ 时 $s(x) < 0$，指向 $\mu$（往左拉）；$x < \mu$ 时 $s(x) > 0$，往右拉；$x = \mu$ 时 $s = 0$（mode 是 score 的零点）。代具体数：$\mu = 0, \sigma = 1, x = 2 \Rightarrow s = -(2-0)/1 = -2$。要让样本更像 $\mathcal{N}(0,1)$，Langevin 一步是：</p>
+    <p>$$x \leftarrow x + \tau \cdot s(x) + \sqrt{2\tau}\,z, \quad z \sim \mathcal{N}(0,1).$$</p>
+    <p>取 $\tau = 0.1$、无噪声项时 $x \leftarrow 2 + 0.1\cdot(-2) = 1.8$——往原点挪。重复迭代，$x$ 会逐渐塌缩到 $\mu = 0$ 附近，再被 $\sqrt{2\tau}\, z$ 散开成 $\mathcal{N}(0, 1)$ 的样本。这就是 Langevin 用 score 采样的最小可工作例。</p>
+    <p>第一项 $-\tfrac{1}{2}\log(2\pi\sigma^2)$ 在这里就是<em>归一化常数 $\log Z$ 的贡献</em>，对 $x$ 求导后蒸发。这是「$Z$ 消失」的最小验证：即便是高斯这样简单的分布，归一化常数也是<em>非平凡</em>的（含 $\pi, \sigma$），但 score 完全不需要它。</p>
+    <p>推广到多维各向同性高斯 $\mathcal{N}(\mu, \sigma^2 I)$：$s(x) = -(x - \mu)/\sigma^2$，结果一样，只是变成向量。混合高斯 $p = \sum_k \pi_k \mathcal{N}(x; \mu_k, \sigma_k^2 I)$ 的 score 不再那么干净——它是<em>带 $\pi_k$ 加权的、对每个 mode 的 score 的混合</em>，并且<strong>在 mode 之间会有方向反转</strong>（鞍点），这正是 SVG 里红色箭头标出的位置。</p>
+  </section>
+
+  <section class="concept-pitfalls">
+    <h2>常见误区</h2>
+    <ol>
+      <li><strong>「score 是网络给样本打的分」</strong>。反例：score 是 $\nabla_x \log p$，<em>跟有没有神经网络无关</em>——一维高斯 $\mathcal{N}(0,1)$ 在 $x=2$ 处的 score 是 $-2$，是从公式推出来的，不是任何模型「打分」的结果。「Fisher score」的「score」是 R. A. Fisher 1922 年的统计学历史术语，意思是「对数似然对参数的梯度」（统计推断里）或「对数密度对输入的梯度」（生成模型里），<em>都和 GAN discriminator / 分类器 logit 那种「打分」无关</em>。混淆名词是初学最常见的坑。</li>
+      <li><strong>「score 是对参数 $\theta$ 求导」</strong>。反例：score $= \nabla_x \log p(x)$，下标是<em>输入</em> $x$；维度等于 $x$ 的维度（$256 \times 256 \times 3$ 图像就是 196608 维向量，不是标量）。对参数求导得到的是 loss gradient，是反向传播用的，<em>完全不是同一个东西</em>。一个判别诀窍：score 在<em>没有神经网络</em>的场景下也有定义（比如直接对解析高斯求 $\nabla_x \log p$），loss gradient 没有网络就不存在。</li>
+      <li><strong>「学会一个固定 $p_{\text{data}}$ 的 score 就能采样了」</strong>。反例：原始 score matching + Langevin 在高维实测<em>不工作</em>——纯噪声区 $p_{\text{data}}(x) \approx 0$，score 估不准（没有训练样本支持），Langevin 从随机起点走不出来；同时多 mode 之间是低密度走廊，Langevin 一旦被某个 mode 抓住就出不来。Song & Ermon 2019 的解决方案是「多噪声尺度 NCSN」：学 $p_{\sigma_1}, p_{\sigma_2}, \dots$ 一组<em>被高斯卷积过的</em>边缘分布的 score，从大噪声向小噪声 anneal——大噪声 score 处处有意义、能跨 mode；小噪声还原细节。这恰好就是 diffusion 反向过程的本质，也是为什么扩散模型不能只学 $\nabla \log p_{\text{data}}$，必须学一整族 $\{\nabla \log p_t\}_{t \in [0, T]}$。所有训练数据为什么要在前向里加噪声后再喂给网络？因为只有这样，模型才接触得到流形之外的样本、才知道在那里 score 应该怎么指。</li>
+    </ol>
+  </section>
+
+  <section class="concept-seealso">
+    <h2>相关概念</h2>
+    <ul>
+      <li><a href="/video-to-notebook/concepts/score-matching/">Score Matching</a>——从样本估计 $\nabla \log p$ 的训练目标，跳过 $Z$；本词条提到的「能算出来」的具体方案。</li>
+      <li><a href="/video-to-notebook/concepts/langevin-dynamics/">Langevin Dynamics</a>——有了 score 之后的「物理采样器」，$x \leftarrow x + \tau s + \sqrt{2\tau}\,z$ 的来源。</li>
+      <li><a href="/video-to-notebook/concepts/noise-schedule/">Noise Schedule</a>——$t \mapsto \sigma_t$ 决定 $p_t$ 的退火曲线，即学哪些 $p_t$ 的 score。</li>
+      <li><a href="/video-to-notebook/concepts/ddpm/">DDPM</a>——$\epsilon$-视角下的同一个东西，$s_\theta = -\epsilon_\theta/\sigma_t$ 给出两条线的桥。</li>
+    </ul>
+  </section>
+
+  <section class="concept-sources">
+    <h2>来源</h2>
+    <ol>
+      <li><a href="https://www.youtube.com/watch?v=zRyD7GQ9RHs&t=4s" target="_blank" rel="noopener">diffusion-principles-vizuara · L5 · Energy Based Models / Score Function · (0:04)</a></li>
+      <li><a href="https://www.youtube.com/watch?v=ej7LfQyKXec&t=4s" target="_blank" rel="noopener">diffusion-principles-vizuara · L7 · 磁铁比喻 · NCSN 引入 · (0:04)</a></li>
+      <li><a href="https://www.youtube.com/watch?v=UEJxHpFEb04&t=4s" target="_blank" rel="noopener">cmu-10799-diffusion-flow · L4 · Score-based Models 视角 · (0:04)</a></li>
+    </ol>
+  </section>
+</article>

@@ -1,0 +1,610 @@
+<style>
+  .cfg-ch { line-height: 1.75; }
+  .cfg-ch svg { display: block; margin: 1.2rem auto; max-width: 100%; height: auto; }
+  .cfg-ch .clip-frame { max-width: 720px; margin: 1.4rem auto; }
+  .cfg-ch .clip-frame iframe { width: 100%; aspect-ratio: 16/9; border: 0; border-radius: 6px; }
+  .cfg-ch .clip-frame figcaption { color: var(--text-muted); font-size: 0.85rem; margin-top: 0.4rem; text-align: center; }
+  .cfg-ch .tldr { background: var(--surface-soft); border-left: 4px solid var(--module-accent); padding: 1rem 1.2rem; border-radius: 0 6px 6px 0; margin: 1.4rem 0; }
+  .cfg-ch .tldr h2 { margin-top: 0; font-size: 1.05rem; border-bottom: 0; }
+  .cfg-ch .callout { padding: 0.7rem 1rem; margin: 1rem 0; border-radius: 0 6px 6px 0; }
+  .cfg-ch .callout-info { background: #eef6fc; border-left: 4px solid #2b80c4; }
+  .cfg-ch .callout-note { background: #f3f0fa; border-left: 4px solid #6f4dd0; }
+  .cfg-ch .callout-warning { background: #fff6e0; border-left: 4px solid #d4a017; }
+  .cfg-ch .callout-tip { background: #e8f5e9; border-left: 4px solid #0b5; }
+  .cfg-ch .callout-quote { background: var(--surface-soft); border-left: 3px solid var(--border-strong); padding: 0.5rem 1rem; margin: 0.8rem 0; font-style: italic; color: var(--text-muted); }
+  .cfg-ch .my-addition { background: #fff7d6; border-left: 4px solid #b8860b; padding: 0.7rem 1rem; margin: 1rem 0; border-radius: 0 6px 6px 0; }
+  .cfg-ch pre { background: #1f1f1f; color: #f6f4ee; padding: 1rem; border-radius: 6px; font-size: 0.86rem; line-height: 1.55; overflow-x: auto; }
+  .cfg-ch code:not(pre code) { background: var(--surface-soft); padding: 0.1rem 0.35rem; border-radius: 3px; font-size: 0.9em; }
+  .cfg-ch h2 { border-bottom: 1px solid var(--border); padding-bottom: 0.3rem; margin-top: 2.4rem; }
+  .cfg-ch h3 { color: var(--module-accent); margin-top: 1.6rem; }
+  .cfg-ch .deriv-step { margin: 0.8rem 0; padding: 0.6rem 0.8rem; background: var(--surface-soft); border-radius: 4px; }
+  .cfg-ch .deriv-step strong { color: var(--module-accent); }
+  .cfg-ch .source-quote { font-style: italic; color: var(--text-muted); border-left: 3px solid var(--module-accent); padding: 0.5rem 1rem; margin: 0.8rem 0; background: var(--surface-soft); border-radius: 0 4px 4px 0; }
+  @keyframes cfg-pulse { 0%, 100% { opacity: 0.55; } 50% { opacity: 1; } }
+  .cfg-ch .arrow-pulse { animation: cfg-pulse 2.4s ease-in-out infinite; }
+</style>
+
+<article class="cfg-ch">
+
+<h1>17. Classifier-Free Guidance</h1>
+
+<p style="font-size:0.95rem; color:var(--text-muted);">主源：CMU 10799 S26 Lecture 7《Guidance &amp; Controllable Generation》（讲师在白板上从条件生成的"瓶颈"一路推到 classifier guidance，chunk #1299–1317）。本章后半段 CFG 部分为教材外补充（黄色标注），用来把这条线接到 Ho &amp; Salimans 2022。</p>
+
+<div class="tldr">
+  <h2>📌 TL;DR</h2>
+  <p>到上一章为止，我们学到的所有 diffusion 模型都是<strong>无条件</strong>的——按下按钮，扔一张高斯噪声进去，吐出一张"看起来真"的图，但你<em>没法指定它长什么样</em>。本章解决的就是<strong>conditional generation</strong>：怎么让模型生成"一只戴墨镜的柯基"而不是随机一张图。</p>
+
+  <p>讲师的推导分两步走：</p>
+  <ol>
+    <li><strong>第一性原理</strong>：根据 Bayes 定理，条件分数 = 无条件分数 + 一个判别模型的梯度。$$\nabla_x \log p(x\mid c) \;=\; \nabla_x \log p(x) \;+\; \nabla_x \log p(c\mid x)$$ 这就是 <strong>Classifier Guidance</strong>（Dhariwal &amp; Nichol 2021）——拿一个预训练的无条件 diffusion 加一个分类器，组合出条件生成。</li>
+    <li><strong>但分类器要能"看懂噪声"</strong>。讲师在 chunk #1317 把锅指出来：现成的 ImageNet 分类器根本不能吃 $x_t$，必须重新训一个<em>带噪</em>分类器。对每一个新的条件（文本、深度图、3D mesh），都要重训一次。这条路太贵。</li>
+  </ol>
+
+  <p><strong>Classifier-Free Guidance</strong>（Ho &amp; Salimans 2022）是对这个困境的优雅一击：<em>把无条件模型和条件模型塞进同一张网络</em>，训练时随机把条件 $c$ 丢掉（dropout，比如 $p=0.1$），采样时用一个外推公式</p>
+  $$\hat\epsilon \;=\; (1+w)\,\epsilon_\theta(x_t,t,c) \;-\; w\cdot\epsilon_\theta(x_t,t,\varnothing)$$
+  <p>一个网络、一个训练循环、一行采样代码改动。Stable Diffusion / DALL·E 2 / Imagen 全部在用。<strong>$w$（guidance scale）就是这一章标题的那个"音量旋钮"——拧大点 prompt 听话、多样性下降；拧小点反之。</strong></p>
+</div>
+
+<h2>一、上一章承接：DDIM 之后，下一个旋钮是什么？</h2>
+
+<p>CMU 这节课的开场，讲师先复习了上一节 <a href="/video-to-notebook/textbook/16/">DDIM</a>：</p>
+
+<blockquote class="source-quote">「Last time we learned DDIM which is like a fast sampling method. And how we do it is that basically we first from any noisy time step, we get a predicted clean image estimation from that time step. And instead of basically going back to t minus one, we go back to t minus 10 instead so that we can skip steps and everything. So this way we can have like 10x speed up.」（chunk #1299）</blockquote>
+
+<p>课堂上有学生顺嘴问了一个非常自然的问题：</p>
+
+<blockquote class="source-quote">「Now we go like time t to t minus 10, but do we ever like go the opposite way? Can we do this somewhat sarcastically?」（chunk #1300）</blockquote>
+
+<p>讲师笑了一下，回了一句"yes, we could, we're going to talk about it today"——这句"反着跑"其实就是 CFG 的精髓伏笔：<strong>在分数空间里向"和条件相反的方向"外推一段，等价于强化条件信号</strong>。本章末尾会回来揭这个谜。</p>
+
+<p>讲师顺手把上节课讲过的 EDM 设计空间也<em>更正</em>了一下（chunk #1301–1302）：之前他说 EDM 把训练权重压在中间时间步是"因为中间最难"，这次纠错——其实<strong>是因为中间时间步对应"语义/结构信息"最浓的层级</strong>，那里最能撬动 loss 的下降。这条更正本身和 CFG 没关系，但它埋了一个很重要的<em>背景知识</em>：diffusion 的"中间时间步"是语义信息密度最高的区段，而 CFG 在工业实践中也恰好<strong>只在中间时间步施加最大的 guidance</strong>（即所谓 interval guidance）——讲师在 L7 末尾才会回到这一点。</p>
+
+<p>讲完 DDIM 复习，讲师抛出关键转折（chunk #1302）：</p>
+
+<blockquote class="source-quote">「All right, so now that we have seen a lot of different knobs that we can tune for diffusion models, are they perfect? Now, do we already find the perfect generative models? What are we missing here?」</blockquote>
+
+<p>学生七嘴八舌："attention" → 讲师答这是工程惯性、不是数学必然；最后有人说出了关键词——<strong>"conditional generation"</strong>。讲师拍板："Conditional generation, right? So right now we haven't talked about anything about conditional generation yet."（chunk #1303）。整节课的主题由此定型。</p>
+
+<div class="callout callout-note">
+🧭 <strong>本章在 module 5 的位置</strong>：第 16 章给了你"采样加速"的旋钮（DDIM、各类 ODE solver），本章给你"内容控制"的旋钮（guidance）。两个旋钮加在一起，构成了你今天用 Stable Diffusion WebUI 里能直接拖的两个 slider——"steps" 和 "CFG scale"。再加上后面 <a href="/video-to-notebook/textbook/18/">第 18 章</a>的 ControlNet / negative prompt 这类"细化旋钮"，你就把整个商用文生图工具栏的核心 UI 都对应到了 diffusion 的数学结构上。
+</div>
+
+<h2>二、问题设定：我们到目前为止造的是「无条件机器」</h2>
+
+<p>讲师转到正题时画了一张图（chunk #1303）：</p>
+
+<blockquote class="source-quote">「Right now we haven't talked about anything about conditional generation yet. So far, everything is unconditional. We actually don't know how to do conditional generation yet.」</blockquote>
+
+<p>翻译成我们已经学过的语言：</p>
+
+<ul>
+  <li>到目前为止，diffusion 干的事情是：采 $x_T \sim \mathcal{N}(0,I)$，跑 T 步去噪，得到 $x_0 \sim p_{\mathrm{data}}(x)$；</li>
+  <li>$p_{\mathrm{data}}$ 是整个数据集的<em>边缘分布</em>——你没法挑里面的"一只柯基"或"一张梵高风景"；</li>
+  <li>你要的是 $p(x \mid c)$：给定一个 condition $c$（class label / text prompt / 另一张图 / depth map / 3D mesh / ……），从这个<em>条件分布</em>里采样。</li>
+</ul>
+
+<p>讲师顺手列出真实场景里 $c$ 可能是什么样（chunk #1304, #1306）：</p>
+
+<blockquote class="source-quote">「You'll have like some labels or like some conditions that you want to condition the model or the samples on. So it can be a text description or it can be like the attribute labels or it could be like another image or something like that. … for example maybe another image or like some 3D mesh or something like that.」</blockquote>
+
+<p>注意"3D mesh"那一句——讲师本人是做 3D 生成的，这种"任何模态都能当 condition"的视角，是后面一切讨论的起点。再翻译成一张"条件 → 用例"对照表，帮你把"$c$"这个抽象符号落到地面上：</p>
+
+<ul>
+  <li><strong>$c = $ 类别 id</strong>：经典 ImageNet 1000 类条件生成；$c \in \{0,1,\dots,999\}$，过一个 embedding lookup 进网络；</li>
+  <li><strong>$c = $ 文本 prompt</strong>："一只戴墨镜的柯基"；用 CLIP / T5 text encoder 编成一串 token embedding，再 cross-attend 进 UNet——Stable Diffusion 主线；</li>
+  <li><strong>$c = $ 另一张图</strong>：image-to-image 翻译（白天 → 夜晚）、风格迁移、SR；</li>
+  <li><strong>$c = $ 多模态控制信号</strong>：depth map、edge map、人体姿态、segmentation mask——ControlNet 一系列工作；</li>
+  <li><strong>$c = $ 几何先验</strong>：3D mesh、点云、normal map——讲师本人在 Luma AI 那条线的工作（chunk #1527 提到的 TVM、mean flow，正是 3D 视角下对 CFG 训练稳定性的研究）。</li>
+</ul>
+
+<p>这些条件模态差异巨大，但讲师后面要让你看到的是：<strong>它们在 score 空间里全部坍缩成同一个数学动作</strong>——给 $\nabla \log p(x_t)$ 加一项 $\nabla \log p(c\mid x_t)$。换句话说，guidance 把"千百种条件生成任务"压成了"一种数学操作"。这就是讲师在课堂上反复强调"why this is the best thing I like about diffusion"（chunk #1309 末段）的真正含义。</p>
+
+<h2>三、最朴素的做法：每个条件训一个新模型</h2>
+
+<p>课堂上学生先给了一个非常直接的答案：把条件 $c$ 编码成特征向量，和图像一起塞给网络，<strong>从头训一个条件模型</strong>。讲师承认这是"perfect answer for sure"（chunk #1306），但马上抛出问题：</p>
+
+<blockquote class="source-quote">「But okay, so what what do you guys think is like the major bottleneck for this kind of formulation?」</blockquote>
+
+<p>一个学生答出了关键（chunk #1307）："a lot more training and training data for each condition." 讲师拍板（chunk #1308）：</p>
+
+<blockquote class="source-quote">「You need different training for different conditions, right? … For each type of condition, we will have to train a new model on it. … if this model is text conditioned, then we cannot use it to do like class label condition. … if this model is class label condition then we cannot use it for condition on the depth map or something like that. If it's conditioned on another image then we cannot use it for text condition generation.」</blockquote>
+
+<p>把痛点写清楚：</p>
+
+<ol>
+  <li><strong>组合爆炸</strong>：N 种 condition × M 种数据域，要训 N×M 个模型；</li>
+  <li><strong>数据墙</strong>：每一个条件，都需要"图+条件"的成对数据集；</li>
+  <li><strong>开放集失败</strong>：你训练时没见过的 condition（比如一种你从没遇到过的 attribute），模型一脸懵。</li>
+</ol>
+
+<blockquote class="source-quote">「You can't just like condition on everything you can think of right that's the problem and also even if you could formulate your model to condition on everything that you can think of you also need to collect data for everything. Right. That's really really expensive.」（chunk #1308）</blockquote>
+
+<div class="callout callout-quote">
+讲师顺手开了一个圈内笑话（chunk #1309）：「And this is why like Alexander Wang got his million dollar job now, you know, just collecting data is important apparently.」（指 Scale AI 创始人那笔被 Meta 大额收购的新闻——把"数据收集"卖成了百亿生意。）
+</div>
+
+<p>另一个学生在 chunk #1309 末尾追问：「Can you use a single model to do all of that? Can you embed all of that into it?」讲师答："this is what people are trying to do"——这是<em>omni-model</em>路线（一个网络吃所有模态）。但他马上转向另一条路：</p>
+
+<blockquote class="source-quote">「But actually we can have another option here. <strong>And this is why this is like the best thing that I like about diffusion.</strong>」（chunk #1309）</blockquote>
+
+<p>讲师停顿了一下才往下走——这是整节课的"换挡时刻"，提示你下面要讲的不是"训更大模型"而是"<em>巧妙地重用已有的小模型</em>"。这也是 guidance 这个家族在工程上最迷人的地方：<em>不靠堆参数，靠改采样公式</em>。</p>
+
+<h2>四、关键转折：能不能复用无条件模型？</h2>
+
+<p>讲师在 chunk #1310 把整节课的"核心问题"清清楚楚地写在白板上：</p>
+
+<blockquote class="source-quote">「The unconditional model that we learned already has a lot of good information about how to generate a realistic looking image. … An unconditional model already knows how to generate a human face, you just need to know how to control it better. So why can't you just like reuse some of the knowledge in the unconditional model to better control it into a conditional model? Is it possible for us to reuse the unconditional model at all? <strong>Is the number one question that we're going to answer today.</strong>」</blockquote>
+
+<p>这是<strong>整章的中心问题</strong>。换句话说：</p>
+
+<blockquote>无条件 diffusion 已经把"长得像真图"这件事学会了。我们能不能<em>只额外加一点点东西</em>，就把它"扭"成条件生成？</blockquote>
+
+<p>讲师马上给了一句神级 hint（chunk #1311）：</p>
+
+<blockquote class="source-quote">「Remember how there are two two dudes that we really need to remember from this class? One guy is Gaussian. What's the other guy? Bayes, right? <strong>Remember the number one rule in probability theory. You should tattoo Bayes' theorem.</strong>」</blockquote>
+
+<div class="callout callout-tip">
+💡 <strong>这门课的两位"祖师爷"</strong>：Gaussian 决定了所有 forward / reverse step 都是高斯；Bayes 决定了所有"换底（change of conditioning）"的操作都能写出来。本章的 trick 就是把 Bayes 套在 score function 上。
+</div>
+
+<h2>五、Classifier Guidance：用 Bayes 把条件分数拆开</h2>
+
+<h3>5.1 出发点：diffusion 的 score 视角</h3>
+
+<p>回忆一下我们在第 11 章学过的：diffusion model 本质上是在学<strong>score function</strong>——对数概率密度的梯度。讲师原话（chunk #1311）：</p>
+
+<blockquote class="source-quote">「We know that diffusion model is basically just modeling the score function which is basically just the gradient of the log probability.」</blockquote>
+
+<p>无条件 diffusion 学的是：</p>
+$$s_\theta(x_t,t) \;\approx\; \nabla_{x_t}\log p(x_t).$$
+
+<p>我们想要的是条件分数：</p>
+$$s(x_t,t,c) \;=\; \nabla_{x_t}\log p(x_t\mid c).$$
+
+<h3>5.2 Bayes 一刀切下去</h3>
+
+<p>对条件概率应用 Bayes：</p>
+
+<div class="deriv-step">
+<strong>Step 1.</strong> 写出 Bayes：
+$$p(x_t\mid c) \;=\; \frac{p(x_t)\,p(c\mid x_t)}{p(c)}.$$
+<strong>Why</strong>：把"条件在 $c$ 下生 $x$"换底成"无条件生 $x$，再乘判别概率"。$p(c)$ 是常数，对 $x_t$ 求梯度直接消掉。
+</div>
+
+<div class="deriv-step">
+<strong>Step 2.</strong> 两边取 log：
+$$\log p(x_t\mid c) \;=\; \log p(x_t) \;+\; \log p(c\mid x_t) \;-\; \log p(c).$$
+<strong>Why</strong>：乘法变加法，方便求梯度。
+</div>
+
+<div class="deriv-step">
+<strong>Step 3.</strong> 对 $x_t$ 求梯度，常数 $\log p(c)$ 消失：
+$$\boxed{\;\nabla_{x_t}\log p(x_t\mid c) \;=\; \underbrace{\nabla_{x_t}\log p(x_t)}_{\text{无条件 score (已有)}} \;+\; \underbrace{\nabla_{x_t}\log p(c\mid x_t)}_{\text{判别器梯度}}\;}$$
+<strong>Why</strong>：这就是 Classifier Guidance 的核心公式。讲师原话（chunk #1312）：「the conditional probability can also be written as a combination of the unconditional probability times the conditional probability of the label given the model or the image.」
+</div>
+
+<p>第二项 $\nabla_{x_t}\log p(c\mid x_t)$ 长什么样？讲师解释（chunk #1312–1313）：</p>
+
+<blockquote class="source-quote">「This thing is actually a discriminative model … the probability of the label given the input image. So if your condition is a class label then it's a classifier. If the condition is the image caption then it could be a CLIP model. So basically you can now break the conditional generation score into an unconditional score which we can already obtain by pre-training unconditional model plus a gradient from a discriminative model.」</blockquote>
+
+<p>整理成一句话：</p>
+
+<blockquote><strong>条件 score = 无条件 score（diffusion 提供）+ 判别器对 $x_t$ 的梯度（任何一个会算 $p(c\mid x)$ 的判别模型都行）</strong>。</blockquote>
+
+<h3>5.3 采样：把"原本喂的 score"换成"加了判别器梯度的 score"</h3>
+
+<blockquote class="source-quote">「All you need to do to do classifier guidance is literally just replace this unconditional score with the conditional score that we just derived by Bayes. That's it. And you just run your sampling as normal and you get a conditional sample.」（chunk #1313–1314）</blockquote>
+
+<p>具体到一行代码：原本 reverse step 里你拿 $s_\theta(x_t,t)$ 去更新，现在改成</p>
+$$\tilde s(x_t,t,c) \;=\; s_\theta(x_t,t) \;+\; \gamma\cdot\nabla_{x_t}\log p_\phi(c\mid x_t)$$
+
+<p>其中 $\gamma$ 是 guidance scale（原论文里写 $s$ 或 $w$，本章为避免和 score $s$ 冲突，用 $\gamma$）。$\gamma=1$ 严格对应 Bayes 推导；$\gamma>1$ 是<em>过度加权</em>判别器，把条件信号放大，质量↑多样性↓。</p>
+
+<div class="callout callout-info">
+ℹ️ <strong>判别器梯度怎么算？</strong>讲师回答（chunk #1315）：「Usually back prop right through the model but you take the gradient with respect to the image instead of the parameter and then you get a gradient.」<br>
+换句话说：跑一次分类器前向得到 $\log p_\phi(c\mid x_t)$，做一次反向传播，但不更新参数，而是把 <code>x_t.grad</code> 取出来当作引导方向。和 adversarial example 用的"对图像求梯度"技术完全一样。
+</div>
+
+<h2>六、Classifier Guidance 的应用与局限</h2>
+
+<h3>6.1 应用：一个 unconditional 模型 = 无数个条件任务</h3>
+
+<p>讲师举了一组 OG 论文里的例子（chunk #1316–1317）：</p>
+
+<blockquote class="source-quote">「They just train an unconditional score model and then just apply exactly that thing and then you can get class conditioned on CIFAR, and then this is like inpainting, and this is like colorization. … <strong>you can just use the same unconditional model to perform a lot of conditional generation tasks now.</strong>」</blockquote>
+
+<p>这就是 Song &amp; Ermon 2020 的核心戏法——同一个 unconditional score model，配上不同的"判别项"，就能做：</p>
+
+<ul>
+  <li>类别条件生成（判别项 = ImageNet 分类器）；</li>
+  <li>文本条件生成（判别项 = CLIP score）；</li>
+  <li>inpainting（判别项 = "已知像素与目标一致"的对数概率）；</li>
+  <li>colorization（判别项 = "灰度图与目标一致"）；</li>
+  <li>super-resolution（判别项 = "下采样后等于低分辨率输入"）。</li>
+</ul>
+
+<h3>6.2 致命缺陷：分类器必须"看懂噪声"</h3>
+
+<p>但讲师马上把锅指出来（chunk #1317）：</p>
+
+<blockquote class="source-quote">「This thing is problematic, right? Because the classifier actually need to be able to process noisy image and need to be able to recognize like which noise level it's at. So this thing is very problematic. <strong>This thing just means that we need to train a noisy classifier for the classifier guidance diffusion.</strong> You cannot just use off-the-shelf classifier anymore. So you cannot just like pull a pre-trained classifier from like GitHub or something like that. You need to actually specifically train this.」</blockquote>
+
+<p>把这条限制具象化：</p>
+
+<ul>
+  <li>diffusion 反向过程里，$x_t$ 是<em>高斯噪声严重污染</em>的图像（$t$ 越大噪声越大）；</li>
+  <li>常规 ImageNet 分类器在 $\sigma=0$ 的干净图上训的，喂它 $x_t$ 就崩了——分类器自己都看不懂，对 $x$ 求出来的梯度根本不指向数据流形；</li>
+  <li>所以要专门训一个<strong>"noisy classifier"</strong>：把训练数据按所有 $t \in [0,T]$ 的 noise schedule 加噪，每个噪声水平都要分类正确；</li>
+  <li>对每一种新 condition（不只是类别，还可能是 text、depth、segmentation map），都要重训一个对应的 noisy 判别模型；</li>
+  <li>对 open-vocabulary 文本条件（比如 SD 那种"任意 prompt"），<em>根本不存在</em>这样一个 noisy 分类器——CLIP 也是在干净图上训的。</li>
+</ul>
+
+<div class="callout callout-warning">
+⚠️ <strong>课堂上学生提的另一个尖锐问题</strong>（chunk #1315–1316）：「I guess that only works for those conditionals actually occurs in your training data. You cannot do some interpolation to generate some other thing.」——也就是说，分类器没见过的标签，引导失灵。讲师当时答"I'll continue going, it'll get answered"——下一节课才完整回答，而那个答案就是 CFG。
+</div>
+
+<h2>七、（教材外补充）Classifier-Free Guidance：把两个网络压成一个</h2>
+
+<div class="my-addition">
+🟡 <strong>教材外补充：</strong>课堂源 chunk 在"noisy classifier 是个问题"这里就停了（chunk #1317 是这一节最后一段）。下一节才完整推出 CFG。为了让本章自洽，下面这几节是基于 Ho &amp; Salimans 2022 原论文 + Stable Diffusion 实战经验补充的，<em>不在主源 chunk 内</em>。
+</div>
+
+<h3>7.1 一句话的 idea</h3>
+
+<p>既然 Classifier Guidance 的麻烦在"另外训一个 noisy 分类器"，能不能<strong>干脆不要那个分类器</strong>？Ho &amp; Salimans 2022 的答案是：</p>
+
+<blockquote>把无条件模型 $\epsilon_\theta(x_t,t,\varnothing)$ 和条件模型 $\epsilon_\theta(x_t,t,c)$ <strong>合并进同一张网络</strong>，训练时随机丢掉条件，采样时用两次前向的差来构造引导方向。</blockquote>
+
+<h3>7.2 训练：条件 dropout</h3>
+
+<p>一段普通 DDPM 训练循环里，只改一行：</p>
+
+<ol>
+  <li>从 dataset 里取一对 $(x_0, c)$；</li>
+  <li>采 $t \sim \mathcal{U}\{1,\dots,T\}$，采 $\epsilon \sim \mathcal{N}(0,I)$，构造 $x_t$；</li>
+  <li><strong>以概率 $p_{\text{drop}}$（通常 0.1～0.2），把 $c$ 替换为 special token $\varnothing$</strong>；</li>
+  <li>loss = $\|\epsilon - \epsilon_\theta(x_t, t, c)\|^2$（其中 $c$ 可能已经被换成 $\varnothing$）。</li>
+</ol>
+
+<p>这样训出来的网络<strong>同时是无条件和条件的</strong>——你给它 $c$ 它就生条件分数，你给它 $\varnothing$ 它就生无条件分数。一个网络，一个 loss，一次训练。</p>
+
+<h3>7.3 采样：score 空间的外推</h3>
+
+<p>设 guidance scale 为 $w \ge 0$（SD WebUI 里那个 "CFG Scale"），采样时每一步用：</p>
+
+$$\boxed{\;\hat\epsilon \;=\; (1+w)\cdot\epsilon_\theta(x_t,t,c) \;-\; w\cdot\epsilon_\theta(x_t,t,\varnothing)\;}$$
+
+<p>等价地，写成 score 形式：</p>
+
+$$\hat s(x_t,c) \;=\; s(x_t\mid c) \;+\; w\cdot\bigl(s(x_t\mid c) - s(x_t)\bigr).$$
+
+<p>注意几个关键值：</p>
+
+<ul>
+  <li>$w=0$ → $\hat\epsilon = \epsilon_\theta(x_t,t,c)$，纯条件采样；</li>
+  <li>$w=-1$ → $\hat\epsilon = \epsilon_\theta(x_t,t,\varnothing)$，纯无条件采样；</li>
+  <li>$w>0$ → 把 $\epsilon$ <em>向"条件"方向外推</em>，远离"无条件"——这就是开头那个学生问的"opposite way"的真正含义；</li>
+  <li>$w$ 在 Stable Diffusion 里典型设 $w \in [5, 12]$。</li>
+</ul>
+
+<svg viewBox="0 0 600 240" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="CFG 在 score 空间的外推方向">
+  <defs>
+    <marker id="cfg-arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#333"/>
+    </marker>
+    <marker id="cfg-arr-red" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#c0392b"/>
+    </marker>
+  </defs>
+  <rect x="0" y="0" width="600" height="240" fill="#fafafa"/>
+  <text x="300" y="22" text-anchor="middle" font-size="14" font-weight="bold">CFG 在 score 空间：把条件 score 向"远离无条件"方向外推</text>
+
+  <!-- origin -->
+  <circle cx="120" cy="160" r="5" fill="#333"/>
+  <text x="120" y="180" text-anchor="middle" font-size="12">$x_t$</text>
+
+  <!-- unconditional score arrow -->
+  <line x1="120" y1="160" x2="240" y2="120" stroke="#2b80c4" stroke-width="2.5" marker-end="url(#cfg-arr)"/>
+  <text x="180" y="115" text-anchor="middle" font-size="12" fill="#2b80c4">无条件 $s(x_t)$</text>
+
+  <!-- conditional score arrow -->
+  <line x1="120" y1="160" x2="340" y2="90" stroke="#6f4dd0" stroke-width="2.5" marker-end="url(#cfg-arr)"/>
+  <text x="250" y="80" text-anchor="middle" font-size="12" fill="#6f4dd0">条件 $s(x_t\mid c)$</text>
+
+  <!-- CFG extrapolated -->
+  <line x1="120" y1="160" x2="500" y2="60" stroke="#c0392b" stroke-width="3" marker-end="url(#cfg-arr-red)" class="arrow-pulse"/>
+  <text x="430" y="50" text-anchor="middle" font-size="12" fill="#c0392b" font-weight="bold">$\hat s = s(c) + w\cdot(s(c)-s)$</text>
+  <text x="430" y="66" text-anchor="middle" font-size="11" fill="#c0392b">（CFG 外推，$w &gt; 0$）</text>
+
+  <!-- diff vector -->
+  <line x1="240" y1="120" x2="340" y2="90" stroke="#888" stroke-width="1.5" stroke-dasharray="4,3"/>
+  <text x="295" y="135" text-anchor="middle" font-size="10" fill="#888">$s(c)-s$（差向量）</text>
+
+  <text x="300" y="220" text-anchor="middle" font-size="11" fill="#666">外推 = 沿 "条件指向、远离无条件" 的方向走 $(1+w)$ 倍</text>
+</svg>
+
+<h3>7.4 为什么外推 = 锐化条件分布</h3>
+
+<p>从分布层面看，CFG 等价于在隐式分布上做指数加权。把外推公式逐步推导一下：</p>
+
+<div class="deriv-step">
+<strong>Step 1.</strong> 把 $\epsilon$ 换成 score（差一个 $-\sigma_t$ 因子，符号无关结论）：
+$$\hat s(x_t,c) \;=\; (1+w)\, s(x_t\mid c) \;-\; w\,s(x_t).$$
+<strong>Why</strong>：DDPM 学的 $\epsilon$ 就是 $-\sigma_t \nabla_{x_t}\log p$。换成 score 形式更容易看清"对哪个分布积分"。
+</div>
+
+<div class="deriv-step">
+<strong>Step 2.</strong> 反推这个 $\hat s$ 是哪个对数密度的梯度：
+$$\hat s(x_t,c) \;=\; \nabla_{x_t}\Bigl[(1+w)\log p(x_t\mid c) - w\log p(x_t)\Bigr].$$
+<strong>Why</strong>：梯度是线性算子，可以把系数提出来。
+</div>
+
+<div class="deriv-step">
+<strong>Step 3.</strong> 整理 log 表达式，写回分布：
+$$\tilde p(x\mid c) \;\propto\; p(x\mid c)^{\,1+w}\cdot p(x)^{-w} \;=\; p(x\mid c)\cdot\Bigl(\tfrac{p(x\mid c)}{p(x)}\Bigr)^{\!w}.$$
+<strong>Why</strong>：把指数运算还原成连乘，得到一个隐式分布——CFG 采样事实上就是在<em>这个</em>分布上做 Langevin / probability flow。
+</div>
+
+<p>把 $\bigl(\tfrac{p(x\mid c)}{p(x)}\bigr)^w$ 看作"对条件信号的指数放大"——$w$ 越大，越偏向"高条件似然 / 低无条件似然"的区域，也就是<em>越典型、越像 prompt 描述</em>的样本。这等价于把分布"温度"降低，<strong>采样集中到高密度 mode</strong>。</p>
+
+<p>反过来看：$\frac{p(x\mid c)}{p(x)}$ 这一项本身就是 Bayes 里的"似然比"——它在贝叶斯统计中等价于<em>证据强度</em>。CFG 的直觉因此可以重新表述为：</p>
+
+<blockquote><strong>"把每个样本的条件证据强度提高到 $w+1$ 次方再归一化采样"——证据越强的 $x$，越倾向于被采出来</strong>。</blockquote>
+
+<p>这也解释了为什么 $w$ 太大会"过曝/烤焦"：当 $w \to \infty$，$\tilde p$ 退化成 $\delta$ 在"似然比最高那一点"上——只剩一张图，所有 prompt 都被采成同一个外观。多样性彻底崩塌。</p>
+
+<div class="callout callout-tip">
+💡 <strong>"温度旋钮"的类比</strong>：本章 blurb 写"靠调音量在质量和多样性之间换"——$w$ 就是那个音量。$w \uparrow$ 越听话、越浓缩、越饱和；$w \downarrow$ 越多样、越意外、也越偏题。Stable Diffusion 的"CFG 7"是工程上跑出来的甜蜜区。
+</div>
+
+<svg viewBox="0 0 640 240" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="不同 guidance scale 下的样本分布">
+  <rect x="0" y="0" width="640" height="240" fill="#fafafa"/>
+  <text x="320" y="20" text-anchor="middle" font-size="14" font-weight="bold">CFG scale 扫描：分布如何被锐化</text>
+
+  <!-- w=0 -->
+  <g transform="translate(40,40)">
+    <text x="80" y="-5" text-anchor="middle" font-size="12">$w=0$（纯条件）</text>
+    <rect x="0" y="0" width="160" height="120" fill="none" stroke="#999"/>
+    <ellipse cx="80" cy="60" rx="55" ry="40" fill="#6f4dd0" fill-opacity="0.25" stroke="#6f4dd0"/>
+    <circle cx="60" cy="55" r="3" fill="#333"/><circle cx="75" cy="70" r="3" fill="#333"/>
+    <circle cx="95" cy="50" r="3" fill="#333"/><circle cx="100" cy="75" r="3" fill="#333"/>
+    <circle cx="40" cy="65" r="3" fill="#333"/><circle cx="115" cy="60" r="3" fill="#333"/>
+    <circle cx="85" cy="40" r="3" fill="#333"/><circle cx="70" cy="85" r="3" fill="#333"/>
+    <text x="80" y="135" text-anchor="middle" font-size="10" fill="#666">多样性高、prompt fidelity 一般</text>
+  </g>
+
+  <!-- w=3 -->
+  <g transform="translate(240,40)">
+    <text x="80" y="-5" text-anchor="middle" font-size="12">$w=3$（中等引导）</text>
+    <rect x="0" y="0" width="160" height="120" fill="none" stroke="#999"/>
+    <ellipse cx="80" cy="60" rx="35" ry="25" fill="#c0392b" fill-opacity="0.25" stroke="#c0392b"/>
+    <circle cx="75" cy="55" r="3" fill="#333"/><circle cx="85" cy="65" r="3" fill="#333"/>
+    <circle cx="70" cy="65" r="3" fill="#333"/><circle cx="90" cy="55" r="3" fill="#333"/>
+    <circle cx="80" cy="50" r="3" fill="#333"/><circle cx="80" cy="70" r="3" fill="#333"/>
+    <text x="80" y="135" text-anchor="middle" font-size="10" fill="#666">SD 默认 7 附近，质量/多样性平衡</text>
+  </g>
+
+  <!-- w=15 -->
+  <g transform="translate(440,40)">
+    <text x="80" y="-5" text-anchor="middle" font-size="12">$w=15$（过强）</text>
+    <rect x="0" y="0" width="160" height="120" fill="none" stroke="#999"/>
+    <ellipse cx="80" cy="60" rx="12" ry="9" fill="#000" fill-opacity="0.4" stroke="#000"/>
+    <circle cx="78" cy="58" r="3" fill="#333"/><circle cx="82" cy="62" r="3" fill="#333"/>
+    <circle cx="80" cy="60" r="3" fill="#333"/>
+    <text x="80" y="135" text-anchor="middle" font-size="10" fill="#666">collapse 到 mode，over-saturate / 烤焦</text>
+  </g>
+
+  <text x="320" y="225" text-anchor="middle" font-size="11" fill="#666">$w$ 越大，采样越集中到"最像 prompt"的几张图——少而精；过大则过曝/失真</text>
+</svg>
+
+<h2>八、把"无条件 + 条件"塞进一个网络的工程细节</h2>
+
+<h3>8.1 条件 token 怎么"标记为空"？</h3>
+
+<p>在 SD 这类文本条件模型里，"$\varnothing$"通常实现为<strong>空字符串经 CLIP text encoder 编码后的向量</strong>——即把 prompt 替换为 <code>""</code> 重新跑一次 text encoder。在 class-conditional 模型里，$\varnothing$ 是一个专门的"null class index"——比如本来有 1000 类，多加一个 id=1000 当作 null，embedding 表也多一行。</p>
+
+<p>训练时的"条件 dropout"就是按 $p_{\text{drop}}$ 把上述 condition 替换成 $\varnothing$ 后再算 loss。注意几个关键细节：</p>
+
+<ul>
+  <li><strong>替换是 input 层面的，不是 attention mask 层面的</strong>。直接把 $c$ 换成 $\varnothing$，模型不需要任何架构改动；</li>
+  <li><strong>dropout 是 per-sample 的</strong>，同一 batch 里有些样本有条件、有些没条件，模型必须同时学好两个分支；</li>
+  <li><strong>训练时不需要"两次前向"</strong>——只在采样时才需要分别跑 $c$ 和 $\varnothing$。训练阶段对计算图是无感的。</li>
+</ul>
+
+<h3>8.2 采样要跑两次前向</h3>
+
+<p>每个去噪步骤都要算 $\epsilon_\theta(x_t,t,c)$ 和 $\epsilon_\theta(x_t,t,\varnothing)$ <strong>两次</strong>，再线性组合。这意味着 CFG 把单步采样成本翻倍。</p>
+
+<p>实践中常把它打包进 batch：把 $(x_t, c)$ 和 $(x_t, \varnothing)$ 拼成 batch size 2 跑一次 forward，再 split 输出。代价仍是 2×，但内存友好——而且现代 GPU 在 batch=2 上的 throughput 几乎和 batch=1 相同。所以"CFG 让推理慢两倍"这个说法在 SD 这类已经被 batch 占满的场景里基本不成立，实际慢 1.3–1.5 倍。</p>
+
+<p>有几种工业上常见的"省一半算力"技巧：</p>
+
+<ul>
+  <li><strong>Guidance distillation</strong>（Meng et al. 2023）：训一个新网络直接输出 $\hat\epsilon$，省掉那次 unconditional forward。SDXL Turbo / LCM 这一类都在用；</li>
+  <li><strong>Self-attention guidance / PAG</strong>：用网络内部某种"模糊版预测"代替 unconditional 分支，避免显式跑第二次；</li>
+  <li><strong>Interval guidance</strong>（Kynkäänniemi et al. 2024）：只在中间时间步施加 CFG，开头结尾不施加，FID 提升、采样略快——这正好印证了开头讲师讲的"medium time steps 最关键"。</li>
+</ul>
+
+<h3>8.3 工程伪代码</h3>
+
+<pre><code class="language-python"># Classifier-Free Guidance: 训练 + 采样（伪代码）
+# 训练：DDPM loss + 条件 dropout
+def train_step(x0, c, model, p_drop=0.1):
+    B = x0.size(0)
+    t = torch.randint(0, T, (B,))                      # 采时间步
+    eps = torch.randn_like(x0)                         # 采噪声
+    xt = sqrt_alpha_bar[t] * x0 + sqrt_one_minus_alpha_bar[t] * eps
+
+    # 关键一行：以概率 p_drop 把 condition 替换成 null
+    mask = (torch.rand(B) &lt; p_drop)
+    c_in = c.clone()
+    c_in[mask] = NULL_TOKEN                            # 文本: ""; 类别: null_class_id
+
+    eps_pred = model(xt, t, c_in)                      # 同一个网络，可能拿到 c 也可能拿到 null
+    loss = F.mse_loss(eps_pred, eps)
+    return loss
+
+
+# 采样：每步两次前向，线性外推
+@torch.no_grad()
+def cfg_sample(model, c, w=7.0, T=50, shape=(1,3,64,64)):
+    x = torch.randn(shape)                             # x_T ~ N(0, I)
+    for t in reversed(range(T)):
+        t_b = torch.full((shape[0],), t, dtype=torch.long)
+
+        # 两次前向：一次给 c，一次给 null
+        eps_c   = model(x, t_b, c)                     # 条件分支
+        eps_unc = model(x, t_b, NULL_TOKEN)            # 无条件分支
+
+        # CFG 外推：把 eps 推向 c、远离 null
+        eps_hat = (1 + w) * eps_c - w * eps_unc
+
+        # 然后照常做 DDPM / DDIM 一步反向
+        x = ddim_step(x, eps_hat, t)
+    return x
+</code></pre>
+
+<div class="callout callout-note">
+🛠️ <strong>实战 tips</strong>：<br>
+• $p_{\text{drop}}$ 用 0.1～0.2 都行；太高会损害条件性能，太低 unconditional 分支学不好。<br>
+• Stable Diffusion v1 的 $w=7.5$ 是当年 LAION 数据集 + CLIP encoder 上扫出来的甜蜜点。<br>
+• 不同 sampler 下的最优 $w$ 不一样，DDIM 和 DPM-Solver 通常可以用更小的 $w$ 拿到同等效果。<br>
+• Negative prompt 的实现就是把"$\varnothing$"换成"你不想要的 prompt"：$\hat\epsilon = (1+w)\epsilon(c_+) - w\epsilon(c_-)$。
+</div>
+
+<h2>九、CFG 为什么是"工业标准"</h2>
+
+<p>把 CFG 和 Classifier Guidance 放一起对比一下：</p>
+
+<table style="width:100%; border-collapse:collapse; margin:1rem 0;">
+  <thead>
+    <tr style="background:var(--surface-soft);">
+      <th style="padding:0.5rem; text-align:left; border:1px solid var(--border);">维度</th>
+      <th style="padding:0.5rem; text-align:left; border:1px solid var(--border);">Classifier Guidance (2021)</th>
+      <th style="padding:0.5rem; text-align:left; border:1px solid var(--border);">Classifier-Free Guidance (2022)</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr><td style="padding:0.5rem; border:1px solid var(--border);">需要的网络数</td><td style="padding:0.5rem; border:1px solid var(--border);">2（diffusion + noisy classifier）</td><td style="padding:0.5rem; border:1px solid var(--border);">1（diffusion 本身兼任两者）</td></tr>
+    <tr><td style="padding:0.5rem; border:1px solid var(--border);">额外训练成本</td><td style="padding:0.5rem; border:1px solid var(--border);">必须训"带噪分类器"，每个条件域单独训</td><td style="padding:0.5rem; border:1px solid var(--border);">在原训练循环里加一行 dropout，零额外成本</td></tr>
+    <tr><td style="padding:0.5rem; border:1px solid var(--border);">支持 open-vocabulary 文本？</td><td style="padding:0.5rem; border:1px solid var(--border);">不行（CLIP 没在 $x_t$ 上训过）</td><td style="padding:0.5rem; border:1px solid var(--border);">行（text encoder 任意接）</td></tr>
+    <tr><td style="padding:0.5rem; border:1px solid var(--border);">采样成本</td><td style="padding:0.5rem; border:1px solid var(--border);">每步 1× diffusion + 1× classifier backprop</td><td style="padding:0.5rem; border:1px solid var(--border);">每步 2× diffusion forward</td></tr>
+    <tr><td style="padding:0.5rem; border:1px solid var(--border);">实证 FID / IS / CLIP score</td><td style="padding:0.5rem; border:1px solid var(--border);">提升明显</td><td style="padding:0.5rem; border:1px solid var(--border);">同等或更好；几乎所有 SOTA 模型默认开启</td></tr>
+    <tr><td style="padding:0.5rem; border:1px solid var(--border);">代表系统</td><td style="padding:0.5rem; border:1px solid var(--border);">ADM-G (Dhariwal &amp; Nichol)</td><td style="padding:0.5rem; border:1px solid var(--border);">Stable Diffusion / DALL·E 2 / Imagen / SDXL</td></tr>
+  </tbody>
+</table>
+
+<p>对工业界来说，CFG 的胜利不是"理论更精妙"，而是"<strong>训练 pipeline 不变、推理改两行、效果暴涨</strong>"——这是工程上 ROI 最高的一类 trick。</p>
+
+<h2>九点五、深入：Bayes 推导里几个被一带而过的微妙点</h2>
+
+<p>讲师在课堂上走 Bayes 走得很快，这里把几个值得停下来咀嚼的点拆开讲。</p>
+
+<h3>9.5.1 为什么 $\log p(c)$ 可以直接扔掉？</h3>
+
+<p>$p(c)$ 是先验类频，对 $x$ 来说是常数——求梯度 $\nabla_x$ 直接为零。但要注意：<strong>这不代表 $p(c)$ 在采样时不存在</strong>。它只是不参与"指方向"。如果两个类的 $p(c)$ 差很多（比如长尾类），你拿到的 $\nabla \log p(c\mid x)$ 在梯度方向上仍是正确的，但绝对幅度未必是你想要的"理想 guidance strength"——这就是为什么实践中总要乘一个 $\gamma$ 或 $w$ 来手动调强度。</p>
+
+<h3>9.5.2 $\nabla_x \log p(c\mid x)$ 在采样时是哪个 $x$？</h3>
+
+<p>读者最容易混淆的一点：classifier 接的是 <strong>$x_t$（带噪）</strong>，不是 <strong>$x_0$（干净）</strong>。因为我们要把这个梯度加到 $\epsilon_\theta(x_t,t)$ 上一起跑下一步反向去噪，所以必须在同一空间 $x_t$ 上做。这就是 chunk #1317 那个"noisy classifier"问题的根源——分类器必须吃 $x_t$，否则梯度根本对不上 reverse step 的尺度。</p>
+
+<h3>9.5.3 guidance scale $\gamma$ 是怎么"凭空多出来"的？</h3>
+
+<p>严格 Bayes 推出的式子里没有 $\gamma$，是 $\gamma=1$ 的特殊情况。Dhariwal &amp; Nichol 2021 经验上发现：<strong>把分类器梯度乘 $\gamma > 1$ 能极大提升 FID</strong>。直觉解释是：分类器学到的 $p_\phi(c\mid x_t)$ 通常比真实 $p(c\mid x_t)$ <em>更平</em>（欠自信），乘 $\gamma$ 是在补这个 gap。从分布层面：guided 采样等价于从 $p(x\mid c) p(c\mid x)^{\gamma-1}$ 取样，$\gamma-1$ 就是对似然比的指数加权——这和 CFG 那个 $(p(x\mid c)/p(x))^w$ 是同一类数学结构。</p>
+
+<div class="callout callout-info">
+ℹ️ <strong>历史脚注</strong>：Classifier Guidance 的论文标题叫《Diffusion Models Beat GANs on Image Synthesis》（Dhariwal &amp; Nichol 2021）。让 diffusion 第一次在 FID 上超过 BigGAN 的<em>关键技巧</em>就是 $\gamma > 1$ 的 classifier guidance。整个 diffusion 火起来，guidance 是头号功臣，比 DDPM 本身的发明还重要。
+</div>
+
+<h2>九点八、把 CFG 当成 reward-tuned sampling 的视角</h2>
+
+<p>有一个现代视角可以让 CFG 的本质更显然：CFG 就是"基于 reward 的采样修正"。</p>
+
+<p>把 $\log p(c\mid x)$ 看成"$x$ 满足条件 $c$ 的得分"——也就是 reward。我们想从一个修正分布 $p_{\beta}(x) \propto p(x) \exp(\beta R(x))$ 中采样，其中 $R(x) = \log p(c\mid x)$，$\beta$ 是温度参数。对它求 score：</p>
+
+$$\nabla_x \log p_\beta(x) \;=\; \nabla_x \log p(x) \;+\; \beta\,\nabla_x R(x).$$
+
+<p>这就是 classifier guidance。而 CFG 是同样的事情、但用 $\log p(x\mid c) - \log p(x)$ 这个"隐式 reward"代替了显式 classifier——你不需要单独训一个 reward model，diffusion 本身的"条件减无条件"分支已经隐含了这个 reward。</p>
+
+<p>这个视角让 CFG 和近年的 reward fine-tuning（DPOK、Diffusion-DPO、ReFL）连成了一条线：</p>
+
+<ul>
+  <li><strong>CFG</strong>：inference-time 修正，reward 隐含在 conditional vs unconditional 分支差里；</li>
+  <li><strong>Classifier guidance</strong>：inference-time 修正，reward 显式来自分类器；</li>
+  <li><strong>RLHF for diffusion</strong>：training-time 修正，reward 来自人工偏好；</li>
+</ul>
+
+<p>本质都是"无条件分布 + reward → 修正分布"。CFG 的便宜之处在于它<em>不需要任何额外训练</em>——reward 已经在你 dropout 训练时一并学到了。</p>
+
+<h2>十、回到课堂：把"反着跑"的悬念解开</h2>
+
+<p>本章开头讲师顺嘴的那句"go the opposite way, sarcastically"，到这里就清楚了：</p>
+
+<ul>
+  <li>$\epsilon_\theta(x_t,t,c)$ 是"指向 prompt 的方向"；</li>
+  <li>$\epsilon_\theta(x_t,t,\varnothing)$ 是"指向真实数据流形（但不挑 prompt）的方向"；</li>
+  <li>CFG 把第一个减去第二个，<strong>留下的差就是"纯粹的 prompt 信号"</strong>，然后把它放大 $w$ 倍加回去；</li>
+  <li>所以你确实在"沿条件方向<em>过冲</em>地走"——就像 DDIM 是"在时间轴上跳着走"，CFG 是"在条件轴上跳着走"。</li>
+</ul>
+
+<div class="my-addition">
+🟡 <strong>教材外补充——CFG 为什么在 flow matching 里也能用</strong>：第 13–14 章学的 flow matching / rectified flow 同样有 $v_\theta(x_t,t,c)$ 和 $v_\theta(x_t,t,\varnothing)$ 两个分支。CFG 公式直接套到 velocity 上：$\hat v = (1+w) v(c) - w\,v(\varnothing)$。这就是 SD3、Flux 这一代模型上仍然有"CFG scale"slider 的原因——它和 DDPM 没有强耦合，只要你有"无条件 + 条件"两个分支就能用。
+</div>
+
+<h2>十点五、一个常被问的细节：CFG 训练里 $p_{\text{drop}}$ 到底怎么选？</h2>
+
+<p>$p_{\text{drop}}$ 这个超参看似不起眼，实际是决定 CFG 行为的关键之一。回忆训练目标：</p>
+
+<ul>
+  <li>当样本被 dropout，模型在学 $\epsilon_\theta(x_t,t,\varnothing)$ → 无条件分支；</li>
+  <li>当样本保留条件，模型在学 $\epsilon_\theta(x_t,t,c)$ → 条件分支。</li>
+</ul>
+
+<p>所以 $p_{\text{drop}}$ 就是<strong>两个分支在训练样本上的占比</strong>。极端情况：</p>
+
+<ul>
+  <li>$p_{\text{drop}} = 0$：纯条件训练，模型完全不会做无条件 → CFG 用不了；</li>
+  <li>$p_{\text{drop}} = 1$：纯无条件训练，模型完全不看 $c$ → 退化成普通 unconditional diffusion；</li>
+  <li>$p_{\text{drop}} \in [0.1, 0.2]$：条件分支占 80%–90% 样本，无条件分支占 10%–20%。这是 Ho &amp; Salimans 原论文和 SD 训练惯例。</li>
+</ul>
+
+<p>为什么这么不对称？因为<strong>无条件分支"更容易学"</strong>——它只需要学好整体数据分布，不必区分细粒度 prompt。所以 10% 的样本就足够把它教会；剩下 90% 留给更难的条件分支。这是工程上"任务难易决定数据预算"的一个漂亮例子。</p>
+
+<div class="callout callout-warning">
+⚠️ <strong>常见踩坑</strong>：自己训 CFG 时如果发现"开了 CFG 效果反而比 $w=0$ 差"——很可能是 $p_{\text{drop}}$ 设错了（比如忘加这一行，模型从没见过 $\varnothing$，无条件分支输出垃圾，再去减它就是在加噪声）。验证方法：单独跑一次 $w=-1$（纯无条件），看输出是否像"通用真实图像"。如果输出像噪声或纯黑，说明无条件分支没训出来。
+</div>
+
+<h2>十点八、CFG 引发的"心理学"现象：为什么 $w=7$ 这么受欢迎？</h2>
+
+<p>Stable Diffusion 默认 CFG=7.5，DALL·E 2 默认 5–10，Imagen 用 3–10。这些数字不是从理论推出来的，是<strong>用户偏好实验扫出来的甜蜜区</strong>。一个有意思的现象：</p>
+
+<ul>
+  <li>FID（看像不像真图）通常在 $w \in [1, 3]$ 最低；</li>
+  <li>CLIP score（看像不像 prompt）随 $w$ 单调上升；</li>
+  <li>人类偏好评分在 $w \in [5, 10]$ 达到峰值——人比 FID 更看重"听话"，但又不想要"烤焦"。</li>
+</ul>
+
+<p>这暴露了一个本章的核心张力：<strong>FID 偏爱多样、自然；用户偏爱听话、典型；中间永远要权衡</strong>。"$w$ 旋钮"的存在让这个权衡<em>留在推理时</em>，而不是被锁在训练里——这是 CFG 工程上最优雅的地方：<em>用户在网页上拖个 slider 就能改风格倾向，根本不用重训</em>。</p>
+
+<h2>十一、嵌入源课讲解片段</h2>
+
+<div class="clip-frame">
+  <iframe src="https://www.youtube.com/embed/lPipzIG6rkc?start=567" allowfullscreen></iframe>
+  <figcaption>CMU 10799 L7（chunk #1310 起）：讲师从"能不能复用 unconditional 模型？"的核心问题开始，配上 Bayes 一步推到 classifier guidance。这一段是本章主源最精彩的 4 分钟。</figcaption>
+</div>
+
+<h2>十二、本章 Takeaways</h2>
+
+<ol>
+  <li><strong>条件生成的痛点是组合爆炸</strong>。讲师原话（chunk #1308）："for each type of condition, we will have to train a new model"——这条墙让"一个 condition 一个模型"路线难以扩展到开放世界。</li>
+  <li><strong>Bayes 是条件生成的"通用解码器"</strong>。$\log p(x\mid c) = \log p(x) + \log p(c\mid x) - \log p(c)$。对 $x$ 求导，常数消失，剩下"无条件 score + 判别器梯度"。讲师让你"tattoo Bayes' theorem"绝对不是开玩笑。</li>
+  <li><strong>Classifier Guidance 的代价是 noisy classifier</strong>。off-the-shelf 分类器看不懂 $x_t$，你必须按 noise schedule 重训一份，对每种条件单独训。对 open-vocabulary 文本几乎不可行。</li>
+  <li><strong>CFG 用"条件 dropout + 两次前向"绕开了上面所有问题</strong>。训练加一行代码，采样加一次 forward，得到的 $\hat\epsilon = (1+w)\epsilon(c) - w\epsilon(\varnothing)$ 等价于在 score 空间向条件方向外推。</li>
+  <li><strong>$w$ 是"音量旋钮"</strong>。$w=0$ 纯条件、典型多样；$w$ 大 prompt fidelity ↑、多样性 ↓、过大会"烤焦"。SD 工业经验值 $w \in [5,12]$。</li>
+  <li><strong>分布层面 CFG = 锐化</strong>：等价于从 $p(x\mid c)^{1+w}/p(x)^w$ 采样，把 $\frac{p(x\mid c)}{p(x)}$ 这个"似然比"指数加权，集中到典型 mode。</li>
+  <li><strong>CFG 不依赖 diffusion 数学骨架</strong>，flow matching、rectified flow、consistency model 全都能套同样的外推公式——所以它从 2022 一直活到今天。</li>
+</ol>
+
+<p>下一章我们会继续在 guidance 这条线上走——<a href="/video-to-notebook/textbook/18/">第 18 章</a>聊 CFG 的变体与改进（rescaling、auto-guidance、interval guidance），看工程界怎么把"$w$ 调大"和"不烤焦"这对矛盾继续榨干。</p>
+
+</article>

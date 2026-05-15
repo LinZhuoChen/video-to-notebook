@@ -1,0 +1,637 @@
+<style>
+  .ddim-ch { line-height: 1.7; }
+  .ddim-ch svg { display: block; margin: 1.2rem auto; max-width: 100%; height: auto; }
+  .ddim-ch .clip-frame { max-width: 720px; margin: 1.4rem auto; }
+  .ddim-ch .clip-frame iframe { width: 100%; aspect-ratio: 16/9; border: 0; border-radius: 6px; }
+  .ddim-ch .clip-frame figcaption { color: var(--text-muted); font-size: 0.85rem; margin-top: 0.4rem; text-align: center; }
+  .ddim-ch .tldr { background: var(--surface-soft); border-left: 4px solid var(--module-accent); padding: 1rem 1.2rem; border-radius: 0 6px 6px 0; margin: 1.4rem 0; }
+  .ddim-ch .tldr h2 { margin-top: 0; font-size: 1.05rem; }
+  .ddim-ch .callout { padding: 0.7rem 1rem; margin: 1rem 0; border-radius: 0 6px 6px 0; }
+  .ddim-ch .callout-info { background: #eef6fc; border-left: 4px solid #2b80c4; }
+  .ddim-ch .callout-note { background: #f3f0fa; border-left: 4px solid #6f4dd0; }
+  .ddim-ch .callout-warning { background: #fff6e0; border-left: 4px solid #d4a017; }
+  .ddim-ch .callout-tip { background: #e8f5e9; border-left: 4px solid #0b5; }
+  .ddim-ch .callout-quote { background: var(--surface-soft); border-left: 3px solid var(--border-strong); padding: 0.5rem 1rem; margin: 0.8rem 0; font-style: italic; color: var(--text-muted); }
+  .ddim-ch .my-addition { background: #fff7d6; border-left: 4px solid #b8860b; padding: 0.7rem 1rem; margin: 1rem 0; border-radius: 0 6px 6px 0; }
+  .ddim-ch pre { background: #1f1f1f; color: #f6f4ee; padding: 1rem; border-radius: 6px; font-size: 0.86rem; line-height: 1.55; overflow-x: auto; }
+  .ddim-ch code:not(pre code) { background: var(--surface-soft); padding: 0.1rem 0.35rem; border-radius: 3px; font-size: 0.9em; }
+  .ddim-ch h2 { border-bottom: 1px solid var(--border); padding-bottom: 0.3rem; margin-top: 2.4rem; }
+  .ddim-ch h3 { color: var(--module-accent); margin-top: 1.6rem; }
+  .ddim-ch .deriv-step { margin: 0.8rem 0; padding: 0.6rem 0.8rem; background: var(--surface-soft); border-radius: 4px; }
+  .ddim-ch .deriv-step strong { color: var(--module-accent); }
+  @keyframes ddim-walk { 0% { offset-distance: 0%; } 100% { offset-distance: 100%; } }
+  .ddim-ch .ddim-dot { animation: ddim-walk 4s linear infinite; }
+</style>
+
+<article class="ddim-ch">
+
+<h1>16. DDIM：去掉随机性的采样器</h1>
+
+<p style="font-size:0.95rem; color:var(--text-muted);">主源：CMU 10799 S26 Lecture 11（Luma AI Linqi (Alex) Zhou 客座讲）；副源：CMU 10799 S26 Lecture 7（Guidance）、Lecture 10（Distillation & Flow Maps）。</p>
+
+<div class="tldr">
+  <h2>📌 TL;DR</h2>
+  <p><strong>DDIM = 去掉随机性的 DDPM 采样器</strong>（Song, Meng, Ermon 2021）。它<em>不重新训练模型</em>，只是把 DDPM 的随机反向链改写成一个<strong>确定性的递推</strong>，使 1000 步采样能压缩到 50 步、20 步甚至 10 步而几乎不掉质量。</p>
+  $$x_{t-1} \;=\; \sqrt{\bar\alpha_{t-1}}\,\tilde x_0(x_t,\epsilon_\theta) \;+\; \sqrt{1-\bar\alpha_{t-1}-\sigma_t^2}\,\epsilon_\theta(x_t,t) \;+\; \sigma_t\,\epsilon$$
+  <p>三个观察撑起全章：</p>
+  <ul>
+    <li><strong>训练目标只看 marginal $q(x_t|x_0)$</strong>——很多前向过程共享同一条 marginal，DDPM 是其中"最随机"的一条，DDIM 是"最确定"的一条。</li>
+    <li><strong>$\sigma_t=0$ → 完全确定性</strong>，这就是 PF-ODE 的 Euler 解；<strong>$\sigma_t$ 取 DDPM 那个特殊值 → 退化回 DDPM</strong>。两者中间用一个旋钮 $\eta\in[0,1]$ 插值。</li>
+    <li><strong>因为是 ODE，可以跨大步走</strong>。1000→999→…→0 改成 1000→980→…→0（50 步），10× 加速，质量稳。</li>
+  </ul>
+  <p><strong>为什么把这章放在 Module 5 开篇？</strong>因为 DDIM 是<em>采样侧</em>所有改进的起点——它把 DDPM 从"随机过程"翻译成"ODE 上的轨迹"，后面 DPM-Solver、Flow Matching、Consistency Model（第 15 章）全部站在 DDIM 这条 ODE 视角上。课程里 Lecture 7、10、11 三个独立讲座都把它当成"前置知识"反复回顾——它就是<strong>整门课的采样基石</strong>。</p>
+</div>
+
+<h2>一、为什么 DDPM 慢？先把"慢"这件事拆开</h2>
+
+<p>Alex Zhou 在 Lecture 11 开场就把问题摆正了：</p>
+
+<div class="callout-quote">
+"To think about efficient inference, we first need to look at what makes diffusion inference slow. … our diffusion model essentially solves an ODE at inference time, which requires the inference loop to take infinitesimal jumps. But what we actually want for one- or few-step generation is that we want our model to be able to perform large jumps in time instead of infinitesimal jumps."
+</div>
+
+<p>把这段话翻译成中文教材语言：</p>
+
+<ol>
+  <li><strong>DDPM 推理 = 解一个 ODE/SDE</strong>。第 11 章我们已经证明了，DDPM 的反向链对应一个 probability flow ODE。求解 ODE 的标准做法是 <em>欧拉法（Euler method）</em>——每步取一个小步长 $\Delta t$，往前推。</li>
+  <li><strong>DDPM 的"步长"非常小</strong>：训练时定 $T=1000$，于是每步 $\Delta t = 1/1000$。这是<em>训练侧</em>定的步长，推理侧默认沿用——所以要走 1000 次神经网络 forward。</li>
+  <li><strong>真正想要的</strong>：少几步——"large jumps"——但质量不掉。这个"大跨步"在 SDE 上做不到（噪声会爆），在 ODE 上有可能做到（Euler 在光滑场上可以放大步长）。</li>
+</ol>
+
+<p>这"1000 步"听起来抽象，落到产品里就是<strong>响应延迟</strong>。一个 1024×1024 的 Stable Diffusion 在 RTX 4090 上，单次 forward 大约 30 ms。1000 步 = 30 秒；50 步 = 1.5 秒。前者用户必然流失，后者刚好在"等不及但可接受"的临界点上。学术论文里 1000 步是"无所谓"的训练超参，工业产品里 1000 步就是<em>不能用</em>。所以"如何压缩采样步数"在 2021 年成了整个 diffusion 社区最热的问题。</p>
+
+<p>所以本章的核心问题可以一句话写下来：</p>
+
+<blockquote><strong>能不能<em>不重新训练</em> $\epsilon_\theta$，只改采样规则，就把 1000 步压到 50 步？</strong></blockquote>
+
+<p>DDIM 给出的回答是：能，而且只需要一行公式。这一行公式之所以能成立，依赖一条几乎令人难以置信的观察：<em>训练损失根本不关心"模型在每一步看到的中间噪声样本"长啥样</em>。把这件事讲清楚是下一节的任务。</p>
+
+<div class="callout callout-warning">
+⚠️ <strong>一个非常容易踩的误解</strong>：很多人第一次听到 DDIM 以为它是"另一个模型"。<strong>不是！</strong>DDIM 用的 $\epsilon_\theta(x_t,t)$ 就是 DDPM 训出来的那个网络，权重一字不改。DDIM 只改采样循环，所以你下载任何一个 DDPM 权重，立刻就能换上 DDIM 采样器跑 50 步——这就是为什么它在 2021 年发布后<em>几乎所有开源 diffusion 代码默认采样器都改成了 DDIM</em>。
+</div>
+
+<h2>二、关键洞察：训练损失只锁住 marginal，不锁住链</h2>
+
+<p>这是 DDIM 论文最精妙、也最容易被一笔带过的一步。</p>
+
+<p>回忆 DDPM 的训练目标（第 7 章）：</p>
+
+$$\mathcal{L}_\text{simple} \;=\; \mathbb{E}_{t,\,x_0,\,\epsilon}\!\left[\big\|\epsilon - \epsilon_\theta(x_t,t)\big\|^2\right],\quad x_t=\sqrt{\bar\alpha_t}\,x_0+\sqrt{1-\bar\alpha_t}\,\epsilon$$
+
+<p>留意一件事：训练时<strong>我们只用 $x_0$ 和 $x_t$，根本不需要中间的 $x_1,\dots,x_{t-1}$</strong>。换句话说，损失只依赖<strong>边缘分布</strong></p>
+
+$$q(x_t|x_0) \;=\; \mathcal{N}\!\big(\sqrt{\bar\alpha_t}\,x_0,\;(1-\bar\alpha_t)\,I\big)$$
+
+<p>而不依赖<em>"哪条前向链通向这个 $x_t$"</em>。</p>
+
+<div class="callout callout-tip">
+💡 <strong>核心 insight（DDIM 论文 §3）</strong>：满足这同一组 marginal 的前向过程<strong>不只一个</strong>。DDPM 那条"独立加噪的 Markov 链"只是其中一条。<em>只要换一条共享同样 marginal、但反向是确定性的前向过程，训练好的 $\epsilon_\theta$ 就可以直接复用</em>——因为损失里看到的"$x_0,x_t$"分布根本没变。
+</div>
+
+<p>这就是 DDIM 的"魔术"：</p>
+
+<ul>
+  <li>训练完全照搬 DDPM；</li>
+  <li>采样换一条新轨迹；</li>
+  <li>损失没变 → 模型没变 → 上线不用重训。</li>
+</ul>
+
+<p>这种思路在论文里被表述为"<strong>非 Markov 前向过程</strong>（non-Markovian forward process）"。听起来高深，本质就是上面这件事：marginal 不动、链可以换。</p>
+
+<p>打一个不太严谨但很顺手的类比：你考研复习时，老师只关心你期末卷子上写下来的<em>每一题答案</em>是否正确，不关心你是用"先打草稿再誊抄"还是"直接动笔"的方法写出来的。"答案"在这里就是 marginal $q(x_t|x_0)$，"过程"就是前向链。DDPM 是"独立加噪、一步一步推"的复习方式，DDIM 是"一口气直接跳到答案"的复习方式——两者卷面分数（损失）一模一样。</p>
+
+<div class="callout callout-info">
+🎯 <strong>这一节为什么重要</strong>：它解释了为什么"DDIM 不重训"是<em>合法的</em>，而不是经验上的"碰巧好用"。如果不理解 marginal vs 链 的区别，你会一直困惑"既然采样过程变了，凭什么不重训？"——这是一个反直觉但严格成立的事实。后面 Flow Matching、Score SDE 都依赖这种"边缘等价、过程自由"的观点。
+</div>
+
+<h2>三、DDIM 更新公式：一行三块拼装</h2>
+
+<p>DDIM 论文最终给出的反向更新长这样（这是<strong>整章最重要的公式</strong>）：</p>
+
+$$\boxed{\;x_{t-1} \;=\; \underbrace{\sqrt{\bar\alpha_{t-1}}\,\tilde x_0(x_t,\epsilon_\theta)}_{\text{① 朝预测的干净图走}} \;+\; \underbrace{\sqrt{1-\bar\alpha_{t-1}-\sigma_t^2}\,\epsilon_\theta(x_t,t)}_{\text{② 加回"恰当量"噪声}} \;+\; \underbrace{\sigma_t\,\epsilon}_{\text{③ 额外随机扰动}}\;}$$
+
+<p>其中那个反复出现的 $\tilde x_0$ 是<strong>x0 预测</strong>（第 8 章已经推过）：</p>
+
+$$\tilde x_0(x_t,\epsilon_\theta) \;=\; \frac{x_t - \sqrt{1-\bar\alpha_t}\,\epsilon_\theta(x_t,t)}{\sqrt{\bar\alpha_t}}$$
+
+<p>这一公式的三块乍看眼花，但每一块都对应一个物理动作，看清楚就拆穿了。</p>
+
+<h3>3.1 拆块 ①：朝"模型心中的干净图"走一段</h3>
+
+<p>Lecture 7 里讲师用最朴素的话讲过 DDIM 的过程：</p>
+
+<div class="callout-quote">
+"We get a predicted clean image or clean image estimation from that time step. And instead of going back to t minus one, we go back to t minus 10 instead so that we can skip steps."
+</div>
+
+<p>每一步 DDIM 先用 $\epsilon_\theta$ 估计当前 $x_t$ 对应的"干净图猜测"$\tilde x_0$，再把这个 $\tilde x_0$ 按 $\sqrt{\bar\alpha_{t-1}}$ 缩放——意思就是"<strong>把 $\tilde x_0$ 加噪到 $t-1$ 时刻该有的强度</strong>"。</p>
+
+<h3>3.2 拆块 ②：补回"$t-1$ 时刻还该残留的噪声"</h3>
+
+<p>到了 $t-1$ 时刻，按 marginal 公式 $x_{t-1}=\sqrt{\bar\alpha_{t-1}}x_0+\sqrt{1-\bar\alpha_{t-1}}\epsilon$，<strong>还应该带有一个 $\sqrt{1-\bar\alpha_{t-1}}$ 强度的噪声</strong>。但我们已经在第 ③ 块用了 $\sigma_t$ 强度的纯随机噪声，剩下的<strong>差额</strong> $\sqrt{1-\bar\alpha_{t-1}-\sigma_t^2}$ 就由原噪声方向 $\epsilon_\theta$ 来补——它恰好<em>方差对得上</em>。</p>
+
+<h3>3.3 拆块 ③：随机性旋钮 $\sigma_t$</h3>
+
+<p>这是 DDIM 的"灵魂参数"。改变 $\sigma_t$ 就改变采样器的"随机程度"，但<em>marginal 始终保持</em>。后面我们会看到，$\sigma_t=0$ 给出最简洁、最有用的形式。</p>
+
+<p>把三块拼起来再看一眼：第 ① 块决定"目标方向"（朝模型对干净图的猜测前进），第 ② 块"配重"——把 marginal 该有的噪声量补够，第 ③ 块"加扰"——选择多大程度让链回到随机过程。前两块是<em>必须的</em>（决定 marginal 对齐），第三块是<em>可选的</em>（决定确定性 vs 随机性）。读者后续在论文里看到 $\sigma_t$ 出现在各种地方，都可以回到这三块拆解：你是想让 marginal 对齐？那就调前两块；你是想加随机？那就调第三块。</p>
+
+<div class="callout callout-note">
+📝 <strong>记号小提示</strong>：很多文献用 $\eta\in[0,1]$ 作为人类友好的旋钮，定义
+$$\sigma_t(\eta) \;=\; \eta\sqrt{\tfrac{1-\bar\alpha_{t-1}}{1-\bar\alpha_t}}\,\sqrt{1-\tfrac{\bar\alpha_t}{\bar\alpha_{t-1}}}$$
+<ul>
+  <li>$\eta=0$ → $\sigma_t=0$ → <strong>确定性 DDIM</strong>；</li>
+  <li>$\eta=1$ → $\sigma_t$ 取 DDPM 原值 → <strong>退化为 DDPM</strong>；</li>
+  <li>$0<\eta<1$ → 介于两者之间。</li>
+</ul>
+HuggingFace diffusers 的 <code>DDIMScheduler</code> 默认 $\eta=0$，就是确定性版本。
+</div>
+
+<h2>四、两个极端：$\sigma_t=0$ 和 $\sigma_t=\sigma_t^\text{DDPM}$</h2>
+
+<h3>4.1 $\sigma_t=0$：完全确定性</h3>
+
+<p>把 $\sigma_t=0$ 代入更新公式，第三块消失：</p>
+
+$$x_{t-1} \;=\; \sqrt{\bar\alpha_{t-1}}\,\tilde x_0(x_t,\epsilon_\theta) \;+\; \sqrt{1-\bar\alpha_{t-1}}\,\epsilon_\theta(x_t,t)$$
+
+<p>没有 $\epsilon$，没有 <code>randn</code>，从 $x_T$ 到 $x_0$ 整条轨迹<strong>完全由 $x_T$ 决定</strong>。同一个 $x_T$ 喂两次，会得到一模一样的图像。</p>
+
+<div class="callout callout-tip">
+💡 <strong>关键事实（第 11 章已经埋过伏笔）</strong>：这条确定性更新就是 PF-ODE 的 <em>Euler 步</em>。也就是说，<strong>确定性 DDIM ≡ 在 probability flow ODE 上做 Euler 积分</strong>。这一等价是后续 DPM-Solver / Heun / Runge-Kutta 等"更高阶 ODE 求解器"的入口——只要把 Euler 换成更高阶的求解器，就能在更少步数下达到同样精度。
+</div>
+
+<h3>4.2 $\sigma_t$ 取 DDPM 值：等同 DDPM</h3>
+
+<p>当 $\sigma_t=\sqrt{(1-\bar\alpha_{t-1})/(1-\bar\alpha_t)}\cdot\sqrt{1-\bar\alpha_t/\bar\alpha_{t-1}}$ 时，更新公式化简后<strong>恰好</strong>是 DDPM 的反向链。DDIM 论文证明：在这条 $\sigma$ 取值上，第二块的系数 $\sqrt{1-\bar\alpha_{t-1}-\sigma_t^2}$ 配上第三块的 $\sigma_t\epsilon$，重新组合后回到原 DDPM。所以——</p>
+
+<blockquote>DDPM 是 DDIM 家族中"最随机"的那一个；DDIM（$\eta=0$）是"最确定"的那一个；两者之间用 $\eta$ 自由拨。</blockquote>
+
+<p>这一句话非常值得反复咀嚼。它意味着：<strong>DDPM 不是一个独立的方法，而是 DDIM 这个更广采样器家族里一个特例</strong>。从历史叙述角度看，Ho 等人 2020 年提的 DDPM 在 Song 等人 2021 年提出 DDIM 之后被"重新解读"——原来你这个所谓"随机扩散过程"只是参数 $\eta=1$ 的特殊选择，真正自由的旋钮在我手里。这种"原方法是新方法的特例"的叙述在科研里是非常强的论文卖点，DDIM 论文就是凭这个 framing 一举占领整个采样侧领域。</p>
+
+<h2>五、为什么这个改动能"快"？ODE 的几何视角</h2>
+
+<p>前两节都是公式。这一节用一张图打通直觉。</p>
+
+<p>把 $x_T\sim\mathcal{N}(0,I)$ 看作右端"先验云"，$x_0\sim p_\text{data}$ 看作左端"数据云"。DDPM 与 DDIM 在两者间画两条<strong>性质完全不同</strong>的轨迹：</p>
+
+<svg viewBox="0 0 720 280" role="img" aria-label="DDPM 噪声轨迹 vs DDIM 确定性轨迹">
+  <g font-family="ui-sans-serif" font-size="11" fill="var(--text)">
+    <text x="60" y="20" text-anchor="middle" font-weight="600">x₀（数据云）</text>
+    <text x="660" y="20" text-anchor="middle" font-weight="600">x_T（先验 𝒩(0,I)）</text>
+
+    <ellipse cx="60" cy="140" rx="40" ry="80" fill="var(--module-accent-soft)" stroke="var(--module-accent)"/>
+    <ellipse cx="660" cy="140" rx="40" ry="80" fill="#e8f5e9" stroke="#0b5"/>
+
+    <!-- DDPM zigzag trajectories -->
+    <text x="360" y="50" text-anchor="middle" fill="#d4a017" font-weight="600">DDPM：抖动的随机路径（步小才稳）</text>
+    <path d="M 660 100 Q 590 85 560 115 T 500 95 T 440 125 T 380 100 T 320 130 T 260 95 T 200 120 T 140 105 T 90 115" fill="none" stroke="#d4a017" stroke-width="1.5" opacity="0.8"/>
+    <path d="M 660 130 Q 580 115 540 145 T 470 130 T 390 155 T 310 135 T 230 155 T 150 140 T 90 140" fill="none" stroke="#d4a017" stroke-width="1.5" opacity="0.6"/>
+
+    <!-- DDIM smooth -->
+    <text x="360" y="270" text-anchor="middle" fill="#2b80c4" font-weight="600">DDIM(η=0)：光滑 ODE 轨迹（可大步跨）</text>
+    <path d="M 660 170 C 540 195, 360 200, 90 165" fill="none" stroke="#2b80c4" stroke-width="2.2"/>
+    <path d="M 660 195 C 540 215, 360 220, 90 195" fill="none" stroke="#2b80c4" stroke-width="2.2" opacity="0.7"/>
+
+    <!-- step markers DDIM coarse -->
+    <circle cx="660" cy="170" r="3" fill="#2b80c4"/>
+    <circle cx="530" cy="195" r="3" fill="#2b80c4"/>
+    <circle cx="380" cy="200" r="3" fill="#2b80c4"/>
+    <circle cx="220" cy="190" r="3" fill="#2b80c4"/>
+    <circle cx="90" cy="165" r="3" fill="#2b80c4"/>
+    <text x="360" y="245" text-anchor="middle" fill="#2b80c4" font-size="10">只用 5 个采样点也能近似</text>
+  </g>
+</svg>
+
+<p>看图就明白：</p>
+
+<ul>
+  <li><strong>DDPM 路径剧烈抖动</strong>。因为每步都注入随机噪声，路径在 $x_t$ 空间里像布朗运动。用大步长走，<em>噪声方差和步长成正比但梯度变化也大</em>，所以必须用细步长才不爆。</li>
+  <li><strong>DDIM 路径光滑可微</strong>。因为是 ODE 解，本地有 Lipschitz 性质，Euler 法在大步长下误差仍可控。所以 1000 → 50 几乎免费。</li>
+</ul>
+
+<p>另一个观察很重要：<strong>两种采样路径在终点 $x_0$ 处的<em>分布</em>是一样的</strong>（marginal 相等是 DDIM 论文的核心保证），但<em>每条具体样本</em>不同。DDPM 同一个 $x_T$ 跑两次，因为每步注入独立噪声，得到两张不同的图；DDIM ($\eta=0$) 同一个 $x_T$ 跑两次，得到完全相同的图。这条性质对"采样多样性"和"采样可重现性"是一对此长彼消的取舍：DDPM 多样但不可重现，DDIM 可重现但多样性窄。这点在产品里很关键——做 art generation 偏好多样，做 image editing / 论文 reproduce 偏好可重现。</p>
+
+<div class="callout callout-info">
+📐 <strong>类比</strong>：开车从北京到上海。DDPM 像在风暴里开（路径剧烈抖），必须每 100 米踩一次刹车；DDIM 像晴天高速（路径平直），每 50 公里调一次方向就够。终点一样，时间天差地别。
+</div>
+
+<h2>六、跳步采样：DDIM 真正的"快"</h2>
+
+<p>更新公式没有规定 $t-1$ 必须是 $t$ 的下一格。完全可以把"下一格"改成"下 10 格"：选一个稀疏子序列 $\tau_1<\tau_2<\dots<\tau_S$（比如 $\{0,20,40,\dots,1000\}$, $S=50$），然后采样按这个子序列走。</p>
+
+<p>更新公式只需把 $t-1$ 换成 $\tau_{i-1}$，$t$ 换成 $\tau_i$，$\bar\alpha$ 用对应的：</p>
+
+$$x_{\tau_{i-1}} \;=\; \sqrt{\bar\alpha_{\tau_{i-1}}}\,\tilde x_0 \;+\; \sqrt{1-\bar\alpha_{\tau_{i-1}}-\sigma^2}\,\epsilon_\theta(x_{\tau_i},\tau_i) \;+\; \sigma\,\epsilon$$
+
+<svg viewBox="0 0 720 140" role="img" aria-label="DDIM 跳步采样示意">
+  <g font-family="ui-sans-serif" font-size="11" fill="var(--text)">
+    <!-- 1000 small ticks -->
+    <text x="20" y="30" font-weight="600">DDPM：</text>
+    <line x1="80" y1="40" x2="700" y2="40" stroke="var(--border)" stroke-width="1"/>
+    <g fill="#d4a017">
+      <!-- 50 ticks to suggest dense -->
+      <g>
+        <rect x="80" y="36" width="1" height="8"/>
+        <rect x="92" y="36" width="1" height="8"/>
+        <rect x="104" y="36" width="1" height="8"/>
+        <rect x="116" y="36" width="1" height="8"/>
+        <rect x="128" y="36" width="1" height="8"/>
+        <rect x="140" y="36" width="1" height="8"/>
+        <rect x="152" y="36" width="1" height="8"/>
+        <rect x="164" y="36" width="1" height="8"/>
+        <rect x="176" y="36" width="1" height="8"/>
+        <rect x="188" y="36" width="1" height="8"/>
+        <rect x="200" y="36" width="1" height="8"/>
+        <rect x="212" y="36" width="1" height="8"/>
+        <rect x="224" y="36" width="1" height="8"/>
+        <rect x="236" y="36" width="1" height="8"/>
+        <rect x="248" y="36" width="1" height="8"/>
+        <rect x="260" y="36" width="1" height="8"/>
+        <rect x="272" y="36" width="1" height="8"/>
+        <rect x="284" y="36" width="1" height="8"/>
+        <rect x="296" y="36" width="1" height="8"/>
+        <rect x="308" y="36" width="1" height="8"/>
+        <rect x="320" y="36" width="1" height="8"/>
+        <rect x="332" y="36" width="1" height="8"/>
+        <rect x="344" y="36" width="1" height="8"/>
+        <rect x="356" y="36" width="1" height="8"/>
+        <rect x="368" y="36" width="1" height="8"/>
+        <rect x="380" y="36" width="1" height="8"/>
+        <rect x="392" y="36" width="1" height="8"/>
+        <rect x="404" y="36" width="1" height="8"/>
+        <rect x="416" y="36" width="1" height="8"/>
+        <rect x="428" y="36" width="1" height="8"/>
+        <rect x="440" y="36" width="1" height="8"/>
+        <rect x="452" y="36" width="1" height="8"/>
+        <rect x="464" y="36" width="1" height="8"/>
+        <rect x="476" y="36" width="1" height="8"/>
+        <rect x="488" y="36" width="1" height="8"/>
+        <rect x="500" y="36" width="1" height="8"/>
+        <rect x="512" y="36" width="1" height="8"/>
+        <rect x="524" y="36" width="1" height="8"/>
+        <rect x="536" y="36" width="1" height="8"/>
+        <rect x="548" y="36" width="1" height="8"/>
+        <rect x="560" y="36" width="1" height="8"/>
+        <rect x="572" y="36" width="1" height="8"/>
+        <rect x="584" y="36" width="1" height="8"/>
+        <rect x="596" y="36" width="1" height="8"/>
+        <rect x="608" y="36" width="1" height="8"/>
+        <rect x="620" y="36" width="1" height="8"/>
+        <rect x="632" y="36" width="1" height="8"/>
+        <rect x="644" y="36" width="1" height="8"/>
+        <rect x="656" y="36" width="1" height="8"/>
+        <rect x="668" y="36" width="1" height="8"/>
+        <rect x="680" y="36" width="1" height="8"/>
+        <rect x="692" y="36" width="1" height="8"/>
+      </g>
+    </g>
+    <text x="390" y="65" text-anchor="middle" font-size="10" fill="#d4a017">T = 1000 步，全部串起来走</text>
+
+    <text x="20" y="100" font-weight="600">DDIM：</text>
+    <line x1="80" y1="110" x2="700" y2="110" stroke="var(--border)" stroke-width="1"/>
+    <g fill="#2b80c4">
+      <rect x="80" y="103" width="3" height="14"/>
+      <rect x="142" y="103" width="3" height="14"/>
+      <rect x="204" y="103" width="3" height="14"/>
+      <rect x="266" y="103" width="3" height="14"/>
+      <rect x="328" y="103" width="3" height="14"/>
+      <rect x="390" y="103" width="3" height="14"/>
+      <rect x="452" y="103" width="3" height="14"/>
+      <rect x="514" y="103" width="3" height="14"/>
+      <rect x="576" y="103" width="3" height="14"/>
+      <rect x="638" y="103" width="3" height="14"/>
+      <rect x="700" y="103" width="3" height="14"/>
+    </g>
+    <text x="390" y="135" text-anchor="middle" font-size="10" fill="#2b80c4">只在子序列上落点（这里画 10 步），跨大步</text>
+  </g>
+</svg>
+
+<p>常用的 $S$ 取值（Stable Diffusion 默认）：</p>
+
+<ul>
+  <li><strong>50 步</strong>：质量已经接近 1000 步 DDPM，肉眼几乎无差别。<em>这是 Stable Diffusion 1.x 默认值</em>。</li>
+  <li><strong>20–25 步</strong>：略微掉细节，但加速 40–50 倍，多数 demo 用这个。</li>
+  <li><strong>10 步</strong>：开始出现明显伪影，但仍勉强可用。</li>
+  <li><strong>< 5 步</strong>：DDIM 本身已撑不住，<em>这是后续 Consistency Model（第 15 章）/ Distillation（第 17 章）登场的原因</em>。</li>
+</ul>
+
+<div class="callout callout-warning">
+⚠️ <strong>跳步不是免费的</strong>：跳得越大，每一步的 Euler 误差越大。当 $S$ 太小（比如 $S=4$），$\epsilon_\theta$ 在大跨度上"看不到"轨迹的曲率，结果是图像变模糊或出现纹理。Alex 在 Lecture 11 把这个现象明确命名为 <strong>"DDIM 的 capacity problem"</strong>——单步 DDIM 本质上是 $x_t$ 和模型预测 $\tilde x_0$ 之间的<em>线性插值</em>，没法表达更弯曲的 ODE 真实轨迹。后面第 15 章的 Consistency / Flow Map 就是为了解决这个 capacity 限制。
+</div>
+
+<p>关于"如何选择跳步子序列"，有两种常见做法：</p>
+
+<ul>
+  <li><strong>线性子序列</strong>（uniform）：$\tau_i$ 等间距，比如 0, 20, 40, …, 1000。最简单，效果稳定，HuggingFace 默认。</li>
+  <li><strong>二次子序列</strong>（quadratic）：$\tau_i \propto i^2$，前期密、后期疏。理由是 $x_t$ 接近 $x_0$（小 $t$）时图像细节多，需要更密的步长。<em>DDIM 原论文实验上 quadratic 略好</em>，但差距不大。</li>
+</ul>
+
+<p>实际项目里，能省心就用线性。除非你训了非标准 schedule（如 cosine 或 v-prediction）需要特殊处理。</p>
+
+<h2>七、单步 DDIM 的"容量上限"——线性插值视角</h2>
+
+<p>这一节把 Alex 在 Lecture 11 第 11 分钟的关键图讲清楚，因为它是<em>整门课从 DDIM 跳到 Flow Map / Consistency 的桥梁</em>。</p>
+
+<div class="callout-quote">
+"Given an initial point $x_t$, our one-step DDIM is basically an interpolation between the initial point and your model predicted point. … This means that naive DDIM is severely limited in representing any function of S that's more complex than just linear relationship. … I like to term this the capacity problem of DDIM."
+</div>
+
+<p>怎么理解"线性插值"？把确定性 DDIM 公式整理一下：</p>
+
+<div class="deriv-step">
+<strong>步骤 1</strong>：代入 $\tilde x_0=(x_t-\sqrt{1-\bar\alpha_t}\,\epsilon_\theta)/\sqrt{\bar\alpha_t}$。
+<em>Why</em>：把"对干净图的猜测"显式写出来。
+</div>
+
+<div class="deriv-step">
+<strong>步骤 2</strong>：合并同类项，写成"$x_t$ 系数 + $\epsilon_\theta$ 系数"。
+$$x_s \;=\; \underbrace{\sqrt{\tfrac{\bar\alpha_s}{\bar\alpha_t}}}_{a(s,t)}\,x_t \;+\; \underbrace{\Big(\sqrt{1-\bar\alpha_s}-\sqrt{\tfrac{\bar\alpha_s}{\bar\alpha_t}(1-\bar\alpha_t)}\Big)}_{b(s,t)}\,\epsilon_\theta(x_t,t)$$
+<em>Why</em>：这一形式表明，给定 $x_t$ 和模型输出 $\epsilon_\theta$，<strong>$x_s$ 是关于 $x_t$ 和 $\epsilon_\theta$ 的线性组合</strong>，系数只依赖 $s,t$ 这对时间。
+</div>
+
+<div class="deriv-step">
+<strong>步骤 3</strong>：换个等价视角——单步 DDIM 等价于<em>沿着"$x_t$ → 模型预测的干净图 $\tilde x_0$"这条线段</em>，按 $s$ 决定的比例走一段。
+<em>Why</em>：因为 $a(s,t),b(s,t)$ 满足 $a^2(1-\bar\alpha_t)+b^2$ 等于 $\sqrt{\bar\alpha_s/\bar\alpha_t}$ 与 $\sqrt{1-\bar\alpha_s}$ 加权后恰好对应"$x_t$ 和 $\tilde x_0$ 的凸组合"。
+<strong>代价</strong>：模型只能学到"沿直线移动"——但真实 ODE 轨迹是<em>弯</em>的。
+</div>
+
+<svg viewBox="0 0 540 220" role="img" aria-label="单步 DDIM = 线性插值；多步 DDIM 才能拟合曲线 ODE">
+  <g font-family="ui-sans-serif" font-size="11" fill="var(--text)">
+    <text x="270" y="20" text-anchor="middle" font-weight="600">单步 DDIM：把弯的 ODE 拍直</text>
+
+    <!-- True curved ODE -->
+    <path d="M 100 80 C 200 30, 340 180, 460 130" fill="none" stroke="#0b5" stroke-width="2.5" stroke-dasharray="5 4"/>
+    <text x="270" y="50" text-anchor="middle" fill="#0b5" font-size="10">真实 ODE（弯）</text>
+
+    <!-- Linear DDIM step -->
+    <line x1="100" y1="80" x2="460" y2="130" stroke="#2b80c4" stroke-width="2"/>
+    <text x="270" y="155" text-anchor="middle" fill="#2b80c4" font-size="10">单步 DDIM 走的"直线"</text>
+
+    <circle cx="100" cy="80" r="5" fill="#2b80c4"/>
+    <text x="100" y="70" text-anchor="middle" font-size="10">x_t</text>
+    <circle cx="460" cy="130" r="5" fill="#2b80c4"/>
+    <text x="475" y="125" font-size="10">$\tilde x_0$（模型预测）</text>
+
+    <!-- Multi-step DDIM approximating curve -->
+    <text x="270" y="190" text-anchor="middle" fill="var(--text-muted)" font-size="10">→ 多步 DDIM 用很多短直线段拼出曲线（步多→拟合好）</text>
+  </g>
+</svg>
+
+<p>这张图的教学含义是<strong>无价</strong>的：</p>
+
+<ol>
+  <li>每一步 DDIM 都是 $x_t \to \tilde x_0$ 这条线段上的一个点；</li>
+  <li>多步 DDIM = 一系列短线段串成的折线，去逼近真实弯曲的 ODE；</li>
+  <li>步数越多，折线越贴近曲线 → 质量越好；</li>
+  <li>但<em>一步 DDIM 无论怎么训，本质上是"直线"，永远拟合不出真实的弯曲 ODE</em>——这就是 capacity 上限。</li>
+</ol>
+
+<div class="my-addition">
+🟡 <strong>教材外补充：DDIM 的 capacity problem 直接催生了后续半门课的内容。</strong>
+<ul>
+  <li><strong>Consistency Model</strong>（第 15 章）：直接把"单步 = 直线"这一限制取消，让网络<em>显式学习</em>跨大步的映射 $f(x_t,t)\to x_0$。代价是要重新训练。</li>
+  <li><strong>Flow Map / TBM</strong>（Luma AI 内部模型，Lecture 10–11 主题）：在网络里同时注入起始时刻 $t$ 和终止时刻 $s$，使一次 forward 能表达"从 $t$ 到 $s$"的任意弯曲段，<em>突破线性插值上限</em>。Alex Zhou 在 Lecture 11 演讲的核心就是这一点。</li>
+  <li><strong>DPM-Solver / Heun / RK4</strong>：保留 DDIM 训练，但把 Euler 一阶 step 换成更高阶 ODE 求解器，<em>用更准的曲线拟合，而不是更多直线段</em>。</li>
+</ul>
+所以你看：DDIM 自己是 2021 年的工作，但它<em>定义了后续 5 年的研究方向</em>。
+</div>
+
+<h2>八、DDIM Inversion：把图像"反推"成它的种子噪声</h2>
+
+<p>确定性 DDIM 还有一个免费赠送的强力工具：<strong>DDIM inversion</strong>。</p>
+
+<p>注意确定性 DDIM 是一个<em>可逆的</em>映射 $x_T \leftrightarrow x_0$。如果我们能从 $x_T$ 走到 $x_0$，那反过来——给我一张真实图 $x_0$，<strong>我们能不能找到产生它的那个 $x_T$？</strong></p>
+
+<p>答案：能。把 DDIM 的更新公式反过来求解 $x_t$ 关于 $x_{t-1}$ 的关系：</p>
+
+$$x_t \;\approx\; \sqrt{\bar\alpha_t}\,\tilde x_0(x_{t-1},\epsilon_\theta) \;+\; \sqrt{1-\bar\alpha_t}\,\epsilon_\theta(x_{t-1},t-1)$$
+
+<p>注意这是"近似反向"，因为这里我们用 $\epsilon_\theta(x_{t-1},\cdot)$ 代替了理论上应该是 $\epsilon_\theta(x_t,\cdot)$——但在小步长下两者近似相等，所以可行。</p>
+
+<p><strong>这一过程有什么用？</strong></p>
+
+<ul>
+  <li><strong>真实图编辑</strong>：把照片 inversion 到 $x_T$，再加 prompt 引导，DDIM 走回去得到"在原图基础上做修改"的结果。这是 Prompt-to-Prompt、Null-text Inversion、SDEdit、InstructPix2Pix 这一系列论文的核心算法。</li>
+  <li><strong>风格迁移</strong>：把图 A inversion 到噪声、再用 prompt B 走回，得到 A 的内容 + B 的风格。</li>
+  <li><strong>真实图作为种子的可重现采样</strong>：固定 $x_T$ 后，DDIM 是<em>函数</em>，可以做 A/B 测试。</li>
+</ul>
+
+<div class="callout callout-tip">
+💡 <strong>为什么 DDPM 没有 inversion？</strong>因为 DDPM 每一步注入新随机噪声 $\epsilon$，反向时无法恢复——你不知道当时具体抽到了哪个 $\epsilon$。<strong>只有去掉了随机性的 DDIM，反向才有定义</strong>。这也是为什么本章标题强调"去掉随机性"——可逆性是 $\sigma_t=0$ 的隐性礼物。
+</div>
+
+<h2>九、DDIM 在 Guidance 里的双重角色</h2>
+
+<p>Lecture 7（Guidance）反复提到 DDIM，并不是把它当成"采样器"，而是当成"<strong>能在每步给出干净图估计的工具</strong>"。讲师亲口讲过一段对话：</p>
+
+<div class="callout-quote">
+"Um, I have an idea." "Okay, let's go." "I recall that we earlier showed that we could estimate $X_0$ from $X_T$. $X_0$ will have a lot less noise than $X_T$. Maybe we could feed $X_0$ to the classifier."<br>
+"Perfect answer. This is exactly what we're going to do. Remember how we do DDIM? At each time step of DDIM, we can actually have a clean data estimation from those noisy time steps."
+</div>
+
+<p>这就是 <strong>DPS（Diffusion Posterior Sampling）</strong>和 <strong>LGD（Loss-Guided Diffusion）</strong>的核心技巧：</p>
+
+<ol>
+  <li>在 DDIM 每一步用 $\tilde x_0(x_t,\epsilon_\theta)$ 拿到"干净图估计"；</li>
+  <li>把这个估计喂进 off-the-shelf 分类器（或任意任务模型）；</li>
+  <li>反传得到一个梯度 $\nabla_{x_t}\mathcal{L}(\tilde x_0,\text{condition})$；</li>
+  <li>用这个梯度修正下一步 $x_{t-1}$，把生成"拉"向 condition。</li>
+</ol>
+
+<p>这里 DDIM 不再是"加速器"，而是"<strong>提供干净图估计的窗口</strong>"——它的 $\tilde x_0$ 公式是几乎所有 guidance 算法的依赖。</p>
+
+<p>另一个有趣的应用是 SDEdit/SDXL Refiner 风格的"中途启动"：</p>
+
+<div class="callout-quote">
+"You start by going back some noise … and then you just continue on DDIM as normal. … We don't need to go back all the way to the beginning anymore. We just start from the middle of the diffusion."
+</div>
+
+<p>这种"从中途时刻 $t<T$ 起步、用一张草图作为 $\tilde x_0$ 启动 DDIM"的玩法，就是 SDEdit、img2img、ControlNet refiner 等技巧的基础。<strong>所有这些都建立在 DDIM 的确定性反向链上</strong>。</p>
+
+<h2>十、超越线性插值：从 DDIM 到"两时刻 DDIM"</h2>
+
+<p>这一节把 Lecture 11 后半段 Alex 介绍的"如何修复 capacity problem"思路讲完。它不是 DDIM 本身的内容，但<strong>是讲师在引入 DDIM 时就立刻提到的"后续路线"</strong>，体现了课程怎么把 DDIM 当成"基线"使用。</p>
+
+<p>核心修补：让网络<em>同时接收起始时刻 $t$ 和终止时刻 $s$</em>——以前网络只看 $t$，现在看 $(t,s)$。这一改动让单步映射不再被锁在直线上。Alex 原话：</p>
+
+<div class="callout-quote">
+"A simple fix for this capacity issue is just to inject S into the network. … A single call of DDIM, if you inject both T and S into the network, can now cover pretty complex solutions such as OD integrals. … Before, the end points used to be a fixed linear interpolation, but now the endpoint can actually slide along this OD integral."
+</div>
+
+<p>翻译过来：</p>
+
+<ul>
+  <li><strong>原 DDIM</strong>：网络是 $\epsilon_\theta(x_t, t)$。给定 $x_t$ 和 $t$，输出方向唯一。然后用 DDIM 公式按 $s$ 比例插值——所以"终点"只能在直线上。</li>
+  <li><strong>两时刻 DDIM</strong>：网络是 $f_\theta(x_t, t, s)$。给定 $(t,s)$，网络可以输出<em>不同的方向</em>——把"从 $t$ 到 $s$"的整段曲线压成一次 forward。终点可以沿真实 ODE 曲线滑动。</li>
+</ul>
+
+<p>有了这层改造，再配合一个叫 <strong>inductive learning</strong> 的训练目标，就能教网络逐步学会"任意两时刻间的映射"。Alex 在 Lecture 11 中段花了 10 分钟讲这个 inductive 训练过程：</p>
+
+<ol>
+  <li><strong>Base case</strong>：当 $t=s$，网络必须输出 identity 映射。讲师强调"<em>这是 DDIM 的一个特殊性质</em>"——DDIM 公式中当 $s=t$ 时三块化简为 $x_s=x_t$，<strong>对任何 $\theta$ 成立</strong>，包括未训练的 $\theta$。所以 base case 是"免费"的。</li>
+  <li><strong>Induction step</strong>：用某个中间时刻 $r$ 作为"教师"——$Q_r$ 离 $Q_s$ 已经很近，让网络学会"从 $Q_r$ 走到 $Q_s$"比直接从 $Q_t$ 跳到 $Q_s$ 容易得多。然后用归纳法<em>逐步推</em>到更远的 $t$。</li>
+</ol>
+
+<p>这种"<strong>近距离教远距离</strong>"的训练 paradigm，是后来 Consistency Model / Flow Map / TBM 等 1-step 模型的共同底层逻辑。Alex 把它形象地描述为"让 $Q_r$ 慢慢往 $Q_s$ 滑动，使学生模型分布也慢慢往 $Q_s$ 滑动"。</p>
+
+<div class="callout callout-tip">
+💡 <strong>关键启发</strong>：DDIM 本身没解决 capacity problem，但它<em>提供了解决问题所需的所有零件</em>——确定性反向、可解析的 $\tilde x_0$、$t=s$ 时的 identity 保证。所以"在 DDIM 之上加 capacity"就成了未来 5 年 few-step / one-step diffusion 的主线。从这个角度看，第 16 章不只是讲 DDIM 这个采样器，而是<em>讲整条采样侧研究的发源地</em>。
+</div>
+
+<h2>十一、DDIM ↔ Flow Matching：是同一回事吗？</h2>
+
+<p>Lecture 11 的标题就是"Diffusion & Flow Matching"。Alex 在演讲里反复强调一句话：</p>
+
+<div class="callout-quote">
+"DDIM … reduces to Euler sampler in a flow-matching schedule."
+</div>
+
+<p>翻译：在 Flow Matching 的线性插值噪声调度（rectified flow $x_t=(1-t)x_0+t\epsilon$）下，<strong>DDIM 的确定性更新公式退化为 Flow Matching 的 Euler 采样步</strong>。</p>
+
+<p>这一等价意味着：</p>
+
+<ul>
+  <li>DDIM 不是 DDPM 专属——它是<em>所有 ODE 形式生成模型的通用 Euler 采样器</em>；</li>
+  <li>在 Flow Matching 下叫"Euler sampler"，在 DDPM 下叫"DDIM"，两者是同一个东西穿了不同衣服；</li>
+  <li>所以 Stable Diffusion 3 / SD-Turbo 等 Flow Matching 模型用"Euler sampler"就够了，无需引入"DDIM"这个新名词；但用户层面，习惯仍然把它叫 DDIM。</li>
+</ul>
+
+<div class="callout callout-info">
+🧬 <strong>历史小注</strong>：Song & Ermon 在 2021 年提出 DDIM 时，还没有人把它跟 ODE 显式联系起来。直到 Score SDE 论文（Song et al. 2021）和 Flow Matching 论文（Lipman et al. 2023）出来后，社区才意识到这一切是同一棵树上的分支。Alex 在 Lecture 11 也提到 DDIM 的发明者 Jiaming Song 现在是 Luma AI 的首席科学家——"DDIM 的导师"。
+</div>
+
+<h2>十二、PyTorch 实现骨架（最小可跑版）</h2>
+
+<p>下面是 50 步确定性 DDIM 的最小实现。模型 <code>eps_theta</code> 假定已经用 DDPM 损失训好。</p>
+
+<pre><code>import torch
+
+@torch.no_grad()
+def ddim_sample(eps_theta, shape, num_steps=50, eta=0.0,
+                betas=None, device="cuda"):
+    """
+    Deterministic DDIM (eta=0) sampling from a DDPM-trained eps_theta.
+    eps_theta: nn.Module, eps_theta(x_t, t) -> predicted noise
+    betas:     full DDPM beta schedule of length T (e.g. T=1000)
+    """
+    T = len(betas)
+    alphas = 1.0 - betas
+    alphas_bar = torch.cumprod(alphas, dim=0).to(device)   # \bar\alpha_t
+
+    # 1) Pick a sub-sequence of timesteps (uniform spacing)
+    step_idx = torch.linspace(0, T - 1, num_steps + 1, dtype=torch.long).to(device)
+    step_idx = step_idx.flip(0)   # T-1, ..., 0
+
+    # 2) Start from prior noise
+    x = torch.randn(shape, device=device)
+
+    for i in range(num_steps):
+        t      = step_idx[i]
+        t_prev = step_idx[i + 1]
+
+        a_t      = alphas_bar[t]
+        a_prev   = alphas_bar[t_prev] if t_prev >= 0 else torch.tensor(1.0, device=device)
+
+        # ----- predict noise -----
+        eps = eps_theta(x, t.expand(shape[0]))
+
+        # ----- predict x0 (Tweedie / x0-prediction) -----
+        x0_pred = (x - (1 - a_t).sqrt() * eps) / a_t.sqrt()
+
+        # ----- DDIM sigma (controlled by eta) -----
+        sigma = eta * ((1 - a_prev) / (1 - a_t)).sqrt() * (1 - a_t / a_prev).sqrt()
+
+        # ----- direction pointing to x_t -----
+        dir_xt = (1 - a_prev - sigma ** 2).clamp(min=0).sqrt() * eps
+
+        noise  = sigma * torch.randn_like(x) if eta > 0 else 0.0
+
+        x = a_prev.sqrt() * x0_pred + dir_xt + noise
+
+    return x
+</code></pre>
+
+<p>把 <code>num_steps=50, eta=0</code> 设上，这就是 Stable Diffusion 1.x 时代最经典的采样器。换成 <code>eta=1</code> 就是 DDPM。<code>num_steps</code> 拨到 20、10 测速，肉眼对照质量。</p>
+
+<div class="callout callout-note">
+🛠️ <strong>三个工程细节，看代码时容易跳过</strong>：
+<ol>
+  <li><code>step_idx.flip(0)</code>：从大到小遍历，符合"反向去噪"方向。</li>
+  <li><code>(1 - a_prev - sigma ** 2).clamp(min=0)</code>：极少数边界情况会算出微小负值（浮点误差），clamp 防 NaN。</li>
+  <li><code>a_prev = 1.0</code> 当 $t_\text{prev}=-1$ 时：最后一步走到 $x_0$，对应 $\bar\alpha_0=1$。</li>
+</ol>
+</div>
+
+<h2>十三、把 DDIM 放回整门课的地图</h2>
+
+<p>这是<em>整门课讲师在 Lecture 7、10、11 反复回顾 DDIM</em> 的原因——它不是一个孤立的采样器，而是<strong>下游一整片技术的前置条件</strong>：</p>
+
+<ul>
+  <li><strong>第 11 章 PF-ODE</strong>：DDIM 是 PF-ODE 的 Euler 解 ← <em>本章基础</em>。</li>
+  <li><strong>第 13 章 DPM-Solver</strong>：把 DDIM 的 Euler 一阶升级为更高阶。</li>
+  <li><strong>第 14 章 SDE Solver</strong>：留住一定的随机性（$\eta>0$）以提升多样性。</li>
+  <li><strong>第 15 章 Consistency Model</strong>：突破单步 DDIM 的 capacity 上限，用网络直接学跨大步的映射。</li>
+  <li><strong>第 17 章 Distillation</strong>：在 DDIM 轨迹上做"老师→学生"蒸馏，让学生 1 步追上老师 50 步。</li>
+  <li><strong>第 18 章 Latent Diffusion / SDXL</strong>：默认采样器就是 DDIM。</li>
+  <li><strong>第 19 章 Guidance / DPS</strong>：每步用 DDIM 的 $\tilde x_0$ 作为分类器输入 ← <em>本章 §9</em>。</li>
+  <li><strong>第 20 章 Inversion / Editing</strong>：基于 DDIM inversion 的真实图编辑全家桶 ← <em>本章 §8</em>。</li>
+</ul>
+
+<p>如果你只允许带<strong>一个</strong>采样器去荒岛，那就是 DDIM。</p>
+
+<figure class="clip-frame">
+  <iframe src="https://www.youtube.com/embed/H7MxR3XDt30?start=576" title="Linqi Zhou (Luma AI) — DDIM 与单步 capacity problem" allowfullscreen></iframe>
+  <figcaption>📺 CMU 10799 S26 Lecture 11（9:36 处）—— Linqi (Alex) Zhou：DDIM 的 "interpolation" 视角 & capacity problem</figcaption>
+</figure>
+
+<h2>十四、常见疑问 FAQ</h2>
+
+<h3>14.1 DDIM 比 DDPM 质量更差吗？</h3>
+
+<p>同步数下<strong>几乎无差别</strong>。论文实验：1000 步 DDPM 和 1000 步 DDIM ($\eta=0$) FID 差距在噪声水平内。DDIM 真正的"价值"在<strong>少步数下不掉</strong>：50 步 DDIM ≈ 1000 步 DDPM，但 50 步 DDPM 就明显糊掉了。</p>
+
+<h3>14.2 DDIM 用 $\eta=1$ 真的等于 DDPM 吗？</h3>
+
+<p>采样轨迹的<strong>分布</strong>等价。具体每条样本不等，因为 $\epsilon$ 是独立采的。但 $x_T$ 到 $x_0$ 的<em>边缘分布</em>完全一样。</p>
+
+<h3>14.3 DDIM 多样性比 DDPM 差吗？</h3>
+
+<p><strong>会差一点</strong>。$\eta=0$ 时，$x_0$ 完全由 $x_T$ 决定，所以多样性来源只是初始 $x_T$ 的随机。DDPM 每步还注入新随机，所以"全局多样性"略大。实践中：如果你做 art/创意 → 用 $\eta=0.5$ 或 $\eta=1$（多样性优先）；做 image editing 或可重现实验 → 用 $\eta=0$（一致性优先）。</p>
+
+<h3>14.4 为什么 SD 默认就是 DDIM 而不是 DDPM？</h3>
+
+<p>因为<strong>50 步 vs 1000 步差 20 倍速度</strong>。在产品里这是用户体验上的天壤之别。</p>
+
+<h3>14.5 DDIM 跟 Consistency Model 有什么区别？</h3>
+
+<p>简单一句话：</p>
+
+<ul>
+  <li><strong>DDIM</strong> = 多步确定性采样器，不重训模型。</li>
+  <li><strong>Consistency Model</strong>（第 15 章）= 单步采样器，需要专门训练。Alex 在 Lecture 11 把 DDIM 称为 CM 的"<em>线性插值上限版本</em>"——CM 是把这一上限抬掉。</li>
+</ul>
+
+<h3>14.6 DDIM 训练时要做特殊处理吗？</h3>
+
+<p><strong>不需要</strong>。这是 DDIM 的最大优点之一。你拿任何标准 DDPM 训练流程（MSE 损失、$\epsilon_\theta$ 参数化、cosine 或 linear 调度）训出的模型，都能直接换 DDIM 采样器用。这一点也是 DDIM 被工业界迅速接受的原因——没有迁移成本。</p>
+
+<h3>14.7 我可以混合 DDIM 和 DDPM 吗？比如前 800 步用 DDIM、后 200 步用 DDPM？</h3>
+
+<p>理论上可以——只要换 $\eta$ 即可。但实际上很少这么做。一种常见变体是<strong>动态 $\eta$</strong>：高噪声段用 $\eta=0$（确定地把 $x_T$ 推向数据流形）、低噪声段用 $\eta>0$（注入扰动以增加多样性）。Karras 的 EDM 论文（2022）系统研究了这类"churn" 技巧，但对一般用户而言纯 $\eta=0$ DDIM 已经够好。</p>
+
+<div class="takeaways" style="background:#0b5; color:#fff; padding:1.4rem; border-radius:8px; margin-top:2rem;">
+  <h3 style="margin-top:0; color:#fff;">本章要记住的（讲师亲口给的核心）</h3>
+  <ol>
+    <li><strong>DDIM 不改模型，只改采样</strong>。任何 DDPM 权重 + 一个新循环就能跑——10×–50× 加速。</li>
+    <li><strong>关键洞察：训练损失只锁 marginal $q(x_t|x_0)$，不锁链</strong>。所以可以换一条共享 marginal、但反向确定的非 Markov 链。</li>
+    <li><strong>核心公式三块</strong>：朝预测的 $\tilde x_0$ 走 + 补回适当噪声 + 可选随机扰动 $\sigma_t\epsilon$。$\eta\in[0,1]$ 是随机性旋钮。</li>
+    <li><strong>$\eta=0$ ↔ PF-ODE 的 Euler 解</strong>。这是它跨大步不爆的根本原因（Alex：DDIM "reduces to Euler sampler in a flow-matching schedule"）。</li>
+    <li><strong>跳步采样：1000 → 50 几乎免费，10 仍可用，<5 撑不住</strong>。撑不住的根源是"单步 DDIM = 线性插值"——这就是 Alex 命名的 <em>capacity problem</em>。</li>
+    <li><strong>DDIM Inversion 是确定性的隐性礼物</strong>。可逆性 ⇒ 真实图能反推回 $x_T$ ⇒ 编辑、风格迁移、SDEdit、ControlNet refiner 的算法底座。</li>
+    <li><strong>Guidance 依赖 DDIM 的 $\tilde x_0$ 公式</strong>。DPS / LGD / classifier guidance 在每一步用 $\tilde x_0$ 作为干净图入口。</li>
+    <li><strong>这是整门课 Module 5 的基石</strong>。后面 DPM-Solver、Consistency Model、Distillation、Latent Diffusion、Inversion-based editing 全部站在 DDIM 这张地图上。</li>
+  </ol>
+</div>
+
+</article>

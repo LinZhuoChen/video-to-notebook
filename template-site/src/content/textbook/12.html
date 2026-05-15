@@ -1,0 +1,530 @@
+<style>
+  .cnf-ch { line-height: 1.7; }
+  .cnf-ch svg { display: block; margin: 1.2rem auto; max-width: 100%; height: auto; }
+  .cnf-ch .clip-frame { max-width: 720px; margin: 1.4rem auto; }
+  .cnf-ch .clip-frame iframe { width: 100%; aspect-ratio: 16/9; border: 0; border-radius: 6px; }
+  .cnf-ch .clip-frame figcaption { color: var(--text-muted); font-size: 0.85rem; margin-top: 0.4rem; text-align: center; }
+  .cnf-ch .tldr { background: var(--surface-soft); border-left: 4px solid var(--module-accent); padding: 1rem 1.2rem; border-radius: 0 6px 6px 0; margin: 1.4rem 0; }
+  .cnf-ch .tldr h2 { margin-top: 0; font-size: 1.05rem; }
+  .cnf-ch .callout { padding: 0.7rem 1rem; margin: 1rem 0; border-radius: 0 6px 6px 0; }
+  .cnf-ch .callout-info { background: #eef6fc; border-left: 4px solid #2b80c4; }
+  .cnf-ch .callout-note { background: #f3f0fa; border-left: 4px solid #6f4dd0; }
+  .cnf-ch .callout-warning { background: #fff6e0; border-left: 4px solid #d4a017; }
+  .cnf-ch .callout-tip { background: #e8f5e9; border-left: 4px solid #0b5; }
+  .cnf-ch .callout-quote { background: var(--surface-soft); border-left: 3px solid var(--border-strong); padding: 0.5rem 1rem; margin: 0.8rem 0; font-style: italic; color: var(--text-muted); }
+  .cnf-ch .my-addition { background: #fff7d6; border-left: 4px solid #b8860b; padding: 0.7rem 1rem; margin: 1rem 0; border-radius: 0 6px 6px 0; }
+  .cnf-ch pre { background: #1f1f1f; color: #f6f4ee; padding: 1rem; border-radius: 6px; font-size: 0.86rem; line-height: 1.55; overflow-x: auto; }
+  .cnf-ch code:not(pre code) { background: var(--surface-soft); padding: 0.1rem 0.35rem; border-radius: 3px; font-size: 0.9em; }
+  .cnf-ch h2 { border-bottom: 1px solid var(--border); padding-bottom: 0.3rem; margin-top: 2.4rem; }
+  .cnf-ch h3 { color: var(--module-accent); margin-top: 1.6rem; }
+  .cnf-ch .deriv-step { margin: 0.8rem 0; padding: 0.6rem 0.8rem; background: var(--surface-soft); border-radius: 4px; }
+  .cnf-ch .deriv-step strong { color: var(--module-accent); }
+  .cnf-ch table { border-collapse: collapse; margin: 1rem 0; width: 100%; font-size: 0.9rem; }
+  .cnf-ch th, .cnf-ch td { border: 1px solid var(--border); padding: 0.5rem 0.7rem; text-align: left; vertical-align: top; }
+  .cnf-ch th { background: var(--surface-soft); }
+  @keyframes cnf-flow { 0% { offset-distance: 0%; } 100% { offset-distance: 100%; } }
+  .cnf-ch .flow-dot { animation: cnf-flow 4s linear infinite; }
+</style>
+
+<article class="cnf-ch">
+
+<h1>12. Continuous Normalizing Flow：用一个 ODE 把噪声变成数据</h1>
+
+<p style="font-size:0.95rem; color:var(--text-muted);">主源：CMU 10799 S26 Lecture 5《Flow Matching》（讲师在 Meta 的实习导师 Ricky T. Q. Chen 发表了 2018 年的 Neural ODE 原始论文）；副源：Vizuara《Principles of Diffusion Models》Lecture 9 — Introduction to Flow Models。</p>
+
+<div class="tldr">
+  <h2>📌 TL;DR</h2>
+  <p><strong>Continuous Normalizing Flow（CNF）= 用一个常微分方程（ODE）把简单的先验分布（高斯噪声）变形成目标分布（数据）。</strong>它的核心式只有一行：</p>
+  $$\frac{dz}{dt} = v_\theta(z, t), \quad z(0) \sim p_0, \quad z(1) \sim p_{\text{data}}$$
+  <p>你训练一个神经网络去拟合<strong>速度场</strong> $v_\theta$；采样的时候就调一个 ODE solver，把噪声 $z(0)$ 一步步推到数据 $z(1)$。"流"（flow）就是这个速度场对时间的积分。</p>
+  <p>关键事实：<strong>第 11 章里的 PF-ODE（probability flow ODE）就是一个 CNF</strong>。也就是说，diffusion model 本质上是 CNF 的一种特例，只是它用 score matching 间接训练，而不是直接训练 velocity。这把 diffusion 和 normalizing flow 这两个看似不同的家族统一了起来，也为下一章 <a href="/video-to-notebook/textbook/13/">Flow Matching</a>（直接回归速度场）铺好了路。</p>
+  <p><strong>为什么开篇 Ricky 的 2018 工作？</strong>因为 CNF 是"用一个 ODE 描述生成过程"这一思想的源头。理解了它的 <em>conservation of mass</em>、<em>continuity equation</em>、<em>instantaneous change-of-variables</em>，你才能看懂为什么后面那些"简简单单做 linear interpolation"的 flow matching 居然是一个数学上自洽的生成模型。</p>
+</div>
+
+<h2>一、回到那个让人发愁的问题：能不能再简单一点？</h2>
+
+<p>CMU 第 5 讲一开场，讲师做了一段三句话的复盘，目的是把你从前面的"复杂数学"里捞出来：</p>
+
+<ul>
+  <li>上一讲我们学了 <strong>diffusion</strong>，它的做法是<em>慢慢加噪</em>再<em>慢慢去噪</em>，每个时间步对噪声做一点点小修补；</li>
+  <li>还学了 <strong>score-based model</strong>，做的事情几乎一样，只是把"去噪"这件事换成了"沿 score 方向走"；</li>
+  <li>把这两个家伙的 time step 推到无穷大，它们都收敛到同一个东西——<strong>continuous-time stochastic process</strong>（连续时间随机过程），可以用 <strong>stochastic differential equation</strong>（SDE）来写下来。</li>
+</ul>
+
+<p>给定一个 forward SDE，你<em>直接</em>就能写出 reverse SDE，里面会冒出来一个 score function $\nabla_x \log p_t(x)$，然后用 score matching 去学怎么解这个 reversed SDE。一切都很美丽，但<strong>一切都很烦</strong>——你要懂 Itô 积分、要懂 Anderson 反向公式、要懂 Fokker–Planck，新人看完想退课。讲师的潜台词是：<em>这套数学是历史上偶然走过来的路径，不是唯一的路径</em>。</p>
+
+<div class="callout-quote">
+"And I think someone after they took the quiz, they were already be like, 'Oh, I feel like there should be an easier way.'" —— CMU L5
+</div>
+
+<p>这就是这一章（其实也是下一章 Flow Matching）的<strong>母问题</strong>：</p>
+
+<blockquote>给定一张数据图 $x_1$ 和一个噪声 $x_0$，<strong>构造从噪声到数据的最简单轨迹</strong>是什么？</blockquote>
+
+<p>课堂上学生的回答只有两个字：<strong>linear combination（线性组合）</strong>。讲师直接说："That's exactly correct." 然后顺着这条路推下去：</p>
+
+<div class="deriv-step">
+<strong>线性插值轨迹</strong>
+$$x_t = (1 - t) \cdot x_0 + t \cdot x_1, \quad t \in [0, 1]$$
+<em>Why</em>：起点 $t=0$ 时是纯噪声 $x_0$，终点 $t=1$ 时是纯数据 $x_1$，中间一路混合。
+</div>
+
+<p>讲师在白板上写："at the beginning of time you'll have a large portion of noise mixed with some portion of data, then as you go on the portion of the noise become less and less, and the portion of data become more and more."</p>
+
+<div class="deriv-step">
+<strong>瞬时速度</strong>
+$$\frac{dx_t}{dt} = x_1 - x_0$$
+<em>Why</em>：从 $t = 0.25$ 走到 $t = 0.50$，你需要"减掉 25% 的噪声、加上 25% 的数据"，所以位移就是 $0.25 \cdot (x_1 - x_0)$。把 $\Delta t$ 趋于 0，速度就是常数 $x_1 - x_0$——<strong>不管你在哪一个时间步，方向、速度都一样</strong>。
+</div>
+
+<div class="callout callout-tip">
+💡 <strong>这就是 Flow Matching 的全部预告</strong>。训练流程被讲师压缩成 5 行：
+<ol style="margin: 0.3rem 0;">
+  <li>采一个噪声 $x_0 \sim \mathcal{N}(0, I)$；</li>
+  <li>采一个数据 $x_1 \sim p_{\text{data}}$；</li>
+  <li>采一个时间步 $t \sim U[0, 1]$；</li>
+  <li>构造 $x_t = (1-t) x_0 + t x_1$；</li>
+  <li>训练 $v_\theta(x_t, t)$ 去匹配真实速度 $x_1 - x_0$。</li>
+</ol>
+采样时，从 $t=0$ 的噪声出发，按学到的速度场逐步前进到 $t=1$。<br>
+<strong>"Class is over."</strong> —— 讲师当场打趣，意思是直觉就这么简单。
+</div>
+
+<p>但事情当然没那么便宜。讲师立刻自问自答：</p>
+
+<div class="callout-quote">
+"Like why do we need all those previous diffusion math like stochastic differential equations? Why do we need this? Like also why is this even valid? Why is this the same?" —— CMU L5
+</div>
+
+<p>这一章剩下的所有内容，都是为了回答<strong>"why this is even valid"</strong>这一个问题。我们必须回到 2018 年，回到 Ricky 那篇里程碑式的论文。</p>
+
+<h2>二、2018 年的种子：Neural ODE / Continuous Normalizing Flow</h2>
+
+<p>讲师特意停下来给历史定位（这种带"我亲历"的小掌故是教材里很容易漏掉的、却又最有信息量的部分）：</p>
+
+<div class="callout-quote">
+"Back in 2018 there's this pretty seminal paper called continuous normalizing flow or neural ordinary differential equation, and basically this guy Ricky who was my Meta intern mentor — actually super legendary guy — proposed continuous normalizing flows." —— CMU L5
+</div>
+
+<p>这里"Ricky"指 <strong>Ricky T. Q. Chen</strong>，论文是 Chen et al. 2018 的 <em>Neural Ordinary Differential Equations</em>（NeurIPS 2018 best paper）。这篇论文里有一节叫 "Continuous Normalizing Flow"，把传统 normalizing flow 的"离散层堆叠"换成了"时间连续的速度场"。Ricky 本人后来去了 Meta（讲师就是在 Meta 做实习时被他带的），是后续 Flow Matching 系列（Lipman et al. 2023）的合作者之一——所以这条线从 2018 一直拉到 2023 都是一脉相承的。</p>
+
+<p>CNF 的核心定义只有一句话：</p>
+
+<blockquote><strong>用一个 ODE，把简单的初始分布（如高斯）变换到目标分布（如图像）。</strong></blockquote>
+
+$$\frac{dz}{dt} = v_\theta(z, t), \quad z(0) = z_0 \sim p_0$$
+
+<p>从 $t = 0$ 积分到 $t = 1$，得到 $z(1)$。如果速度场训得对，$z(1)$ 的分布就是数据分布 $p_{\text{data}}$。<strong>采样 = 解 ODE</strong>——这就是 CNF 最朴素的工作方式。</p>
+
+<p>这里需要先建立两个直觉锚点，否则后面所有数学都飘着：</p>
+
+<ul>
+  <li><strong>"速度场"是什么？</strong> 想象数据空间里的<em>每一个点</em>，在<em>每一个时间</em>，都贴着一个小箭头，告诉你"下一瞬间你应该往哪儿走、走多快"。$v_\theta(z, t)$ 就是这片"箭头海"。神经网络的任务是学这片箭头海。</li>
+  <li><strong>"积分"是什么？</strong> 你拿一个粒子放在某个点 $z(0)$，它根据当前点的箭头走一小步，到了新的点 $z(0+\Delta t)$，再根据新点的箭头走一小步……重复无数次。这就是数值 ODE solver 在做的事情。粒子最终走到的位置就是 $z(1)$。</li>
+</ul>
+
+<h2>三、什么是 Normalizing Flow（先讲离散版的）</h2>
+
+<p>讲师在引出"continuous"之前，先把"normalizing flow"这四个字拆开。课堂里他直接问："Anyone remember what is normalizing flow?" 一个学生答："You can reconstruct the process." 讲师补充："Yes, it's an <strong>invertible generative model</strong>."</p>
+
+<h3>3.1 离散版 NF：一个可逆神经网络 + 换元公式</h3>
+
+<p>传统的（离散版）normalizing flow 是这样：你有一个<strong>可逆</strong>神经网络 $f: z \mapsto x$，已知简单分布 $p_Z(z)$，则<strong>变量替换公式</strong>给出 $x$ 的概率密度：</p>
+
+$$\log p_X(x) = \log p_Z\big(f^{-1}(x)\big) + \log \left|\det \nabla f^{-1}(x)\right|$$
+
+<p>训练目标：最大化训练数据的 $\log p_X(x)$。但<strong>要让这个公式可用，$f$ 必须满足两个苛刻条件</strong>：</p>
+
+<ol>
+  <li><strong>可逆</strong>：你得能从 $x$ 算回 $z$（否则没法算 $\log p_Z(f^{-1}(x))$）；</li>
+  <li><strong>Jacobian determinant 可算</strong>：$\det \nabla f^{-1}$ 一般是 $O(d^3)$ 的代价（$d$ 是数据维度，像素图就是几千上万），普通神经网络根本算不动。</li>
+</ol>
+
+<p>所以传统 NF 用了各种"魔法架构"绕开：<strong>coupling layers</strong>（RealNVP / NICE，把维度切两半，一半保持不变、另一半做仿射变换，这样 Jacobian 是三角矩阵，行列式 = 对角元乘积）、<strong>autoregressive flows</strong>（MAF / IAF，逐维度生成，Jacobian 也是三角）等等。代价是 architecture 严重受限——你不能自由地用任何 ResNet / Transformer 当 $f$，必须迁就"Jacobian 必须长成三角形或对角形"这个先天结构。</p>
+
+<div class="callout callout-info">
+🔍 <strong>传统 NF 的尴尬</strong>：你越想让模型表达力强（比如把每层做得更深），$\log \det$ 算起来越贵；但你为了让 $\log \det$ 便宜，又必须把网络架构搞得很死板。<em>表达力和可算性</em>互相拉扯，是 2014-2018 间 NF 一直没能挑战 GAN 的核心原因。CNF 的卖点之一就是把这个拉扯<em>彻底化解</em>。
+</div>
+
+<h3>3.2 流的几何直觉：streams never cross</h3>
+
+<p>讲师在解释"为什么叫 normalizing flow"时，用了一个非常物理化的画面：</p>
+
+<div class="callout-quote">
+"Imagine how you're following a stream of river or water or the wind. If you just follow the stream, the stream will always point to one direction. It will never... if you just follow the wind, you're able to basically get from one point to another point guaranteed. So like deterministically, and because this process is deterministic, if you follow this flow, you're actually going to get an invertible transformation because everything is deterministic." —— CMU L5
+</div>
+
+<p>用一句话概括：<strong>"the streams never cross"</strong>。流线（streamline）永不相交——任意一个点只属于一条流线，所以从起点出发顺流走能到达终点，逆流走能回到起点。流的<em>确定性</em> ⇒ <em>可逆性</em>。</p>
+
+<h2>四、为什么要"continuous"？把 layer 数推到无穷</h2>
+
+<p>Ricky 的核心改动：把离散版 NF 的"$L$ 层堆叠 + 每层一个 $f_\ell$"换成"<strong>连续时间的速度场</strong> $v_\theta(z, t)$"。这听起来像数学游戏，但它的真正动机是 ResNet 的一个观察——ResNet 的残差块 $x_{\ell+1} = x_\ell + f_\ell(x_\ell)$ 在层数趋于无穷、单层贡献趋于无穷小时，<em>就是 Euler 方法在解一个 ODE</em>。把 ResNet 看成 ODE 的离散化，那 ODE 本身就是"无穷深 ResNet"，参数还更少（共享 $v_\theta$）。两边的对应关系是：</p>
+
+<table>
+  <thead>
+    <tr><th>离散 NF</th><th>Continuous NF（CNF）</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>$L$ 层堆叠的可逆网络 $f = f_L \circ \cdots \circ f_1$</td><td>对 ODE 积分 $z(1) = z(0) + \int_0^1 v_\theta(z, t)\, dt$</td></tr>
+    <tr><td>每层都要可逆 + Jacobian 行列式</td><td>速度场<em>任意</em>结构，可逆性由 ODE 解的唯一性保证</td></tr>
+    <tr><td>$\log \det$ 是 $O(d^3)$，需要特殊架构</td><td>瞬时换元公式 $\frac{d \log p}{dt} = -\operatorname{tr}(\nabla v_\theta)$，只算<strong>迹</strong></td></tr>
+    <tr><td>架构受限（coupling / autoregressive）</td><td>$v_\theta$ 可以是任何 MLP / U-Net / Transformer</td></tr>
+  </tbody>
+</table>
+
+<p>讲师用类比讲："think of it as the wind flow transporting some amount of water from the Pacific Ocean to the East Coast." 风把太平洋上的水搬到东海岸——这就是"flow"二字最朴素的意思。</p>
+
+<svg viewBox="0 0 600 240" role="img" aria-label="速度场把噪声变成数据">
+  <defs>
+    <marker id="cnf-arrow" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+      <path d="M0,0 L6,3 L0,6 z" fill="#6f4dd0"/>
+    </marker>
+    <path id="cnf-path" d="M70,180 C200,80 400,160 530,60" fill="none"/>
+  </defs>
+  <g font-family="ui-sans-serif" font-size="11" fill="var(--text)">
+    <text x="70" y="210" text-anchor="middle" font-weight="600">先验 $p_0$（高斯噪声）</text>
+    <text x="530" y="90" text-anchor="middle" font-weight="600">目标 $p_{\text{data}}$（数据）</text>
+
+    <!-- 起点云 -->
+    <ellipse cx="70" cy="180" rx="40" ry="20" fill="#eef6fc" stroke="#2b80c4"/>
+    <!-- 终点云 -->
+    <ellipse cx="530" cy="60" rx="50" ry="22" fill="#e8f5e9" stroke="#0b5"/>
+
+    <!-- 速度场流线 -->
+    <path d="M70,180 C200,80 400,160 530,60" stroke="#6f4dd0" stroke-width="2.2" fill="none" marker-end="url(#cnf-arrow)"/>
+    <path d="M70,200 C200,140 400,180 530,80" stroke="#6f4dd0" stroke-width="1.4" fill="none" opacity="0.55"/>
+    <path d="M70,160 C200,60 400,140 530,40" stroke="#6f4dd0" stroke-width="1.4" fill="none" opacity="0.55"/>
+
+    <!-- 动画粒子 -->
+    <circle r="5" fill="#d4a017" style="offset-path: path('M70,180 C200,80 400,160 530,60'); animation: cnf-flow 5s linear infinite;"/>
+    <circle r="5" fill="#d4a017" style="offset-path: path('M70,180 C200,80 400,160 530,60'); animation: cnf-flow 5s linear infinite -1.7s;"/>
+    <circle r="5" fill="#d4a017" style="offset-path: path('M70,180 C200,80 400,160 530,60'); animation: cnf-flow 5s linear infinite -3.3s;"/>
+
+    <text x="300" y="120" text-anchor="middle" font-style="italic" fill="#6f4dd0">$dz/dt = v_\theta(z, t)$</text>
+    <text x="300" y="220" text-anchor="middle" font-size="10" fill="var(--text-muted)">流线不交叉 → 一一对应 → 可逆</text>
+  </g>
+</svg>
+
+<h2>五、把"流变成概率"需要的两个物理假设</h2>
+
+<p>讲师在 CMU L5 中花了相当长的一段做<strong>物理铺垫</strong>——他自己也承认 "this is very physics coded"。但这两个假设非常重要，是后面所有公式的基石。</p>
+
+<h3>5.1 假设一：Conservation of Mass（质量守恒）</h3>
+
+<div class="callout-quote">
+"Just imagine that the wind carried a certain amount of water, and this certain amount of water never changes. The amount of water that you're transporting never changes. No new mass is going to get added and no mass is going to disappear." —— CMU L5
+</div>
+
+<p>翻译成概率论的语言：<strong>整个空间上的概率永远积分为 1</strong>。流可以把概率从一个区域搬到另一个区域，但不能凭空造出概率，也不能把概率扔掉。这其实是任何"合法分布"的基本要求——一旦你把流定义成"从一个分布到另一个分布的搬运"，质量守恒就自动是<em>必要条件</em>。</p>
+
+$$\int p(z, t) \, dz = 1, \quad \forall t \in [0, 1]$$
+
+<p>讲师在课堂里被学生追问"这一条到底怎么编码到方程里"，他承认有点尴尬："I guess just the first one is not really encoded in this, but you just need to have a probability that adds up to one."——也就是说，质量守恒是<em>设定</em>，不是从方程<em>推出</em>的；连续性方程其实是把这条设定<em>形式化</em>之后的结果。</p>
+
+<h3>5.2 假设二：Continuity（连续性 / 不能瞬移）</h3>
+
+<div class="callout-quote">
+"Not only is mass conserved, you also cannot teleport. Everything needs to move smoothly, everything should move continuously. You cannot just jump from point to point because it's a river." —— CMU L5
+</div>
+
+<p>翻译：<strong>概率密度只能随时间<em>连续</em>变化</strong>。不存在"$t = 0.499$ 时这块概率还在 A，到 $t = 0.501$ 突然出现在 B"这种事情。概率得像河水一样、贴着河床、一点一点挪过去——不能像电子游戏里的传送门那样从一个房间瞬移到另一个房间。</p>
+
+<div class="callout callout-note">
+🧭 <strong>为什么这两条不是废话</strong>：很多生成模型其实<em>不满足</em>这两条。例如 GAN 的训练里，generator 的输出分布可以"跳变"，没有连续路径；diffusion 的离散化版本也只是离散时间下的近似流。把<strong>"流是真正物理意义上的搬运"</strong>立成公理，是 CNF / Flow Matching 整条理论线的逻辑起点。
+</div>
+
+<h2>六、Probability Flux：把"流"写成数学</h2>
+
+<p>有了两条假设，讲师引入<strong>probability flux（概率通量）</strong>这个概念。课堂里立刻有学生问："是不是和磁通量一样？" 讲师回答："Kind of。Water 是更好的类比。" 另一个学生又问："那是不是和黏度（viscosity）有点像？" 讲师又说："也算 kind of。" 课堂里关于"flux 到底是什么物理量"的讨论占了好几分钟——这正说明<em>flux 在工程师的常识里是个含混的词</em>，必须用流体的形象重新校准。</p>
+
+<blockquote><strong>Flux = "单位时间、流过单位面积的物质量"</strong>。</blockquote>
+
+<p>对于概率密度 $p(z, t)$ 以速度场 $v(z, t)$ 流动的情形，概率通量是：</p>
+
+$$J(z, t) = v(z, t) \cdot p(z, t)$$
+
+<p>讲师当堂解释每一项的物理意义：</p>
+
+<ul>
+  <li><strong>$v(z, t)$</strong>：告诉你<em>朝哪个方向、多快</em>流动；</li>
+  <li><strong>$p(z, t)$</strong>：告诉你<em>这里有多少概率</em>可以被流出去。</li>
+</ul>
+
+<div class="callout-quote">
+"So the velocity is giving you where and how fast the probability flows, and the density is telling you how much probability there was so that it flows out." —— CMU L5
+</div>
+
+<h2>七、Continuity Equation：连续性方程</h2>
+
+<p>把质量守恒 + 连续性写成<strong>微分形式</strong>，就得到流体力学里那条经典 PDE：</p>
+
+$$\boxed{\frac{\partial p(z, t)}{\partial t} \;+\; \nabla_z \cdot \big(v(z, t) \, p(z, t)\big) \;=\; 0}$$
+
+<p>讲师在白板上演示时说："This is basically how much probability gets changed infinitesimally through time, and this is what we call <strong>the divergence of velocity times density</strong>." 也就是说：</p>
+
+<ul>
+  <li>左项 $\partial p / \partial t$ = "这一点的概率密度每秒变化多少"；</li>
+  <li>右项的 divergence = "从这一点流出去的概率每秒多少"；</li>
+  <li>两者相加为 0 = "流入流出收支平衡，没有凭空生灭"。</li>
+</ul>
+
+<h3>7.1 Divergence = trace of Jacobian</h3>
+
+<p>讲师特意提醒：上一讲（讲 SDE / score matching 时）见过 divergence——它就是 <strong>velocity field Jacobian 的迹</strong>：</p>
+
+$$\nabla_z \cdot v(z, t) = \sum_{i=1}^d \frac{\partial v_i}{\partial z_i} = \operatorname{tr}\!\big(\nabla_z v\big)$$
+
+<p>$d$ 是数据空间的维度。课堂上有学生确认："D is dimension?" 讲师答："Yes, in every dimension, how does this thing change?"</p>
+
+<div class="callout callout-info">
+🔍 <strong>用日常话讲 divergence</strong>：站在某个点 $z$ 上想象一个无穷小的水球。Divergence 告诉你下一瞬间这个水球会不会"膨胀"。Positive divergence = 球在涨（这一点是"源"，概率正在被甩出来）；negative = 球在缩（这一点是"汇"，概率正在被吸进来）；为 0 = 球的体积保持。
+</div>
+
+<h2>八、Instantaneous Change-of-Variables：从 PDE 到 ODE 的关键一跳</h2>
+
+<p>讲师在这里说出了本讲最重要的一句话：</p>
+
+<div class="callout-quote">
+"A good thing about this is that we can actually transform this PDE into an ODE." —— CMU L5
+</div>
+
+<p>这就是 Chen 2018 的核心技术发现：你不需要解整个 PDE（continuity equation 是一个偏微分方程，作用在整个空间上、每一时刻每一点都要满足）——你只需要<strong>沿着一条流线</strong>，看 $\log p$ 是怎么随时间变化的。PDE 是"对所有点同时立法"，ODE 是"只盯着一个粒子的轨迹"。把视角从"全场上帝视角"切换到"跟着一颗粒子飞"，PDE 就退化成 ODE。</p>
+
+<div class="deriv-step">
+<strong>沿流线的全导数</strong>。考虑某个粒子 $z(t)$ 沿着速度场流动，它感受到的 $\log p$ 变化率是：
+$$\frac{d \log p(z(t), t)}{dt} = \frac{\partial \log p}{\partial t} + \nabla_z \log p \cdot \frac{dz}{dt}$$
+<em>Why</em>：多元链式法则。$\log p$ 既显式依赖时间（$\partial / \partial t$），也通过 $z$ 隐式依赖时间（$dz/dt = v$）。
+</div>
+
+<div class="deriv-step">
+<strong>代入连续性方程</strong>。把 $\partial p / \partial t = -\nabla \cdot (vp)$ 展开 $\nabla \cdot (vp) = v \cdot \nabla p + p \, \nabla \cdot v$，除以 $p$，整理可得：
+$$\frac{\partial \log p}{\partial t} = -v \cdot \nabla \log p - \nabla \cdot v$$
+代回上一步：
+$$\boxed{\frac{d \log p(z(t), t)}{dt} = -\nabla_z \cdot v_\theta(z, t) = -\operatorname{tr}\!\big(\nabla_z v_\theta\big)}$$
+<em>Why</em>：链式法则里的 $\nabla \log p \cdot v$ 和 $\partial \log p / \partial t$ 里那一项<strong>恰好抵消</strong>，只剩下 divergence。这就是<strong>瞬时换元公式（instantaneous change-of-variables）</strong>。
+</div>
+
+<div class="callout callout-tip">
+💡 <strong>为什么这一步是奇迹</strong>：传统 NF 算密度要付出 $O(d^3)$ 的 $\log \det$；CNF 只需要付出 $O(d^2)$ 的 trace（对于一般的网络），甚至可以用 <strong>Hutchinson trace estimator</strong> 降到 $O(d)$。换言之，你<em>解一次 ODE</em> 就能同时拿到样本 $z(1)$ 和它的 $\log p$——这是离散 NF 望尘莫及的。
+</div>
+
+<h3>8.1 Hutchinson estimator（实操细节）</h3>
+
+<p>$\operatorname{tr}(\nabla v_\theta)$ 严格算需要遍历每个维度做一次 backward——对于像 ImageNet 这种 $d = 3 \times 256 \times 256 \approx 200000$ 维的数据，这是<strong>20 万次反向传播</strong>，没法接受。一个常用的<strong>无偏估计</strong>是引入随机向量 $\varepsilon \sim \mathcal{N}(0, I)$：</p>
+
+$$\operatorname{tr}(A) = \mathbb{E}_\varepsilon\!\big[\varepsilon^\top A \varepsilon\big]$$
+
+<p>$\varepsilon^\top \nabla v \cdot \varepsilon$ 只需要一次向量-雅可比积（vector-Jacobian product），自动求导框架（PyTorch / JAX）一行就能算。这把训练成本压到几乎和正向 ODE 一样——<strong>无偏但有方差</strong>，多采几个 $\varepsilon$ 平均一下就行。这是 FFJORD（Grathwohl et al. 2019）这篇 follow-up 论文真正让 CNF 能跑大数据的关键工程突破。</p>
+
+<h2>九、训练 CNF：最大似然 + adjoint method</h2>
+
+<p>CNF 的 likelihood 训练流程，把上面所有零件串起来：</p>
+
+<div class="deriv-step">
+<strong>训练目标（最大似然）</strong>
+$$\max_\theta \;\; \mathbb{E}_{x \sim p_{\text{data}}}\big[\log p_\theta(x)\big]$$
+其中 $\log p_\theta(x)$ 用 ODE 反向积分得到：
+$$\log p_\theta(x) = \log p_0\big(z(0)\big) - \int_0^1 \operatorname{tr}\!\big(\nabla_z v_\theta(z(t), t)\big)\, dt$$
+<em>Why</em>：从 $x = z(1)$ 反向解 ODE 到 $z(0)$（先验空间），同时累积 trace 项，就还原出 $\log p_\theta(x)$。
+</div>
+
+<p>反向传播怎么做？Ricky 2018 论文的另一大贡献是 <strong>adjoint sensitivity method</strong>：朴素做法是把 ODE solver 的每一个内部步骤都保存下来再 backward（像 BPTT 一样），内存开销随步数线性增长；adjoint 的做法是<em>再解一个反向 ODE</em> 来还原中间状态并同时算梯度，内存开销 $O(1)$，代价是再多一次 ODE 求解。这一招是借自最优控制理论里的庞特里亚金极值原理（Pontryagin's maximum principle）——也是 Ricky 这篇论文之所以拿 NeurIPS best paper 的原因之一：把控制论的老结果"插进"深度学习里。</p>
+
+<div class="callout callout-warning">
+⚠️ <strong>CNF 的痛点</strong>：训练的每一个 step 都要解一次正向 ODE（拿 $\log p$）+ 一次反向 ODE（拿梯度）。对于高分辨率图像，这<strong>慢得令人发指</strong>——这也是为什么 CNF 在 2018-2020 没有彻底火起来。生成图像的 SOTA 让位给了 DDPM / score-based，因为后者用 score matching 这种 simulation-free 的目标，绕开了 ODE solve。<br><br>
+（这个矛盾正是下一章 <a href="/video-to-notebook/textbook/13/">Flow Matching</a> 要解决的核心问题：能不能在保留"CNF 是一个 ODE"这一优雅图景的同时，<em>不在训练时解 ODE</em>？）
+</div>
+
+<h2>十、CNF 训练 vs Diffusion 训练：一张对比表</h2>
+
+<div class="my-addition">
+🟡 <strong>教材外补充：</strong>下面这张表是把 CMU L5 的口头对比整理出来——它不是讲师板书的图，但是这堂课从头到尾都在做这个比较，所以单独列出来便于背诵。
+</div>
+
+<table>
+  <thead>
+    <tr><th>维度</th><th>CNF（Chen 2018 原版）</th><th>Diffusion（Ho 2020 / Song 2021）</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>建模对象</strong></td>
+      <td>速度场 $v_\theta(z, t)$（ODE）</td>
+      <td>score $\nabla_x \log p_t(x)$ 或噪声 $\epsilon_\theta$（SDE）</td>
+    </tr>
+    <tr>
+      <td><strong>训练目标</strong></td>
+      <td>最大化数据的 $\log p_\theta(x)$，需要解 ODE</td>
+      <td>denoising score matching，<em>不解 ODE/SDE</em></td>
+    </tr>
+    <tr>
+      <td><strong>每个 step 的代价</strong></td>
+      <td>正向 + 反向 ODE solve，慢</td>
+      <td>一次前向 + 一次 backward，快</td>
+    </tr>
+    <tr>
+      <td><strong>采样</strong></td>
+      <td>解 ODE</td>
+      <td>解 SDE 或 PF-ODE（用 score 拼出来的 ODE）</td>
+    </tr>
+    <tr>
+      <td><strong>架构限制</strong></td>
+      <td>无（任意 MLP / U-Net）</td>
+      <td>无</td>
+    </tr>
+    <tr>
+      <td><strong>对数似然</strong></td>
+      <td>精确（瞬时换元）</td>
+      <td>需要通过 PF-ODE 间接得到</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2>十一、关键桥梁：PF-ODE 其实就是一个 CNF</h2>
+
+<p>这是整章的<strong>点睛之笔</strong>，也是把第三模块（diffusion）和第四模块（flow matching）真正缝合起来的那一针。回忆 <a href="/video-to-notebook/textbook/11/">第 11 章</a> 我们用 Anderson 反向 SDE + Fokker–Planck 凑出来的 <strong>probability flow ODE</strong>：</p>
+
+$$\frac{dx}{dt} = f(x, t) - \frac{1}{2} g(t)^2 \, s_\theta(x, t)$$
+
+<p>其中 $f, g$ 是 forward SDE 的漂移和扩散，$s_\theta = \nabla_x \log p_t$ 是学到的 score。当时我们说："这条 ODE 给出的 marginal 分布和 SDE 完全一致，只是去掉了随机噪声"。但<em>当时没说</em>这个 ODE 究竟"属于"哪个家族。</p>
+
+<p>注意：<strong>这条 ODE 完全没有随机项</strong>，纯粹的确定性微分方程。它是一个把 $x(T) \sim p_T$（接近高斯的噪声）推到 $x(0) \sim p_{\text{data}}$ 的速度场。换句话说：</p>
+
+$$v_\theta^{\text{PF}}(x, t) := f(x, t) - \tfrac{1}{2} g(t)^2 \, s_\theta(x, t)$$
+
+<p>恰好是一个 CNF 的速度场！它满足同样的两条物理假设（质量守恒 + 连续性），它满足同样的瞬时换元公式。<strong>Diffusion model 训完之后，用 PF-ODE 采样，本质就是在跑一个 CNF</strong>——只是这个 CNF 的速度场不是直接训出来的，而是从学到的 score 里"拼装"出来的。</p>
+
+<p>这个观察是 Yang Song et al. 2021 那篇统一 SDE 论文的<em>副产品</em>，但它的重要性其实超过那篇论文本身：它说明<strong>过去十年 deep generative modeling 里看似割裂的两条线（NF / diffusion）实际上是同一回事</strong>。</p>
+
+<div class="callout callout-tip">
+💡 <strong>这个统一意味着什么</strong>：CNF 和 diffusion 不是两个家族，而是一个家族的<em>两种训练方式</em>：
+<ul>
+  <li><strong>CNF 训练</strong>：直接最大化 $\log p$ → 需要解 ODE → 慢；</li>
+  <li><strong>Diffusion 训练</strong>：先把数据加噪 → 学 score → 用 PF-ODE 还原 → 不解 ODE → 快；</li>
+  <li><strong>Flow Matching 训练</strong>（下一章）：直接回归速度场 → <em>既是 CNF 又不用解 ODE</em>，鱼和熊掌都要。</li>
+</ul>
+</div>
+
+<h2>十二、回到开头：线性插值为什么"valid"</h2>
+
+<p>现在我们终于可以回答讲师在第一节抛出的那个 nagging 问题：</p>
+
+<blockquote>"Why is this even valid? Why is this the same?"</blockquote>
+
+<p>答案现在串起来很顺：线性插值 $x_t = (1-t) x_0 + t x_1$ 定义了一条<em>轨迹</em>，而 $dx_t/dt = x_1 - x_0$ 定义了一个<em>速度场</em>。<strong>这个速度场满足连续性方程</strong>——它把先验 $p_0 = \mathcal{N}(0, I)$ 沿一条流线推到 $p_1 = p_{\text{data}}$，质量守恒、不瞬移、可逆。所以这是一个合法的 CNF！它和 Ricky 2018 那一套<em>同属一个家族</em>，只是路径选择不一样。</p>
+
+<p>区别只在于：<strong>我们不再用最大似然训速度场</strong>（那需要解 ODE，慢），而是<strong>直接回归</strong>每一对 $(x_0, x_1)$ 给出的瞬时速度 $x_1 - x_0$——这就是 <a href="/video-to-notebook/textbook/13/">Flow Matching</a>（下一章）。讲师故意先讲"连线-取速度"这个粗暴版本，是为了让你看完 CNF 完整数学后<strong>突然意识到那个粗暴版本数学上是<em>严格合法</em>的、且训练复杂度只有 CNF 的几十分之一</strong>。这种"先复杂再简单"的教学节奏，是 CMU 这堂课最巧妙的一手。</p>
+
+<div class="callout-quote">
+"Now you have flow matching. This is flow matching. Class is over. Hey, no, not really." —— CMU L5（讲师玩笑）
+</div>
+
+<p>下一章你会真正看到："class is over" 这个玩笑后面那个真正的"严格证明"——为什么沿一条线性路径 marginal 出来的速度场也能跨越所有训练数据的 marginal 路径而<em>仍然</em>把高斯推到数据分布。所有铺垫到此为止。</p>
+
+<h2>十三、Vizuara 视角：四到五讲 vs 一讲</h2>
+
+<p>Vizuara 的 Dr. Raj Dandekar 在他的 flow models 系列开场（chunk #333）讲了一个值得抄录的观察：</p>
+
+<div class="callout-quote">
+"One interesting thing about the theory behind flow models is that you can teach the same topic in two different ways. You can teach this entire topic within a span of one lecture, or you can teach it within a span of four lectures. If you go through the difficult route of the four lectures, you end up at a place which is quite simple — which you could have got in the [one]." —— Vizuara L9
+</div>
+
+<p>这个"四讲 vs 一讲"的张力恰好对应了我们这一章的结构：</p>
+
+<ul>
+  <li><strong>一讲版本</strong>（CMU 课堂前 5 分钟）：连线、取速度、回归。完事。</li>
+  <li><strong>四讲版本</strong>（CNF 全套数学）：normalizing flow → continuity equation → probability flux → instantaneous change-of-variables → adjoint method → likelihood training。</li>
+</ul>
+
+<p>两条路线<strong>到达同一个终点</strong>。Vizuara 选了"四讲"路线讲全数学，CMU 选了"一讲"路线讲完直觉再补数学。<em>这本教材选的策略是：先用 CMU 的"简单直觉"勾起好奇，再用 CNF 的"完整数学"回答 why valid</em>——所以读完这一章再去看下一章 Flow Matching 时，你会发现下一章的所有"简单"全都被这一章的"复杂"撑着。</p>
+
+<p>这种"先简后繁再简"的安排在数学教育里有个专门的名字叫 <em>spiral curriculum</em>（螺旋式课程）：同一个概念绕回来三次，每次走得更深。线性插值的故事会在下一章再被讲一次，但这一次它会被嵌入<em>marginal velocity field</em> 这个更强大的视角里，再再被讲一次时它会变成 <em>rectified flow</em>。每绕一圈，你"为什么这样做合法"的理解都更扎实。</p>
+
+<div class="my-addition">
+🟡 <strong>教材外补充（编辑的旁注）：</strong>课堂里讲师没有展开 Vizuara 的 "one lecture vs four lecture" 这个对比。我把它放在这里是因为它<em>恰好</em>解释了为什么 flow matching 系列论文在 2022-2023 出来时让大家觉得"我们之前在干什么"——其实 CNF 早在 2018 年就把骨架搭好了，只是没人想到训练目标可以这么粗暴地简化。
+</div>
+
+<h2>十四、参考 PyTorch 骨架：朴素 CNF + 瞬时换元</h2>
+
+<p>下面这段代码<em>不是 flow matching</em>，而是 Chen 2018 原版 CNF 的写法——它依赖 <code>torchdiffeq</code> 这个库（Ricky 同期开源的），用来解 ODE 并做 adjoint 反传。看一眼就能体会"训练时要解 ODE"是什么意思：</p>
+
+<pre><code>import torch
+import torch.nn as nn
+from torchdiffeq import odeint_adjoint as odeint  # Ricky 写的库
+
+class VelocityField(nn.Module):
+    """学到的 velocity field v_theta(z, t)."""
+    def __init__(self, dim, hidden=128):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(dim + 1, hidden), nn.Tanh(),
+            nn.Linear(hidden, hidden), nn.Tanh(),
+            nn.Linear(hidden, dim),
+        )
+
+    def forward(self, t, z):
+        # t 是标量；广播到 batch 上
+        t_vec = t.expand(z.size(0), 1)
+        return self.net(torch.cat([z, t_vec], dim=-1))
+
+class CNFDynamics(nn.Module):
+    """同时返回 dz/dt 和 d log p / dt 的合并 ODE."""
+    def __init__(self, v):
+        super().__init__()
+        self.v = v
+
+    def forward(self, t, state):
+        z, logp = state[..., :-1], state[..., -1:]
+        with torch.enable_grad():
+            z = z.requires_grad_(True)
+            v = self.v(t, z)
+            # Hutchinson 估计 div(v) = E[eps^T (dv/dz) eps]
+            eps = torch.randn_like(z)
+            dv_eps = torch.autograd.grad(
+                v, z, grad_outputs=eps, create_graph=True
+            )[0]
+            div = (dv_eps * eps).sum(dim=-1, keepdim=True)
+        # d log p / dt = -div(v)（瞬时换元公式）
+        return torch.cat([v, -div], dim=-1)
+
+def cnf_log_prob(x, dynamics, p0):
+    """从数据 x 反向积分到先验，得到 log p_theta(x)."""
+    logp1 = torch.zeros(x.size(0), 1, device=x.device)
+    state1 = torch.cat([x, logp1], dim=-1)
+    t = torch.tensor([1.0, 0.0], device=x.device)  # 反向
+    state0 = odeint(dynamics, state1, t, atol=1e-5, rtol=1e-5)[-1]
+    z0, delta_logp = state0[..., :-1], state0[..., -1:]
+    # log p_theta(x) = log p_0(z(0)) - 累积 div 积分
+    return p0.log_prob(z0).unsqueeze(-1) - delta_logp
+
+# 训练循环
+v = VelocityField(dim=2)
+dyn = CNFDynamics(v)
+p0 = torch.distributions.MultivariateNormal(torch.zeros(2), torch.eye(2))
+opt = torch.optim.Adam(v.parameters(), lr=1e-3)
+for x in dataloader:
+    loss = -cnf_log_prob(x, dyn, p0).mean()  # 负 log-likelihood
+    opt.zero_grad(); loss.backward(); opt.step()</code></pre>
+
+<div class="callout callout-warning">
+⚠️ <strong>看代码里的 <code>odeint_adjoint</code> 和 trace 估计——这就是 CNF 训练的瓶颈所在</strong>：每个 batch 都要解一次正向 + 一次反向 ODE。对于 MNIST 都还撑得住，对 ImageNet 就基本不可行。所以 2018-2020 间 CNF 主要在低维 / 物理 simulation 应用里发光，图像生成大旗被 diffusion 抢走。下一章你会看到 Flow Matching 怎么"<em>把这两个 ODE 都从训练里消掉</em>"。
+</div>
+
+<figure class="clip-frame">
+  <iframe src="https://www.youtube.com/embed/_OOITDB2VCY?start=430" title="CMU L5: Ricky 2018 CNF 介绍" allowfullscreen></iframe>
+  <figcaption>📺 CMU 10799 S26 Lecture 5（07:10 处）—— 讲师回到 2018 年 Ricky 的 Neural ODE 论文，画 wind/water 类比的关键 4 分钟。</figcaption>
+</figure>
+
+<div class="takeaways" style="background:#0b5; color:#fff; padding:1.4rem; border-radius:8px; margin-top:2rem;">
+  <h3 style="margin-top:0; color:#fff;">本章要记住的（讲师亲口给的核心）</h3>
+  <ol>
+    <li><strong>CNF = 用 ODE 描述生成过程</strong>：$dz/dt = v_\theta(z, t)$，从 $z(0) \sim p_0$ 积到 $z(1) \sim p_{\text{data}}$。这是 Ricky T. Q. Chen 2018 年 Neural ODE 论文的核心。</li>
+    <li><strong>"Streams never cross"</strong>：流的确定性 ⇒ 可逆性。这一句是讲师用 wind / Pacific Ocean 类比反复打磨的几何直觉。</li>
+    <li><strong>两条物理假设 = conservation of mass + continuity</strong>。前者保证概率积分为 1，后者禁止瞬移。它们写成微分形式就是 <em>continuity equation</em>：$\partial p/\partial t + \nabla \cdot (vp) = 0$。</li>
+    <li><strong>瞬时换元公式</strong>：$\frac{d \log p(z(t))}{dt} = -\operatorname{tr}(\nabla v_\theta)$。把传统 NF 的 $\log \det$（$O(d^3)$）换成 trace（用 Hutchinson 估到 $O(d)$）——这是 CNF 的"魔法"。</li>
+    <li><strong>训练 = ODE solve</strong>。最大似然 + adjoint 反传 = 每个 step 两次 ODE solve。这<em>慢</em>，是 CNF 在 2018-2020 没干过 diffusion 的根本原因。</li>
+    <li><strong>PF-ODE 就是一个 CNF</strong>：$v^{\text{PF}}(x, t) = f - \tfrac{1}{2} g^2 s_\theta$ 是个合法的速度场。Diffusion 不是 CNF 的对立面，而是"用 score matching 间接训速度场"的 CNF。</li>
+    <li><strong>线性插值轨迹 + 回归 $x_1 - x_0$</strong> 是<em>合法的 CNF 训练目标</em>（满足连续性方程）。但这是下一章 Flow Matching 的故事——"class is over"，但其实没有 over。</li>
+  </ol>
+</div>
+
+</article>

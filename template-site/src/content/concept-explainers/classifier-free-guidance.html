@@ -1,0 +1,239 @@
+<style>
+/* prefix: cfg- */
+.cfg-quickref{background:var(--surface-soft);border-left:3px solid var(--module-accent);padding:0.8rem 1rem;border-radius:0 4px 4px 0;margin:1rem 0;font-size:0.92rem;}
+.cfg-quickref div{margin:0.3rem 0;}
+.cfg-svg{display:block;margin:1.2rem auto;max-width:100%;height:auto;}
+.cfg-pitfalls ol{padding-left:1.4rem;} .cfg-pitfalls li{margin:0.5rem 0;}
+.cfg-source{font-style:italic;color:var(--text-muted);border-left:2px solid var(--border);padding:0.2rem 0.8rem;margin:0.5rem 0;font-size:0.9rem;}
+.cfg-callout{background:var(--module-accent-soft);border-left:3px solid var(--module-accent);padding:0.6rem 0.9rem;border-radius:0 4px 4px 0;margin:0.8rem 0;font-size:0.93rem;}
+.my-addition{background:var(--surface-soft);border-left:3px solid var(--accent);padding:0.6rem 0.9rem;border-radius:0 4px 4px 0;margin:0.8rem 0;font-size:0.93rem;}
+.cfg-controls{display:flex;flex-wrap:wrap;gap:0.4rem;margin:0.8rem 0;}
+.cfg-controls button{background:var(--surface-soft);border:1px solid var(--border);color:var(--text);padding:0.35rem 0.7rem;border-radius:4px;cursor:pointer;font-size:0.88rem;}
+.cfg-controls button.active{background:var(--module-accent);color:var(--surface);border-color:var(--module-accent);}
+.cfg-slider-row{display:flex;align-items:center;gap:0.8rem;margin:0.6rem 0;flex-wrap:wrap;}
+.cfg-slider-row input[type=range]{flex:1;min-width:200px;}
+.cfg-readout{background:var(--surface-soft);border:1px solid var(--border);padding:0.4rem 0.7rem;border-radius:4px;font-family:ui-monospace,monospace;font-size:0.88rem;min-width:140px;text-align:center;}
+.cfg-table{width:100%;border-collapse:collapse;margin:0.6rem 0;font-size:0.9rem;}
+.cfg-table th,.cfg-table td{border:1px solid var(--border);padding:0.35rem 0.6rem;text-align:left;}
+.cfg-table th{background:var(--surface-soft);}
+</style>
+
+<article class="concept-entry">
+  <header class="concept-header">
+    <span class="concept-eyebrow">概念 · Module 5: 采样、引导与应用</span>
+    <h1>Classifier-Free Guidance</h1>
+    <p class="concept-tagline">— 同一个网络兼任「有 prompt」与「没 prompt」两种角色，靠外推放大条件信号。</p>
+  </header>
+
+  <aside class="cfg-quickref">
+    <div><strong>定义</strong> · 训练阶段以概率 $p_{\text{drop}}$（通常 10–20%）丢掉条件 $c$，让 $\epsilon_\theta(x_t, t, c)$ 同时学到条件与无条件去噪；采样时把两者外推。</div>
+    <div><strong>公式</strong> · $\hat\epsilon = (1+w)\,\epsilon_\theta(x_t, t, c) - w\,\epsilon_\theta(x_t, t, \emptyset)$</div>
+    <div><strong>易错</strong> · $w$ 不是"条件权重"——$w=0$ 才是纯条件采样，$w>0$ 是<em>过条件</em>（往条件方向外推）。</div>
+  </aside>
+
+  <section class="concept-intuition">
+    <p>很多人第一次看 CFG 公式会以为：<em>"$w$ 是一个 0 到 1 的混合系数，$w=1$ 完全用条件，$w=0$ 完全无条件"</em>——<strong>正好反了</strong>。CFG 不是在两个预测之间插值，而是在它们连线的<em>延长线</em>上外推。$w=0$ 才是普通条件采样；$w=5$、$w=10$ 是把条件信号<em>放大了几倍</em>——这就是为什么 Stable Diffusion 常用 $w \in [5, 12]$ 仍然能跑、Imagen 论文给出 $w$ 最大可以推到 30，而这些数值在"插值"的解读下完全说不通。CFG 在向量空间里画的是"<strong>比条件还要更条件</strong>"的方向。</p>
+
+    <p>另一个常见误解：以为 CFG 需要一个外接分类器去打分。这是把它和 <em>classifier guidance</em> 混了。CFG 的全名是 <strong>Classifier-<u>Free</u> Guidance</strong>——Ho &amp; Salimans 2022 这篇论文的核心贡献就是：<em>把分类器扔掉，靠一个网络兼任两种角色就够了</em>。它本质上是一种<em>训练技巧加一行推理公式</em>，不需要任何辅助模型。</p>
+
+    <p>CMU 10799 Lecture 7 的 Allen 是这样进入 CFG 的：上节课讲完 DDIM、ODE 求解器、加速到 10×，他抛出一个"反着来"的问题。</p>
+    <div class="cfg-source">「我们之前从 $t$ 跳到 $t-10$ 来加速。那有没有人想过反过来跑？」——「<em>Yeah, we're going to talk about it today.</em>」—— CMU L7 @00:52</div>
+    <p>这句"反过来跑"就是 CFG 的几何直觉：先用条件得到一个去噪方向，再用无条件得到第二个方向；两者相减得到「条件<em>独有</em>的那部分梯度」，然后<em>沿这部分继续往前走</em>——这一步就是"反着退回"，也是 CFG 在 score 向量上的本质。把它念出来：「<em>用无条件方向把条件方向往前再外推一些</em>」。</p>
+
+    <p>这节课正式引出条件生成时，Allen 让学生从最朴素的做法开始，一步步逼到 CFG：</p>
+    <div class="cfg-source">「现在我们做的还都是无条件生成。如果要做条件生成——最直接的写法是什么？」「把 label 当 feature 塞进网络。」「对，那这种写法的<strong>核心瓶颈</strong>是什么？」「每加一种条件都要重训一次。」「Perfect answer。」—— CMU L7 @04:35–08:00</div>
+
+    <p>这就是 CFG 要解决的痛点：<strong>训练时不希望把模型按条件类型切碎</strong>。如果文本条件、类别条件、深度图条件各训一个模型，数据收集与算力成本爆炸；即便都塞进一个模型，朴素 conditioning 在<em>条件信号弱</em>时（文本与图像配对噪声大、CLIP embedding 维度高）会让网络偷懒——退化成"忽略条件、按训练集平均生成"。</p>
+
+    <p>Allen 在课上接着说：</p>
+    <div class="cfg-source">「能不能用<em>一个</em>模型做所有条件？把它们全部嵌进去？——这就是大家在做的事。但其实还有<strong>另一种选择</strong>，这是我最喜欢的 diffusion 的一点。」—— CMU L7 @08:45</div>
+    <p>这个"另一种选择"正是 CFG：一个网络、一种训练流程，靠 condition dropout 同时学到 $p(x|c)$ 与 $p(x)$，采样时把两者的预测做<em>外推</em>，得到比"直接条件预测"更锐的样本。</p>
+
+    <p>在机器学习的上下文里，CFG 对应的是<em>采样阶段</em>的修改，而不是训练阶段——它和 epsilon-prediction、score matching、ELBO 都没有冲突。换句话说：你可以拿任何一个训好的条件扩散模型（只要训练时做了 condition dropout），在推理时<strong>零成本</strong>把无条件预测多算一次，就能用上 CFG。这也是它成为工业级标配的原因。</p>
+  </section>
+
+  <section class="concept-deepdive">
+    <h2>从 score 视角看：CFG 在做什么</h2>
+    <p>扩散模型预测的 $\epsilon_\theta(x_t, t, c)$ 与条件 score 是同一物体（差一个常数 $\sigma_t$）：</p>
+    <p>$$\epsilon_\theta(x_t, t, c) = -\sigma_t \nabla_{x_t} \log p_t(x_t \mid c)$$</p>
+    <p>这条对应关系在 DDPM 训练里隐式成立——它来自 Tweedie 公式：给定带噪样本 $x_t$，最小均方误差去噪等价于沿 score 方向走一步。换句话说，<strong>训扩散模型就是在拟合 score</strong>。明白了这一点，CFG 就可以完全在 score 空间里推导。</p>
+
+    <p>朴素条件采样沿着 $\nabla \log p(x|c)$ 走。CFG 想往「比条件更条件」的方向多迈一步——把<em>条件相对无条件多出来的那部分梯度</em>放大 $w$ 倍：</p>
+    <p>$$\hat s(x_t) = \underbrace{\nabla \log p(x_t \mid c)}_{\text{条件 score}} + w \cdot \underbrace{\big(\nabla \log p(x_t \mid c) - \nabla \log p(x_t)\big)}_{\text{条件相对于无条件的"差量"}}$$</p>
+    <p>把这一项化简，等价于：</p>
+    <p>$$\hat s(x_t) = (1+w)\,\nabla \log p(x_t \mid c) - w\,\nabla \log p(x_t)$$</p>
+    <p>用 $\epsilon = -\sigma_t \nabla \log p$ 换元，立刻得到工程实现里那条公式：</p>
+    <p>$$\boxed{\hat\epsilon = (1+w)\,\epsilon_\theta(x_t, t, c) - w\,\epsilon_\theta(x_t, t, \emptyset)}$$</p>
+    <p><strong>Why</strong>：第一行是几何想法（往"条件 - 无条件"方向多走 $w$ 步）；第二行是把 $p(x|c) - p(x)$ 的差合并；第三行只是把 score 翻成 $\epsilon$、符号反一下——三步一一对应。</p>
+
+    <h2>等价的分布视角</h2>
+    <p>到这里只是几何上的"外推一步"——但更深的问题是：<em>外推后的 score 对应的是哪个分布</em>？把 $\hat s$ 反推回它对应的密度，CFG 实际上是在采样这个<em>非归一化</em>的分布：</p>
+    <p>$$p_w(x \mid c) \propto \frac{p(x \mid c)^{1+w}}{p(x)^{w}} = p(x \mid c) \cdot \Big(\frac{p(x \mid c)}{p(x)}\Big)^{w}$$</p>
+    <p><strong>Why</strong>：$\log p_w(x|c) = (1+w)\log p(x|c) - w \log p(x) + \text{const}$，求 $\nabla_x$ 之后常数消去，正好等于上面那条 $\hat s$。括号里的比值 $p(x|c)/p(x)$ 是<em>条件相对无条件的似然比</em>——CFG 把它 $w$ 次幂放大，等价于"对那些在条件下比无条件更可能的 $x$，再额外加权 $w$ 次"。这一步揭示了 CFG 真正的本质：<strong>它在改采样目标的分布形状，而不是在改去噪算法</strong>。</p>
+
+    <p>这条分布幂的形式还有一个直觉解读：<em>温度退火</em>。把 $p(x|c)^{1+w}/p(x)^w$ 看作"用先验 $p(x)^w$ 做归一化的条件后验幂"——$w$ 越大，分布越集中在条件似然比的众数上。这正是 CFG 提升<em>样本锐度</em>同时损失<em>多样性</em>的数学根源：高 $w$ 让分布变得尖锐 (peaked)，所有采样轨迹都被吸向相同的几个高密度模态。</p>
+
+    <div class="my-addition">🟡 教材外补充：似然比 $p(x|c)/p(x)$ 在 Bayes 下等价于 $p(c|x)/p(c)$——这就是 classifier guidance 用一个外接分类器 $p(c|x)$ 显式给出的东西。Ho &amp; Salimans 2022 的核心观察：<strong>把这个似然比内嵌到 ε 网络里，分类器就不用单独训了</strong>。一张网，两顶帽子，省掉了一整个判别器流水线。</div>
+
+    <h2>训练侧：一行 dropout，两顶帽子</h2>
+    <p>到目前为止的推导都建立在<em>同一个网络</em>能同时给出 $\epsilon_\theta(x_t, t, c)$ 与 $\epsilon_\theta(x_t, t, \emptyset)$ 这两个预测之上。怎么让一个网络学会两件事？答案出奇地朴素：<strong>训练时以一定概率把条件丢掉</strong>。</p>
+
+    <p>Ho &amp; Salimans 2022 的训练伪代码只比无条件 DDPM 多<strong>一行</strong>：</p>
+    <pre style="background:var(--surface-soft);border:1px solid var(--border);padding:0.6rem 0.9rem;border-radius:4px;font-size:0.86rem;overflow-x:auto;">
+# 训练循环
+for x, c in loader:
+    if random() &lt; p_drop:        #  ← 只多这一行
+        c = NULL_TOKEN              # 把条件替换成"占位符 ∅"
+    t = uniform(1, T)
+    noise = randn_like(x)
+    x_t = sqrt(alpha_bar_t) * x + sqrt(1 - alpha_bar_t) * noise
+    loss = ||noise - eps_theta(x_t, t, c)||^2
+</pre>
+    <p><strong>Why</strong>：以 $p_{\text{drop}}$ 概率把条件替换成 $\emptyset$（实际实现中是一个可学习的 null embedding 或全零向量），等价于让同一个网络以 $(1-p_{\text{drop}})$ 的样本学 $p(x|c)$ 的 score、以 $p_{\text{drop}}$ 的样本学 $p(x)$ 的 score。两个分布<em>共享所有权重</em>——网络在前向时看到 $c$ 还是 $\emptyset$，决定它进入条件分支还是无条件分支。这就是 CFG 比 classifier guidance 工程友好的关键：<em>不用维护第二个网络，也不用为每个时间步重训分类器</em>。</p>
+    <p>实现细节有三个容易忽略的地方：<strong>第一</strong>，null token 必须是<em>可学习</em>的（论文里写作 $\emptyset$ 实际是一个 embedding），而不是字面意义的全零——全零会让 attention layer 的 softmax 退化到均匀分布、削弱无条件分支的表达。<strong>第二</strong>，dropout 是按 batch 元素独立采样的，不是整个 batch 一起 drop；这样每个 batch 都同时贡献条件和无条件梯度。<strong>第三</strong>，条件如果是多模态拼接（文本 + image embedding），通常<em>整体一起 drop</em>而不是各自独立 drop——否则会出现"只有文本没图"的奇怪混合状态，CFG 时无对应的 $\emptyset$ 可用。</p>
+
+    <div class="cfg-callout"><strong>典型 $p_{\text{drop}}$</strong>：图像扩散 10–20%（Stable Diffusion 用 10%、Imagen 用 10%）；视频扩散更高（25–30%）以保证时序无条件先验也学得到；condition-rich 任务（ControlNet 这类已经有强 spatial 条件的）有时 5% 就够。<strong>$p_{\text{drop}}$ 太大</strong>→无条件样本占据训练预算太多、条件分支欠拟合、整体 prompt-following 变差；<strong>太小</strong>→无条件分支训练数据不足、$\epsilon_\theta(x_t, t, \emptyset)$ 在采样时输出近似噪声，CFG 公式的减法操作放大噪声、样本质量崩盘。10% 是经验上的工程甜蜜点。</div>
+
+    <h2>为什么 CFG 击败了 classifier guidance</h2>
+    <p>Dhariwal &amp; Nichol 2021 的 classifier guidance 需要一个对<strong>有噪声的 $x_t$</strong> 都能正确分类的判别器——这件事在工程上非常贵：</p>
+    <ul>
+      <li>必须在<em>每一个</em>时间步 $t$ 的噪声分布上重训分类器：ImageNet 上的标准 ResNet 在 $t=500$ 的 $x_t$ 上准确率会跌到接近随机猜测，因为输入与训练分布完全脱节。</li>
+      <li>分类器的梯度 $\nabla_x \log p_\phi(c|x_t)$ 噪声大，又容易把样本推到 <em>adversarial</em> 方向——视觉上看着像"金毛"，实际是高频对抗噪点。Dhariwal &amp; Nichol 不得不用大量 trick（gradient clipping、scale）才能稳定下来。</li>
+      <li>类别空间一旦变化就要换分类器；文本条件下还得专门训一个对噪声鲁棒的 CLIP-style 模型，再算梯度。</li>
+      <li>推理时每一步要做两次反向传播（一次去噪网络、一次分类器），延迟翻倍。</li>
+    </ul>
+    <p>CFG 把似然比"内化"到 ε 网络里——<strong>训练只多一行 dropout，推理只多一次前向，零额外网络</strong>。代价仅仅是：每一步采样要对同一个网络调用两次（条件分支 + 无条件分支），可以做 batched forward 几乎无开销。这也是为什么 Stable Diffusion / Imagen / DiT / SD3 全线倒向 CFG。</p>
+
+    <h2>CFG 的两个变体（值得一记）</h2>
+    <p>原始 CFG 是<em>静态</em>的：整个采样过程用同一个 $w$。但在工程实践中人们发现两个改良：</p>
+    <ul>
+      <li><strong>Dynamic / interval CFG</strong>：只在中间时间步开 CFG，靠近 $t=0$ 和 $t=T$ 关掉。原因：早期高噪声步骤 score 估计不准，外推放大误差；末期低噪声步骤已经接近清晰图，再外推容易过饱和。<em>Common-DiT</em> 和 <em>SD 3</em> 都报告这种 interval guidance 能显著降低 FID。</li>
+      <li><strong>Self-attention guidance / Perturbed-Attention Guidance</strong>：把"无条件分支"替换成"attention 被扰动的分支"，相当于让 CFG 沿着<em>注意力清晰度</em>的方向外推，而不是沿着<em>条件信号</em>外推。这对 unconditional 模型也能用。</li>
+    </ul>
+    <p>这些变体都没有改变 CFG 的核心结构（仍然是"主分支 + 弱分支的外推"），只是把"弱分支"换了一种构造方式——理解了原始 CFG 的几何，这些变体一望即知。</p>
+
+    <h2>Linqi Zhou 的现场实战提醒：random CFG 的梯度噪声</h2>
+    <p>CMU L11 的 guest lecturer 是 Luma AI 的 Linqi (Alex) Zhou。他讲到一个工程细节：</p>
+    <div class="cfg-source">「我们实验里发现，<em>training-time random CFG</em>（也就是 condition dropout）会让 mean-flow 的梯度范数<strong>剧烈波动</strong>，但我们提出的 TVM 目标对此非常稳定。」—— CMU L11 @55:39</div>
+    <p>这条来自工业实战的提醒很有价值：<em>CFG 的 condition dropout 是噪声源</em>。每个 batch 里有些样本带条件、有些没条件，对应不同分布；如果你的训练目标对分布切换不鲁棒（比如某些 flow matching 变体），梯度会反复震荡。这是 condition dropout rate 选得不好（过大或过小）容易踩的坑——这也间接解释了为什么 SD 把 $p_{\text{drop}}$ 锁在 10% 而不是看起来"更均衡"的 50%。</p>
+
+    <svg class="cfg-svg" viewBox="0 0 600 280" role="img" aria-label="CFG 在 score 空间里的几何：条件方向减无条件方向得差量，沿差量外推 w 倍">
+      <g font-family="ui-sans-serif" font-size="11" fill="var(--text)">
+        <!-- 坐标系 -->
+        <line x1="60" y1="220" x2="540" y2="220" stroke="var(--border)" stroke-width="1"/>
+        <line x1="60" y1="220" x2="60" y2="40" stroke="var(--border)" stroke-width="1"/>
+        <text x="540" y="240" font-size="10" fill="var(--text-muted)">score 空间</text>
+        <!-- 当前点 -->
+        <circle cx="100" cy="200" r="5" fill="var(--text)"/>
+        <text x="105" y="215" font-size="10" fill="var(--text-muted)">$x_t$</text>
+        <!-- 无条件方向 -->
+        <line x1="100" y1="200" x2="220" y2="170" stroke="var(--text-muted)" stroke-width="2" marker-end="url(#cfg-arr-grey)"/>
+        <text x="160" y="160" font-size="10" fill="var(--text-muted)">∇log p(x)（无条件）</text>
+        <!-- 条件方向 -->
+        <line x1="100" y1="200" x2="280" y2="120" stroke="var(--blue)" stroke-width="2" marker-end="url(#cfg-arr-blue)"/>
+        <text x="200" y="110" font-size="10" fill="var(--blue)">∇log p(x|c)（条件）</text>
+        <!-- 差量 -->
+        <line x1="220" y1="170" x2="280" y2="120" stroke="var(--module-accent)" stroke-width="2" stroke-dasharray="4,3" marker-end="url(#cfg-arr-acc)"/>
+        <text x="250" y="150" font-size="10" fill="var(--module-accent)">差量（条件 − 无条件）</text>
+        <!-- CFG 外推 -->
+        <line x1="100" y1="200" x2="460" y2="60" stroke="var(--red)" stroke-width="2.5" marker-end="url(#cfg-arr-red)"/>
+        <text x="320" y="60" font-size="11" fill="var(--red)" font-weight="600">CFG（w=3）= 条件 + 3·差量</text>
+        <!-- 箭头定义 -->
+        <defs>
+          <marker id="cfg-arr-grey" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="var(--text-muted)"/></marker>
+          <marker id="cfg-arr-blue" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="var(--blue)"/></marker>
+          <marker id="cfg-arr-acc" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="var(--module-accent)"/></marker>
+          <marker id="cfg-arr-red" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="var(--red)"/></marker>
+        </defs>
+      </g>
+    </svg>
+  </section>
+
+  <section class="concept-interact">
+    <p>下面六步分别对应 CFG 推导链的一行。点按钮看 <strong>不变量</strong>：等式两边、每一步代数化简之后<em>采样的目标分布都没变</em>，变的只是表达形式（从"差量外推"换到"分布幂"再换到"ε 网络外推"再退回"似然比放大"）。这个不变量很重要——它告诉你 CFG 的核心思想可以用四种等价语言描述，工程实现只用第三种，但理解必须靠第一、第四种。</p>
+
+    <div class="cfg-controls" role="tablist" aria-label="CFG 推导步骤">
+      <button data-step="0" class="active">① 想法：往「差量」方向再走一步</button>
+      <button data-step="1">② 写成 score 外推</button>
+      <button data-step="2">③ 合并条件项</button>
+      <button data-step="3">④ score → ε 换元</button>
+      <button data-step="4">⑤ 反推：等价于采分布幂</button>
+      <button data-step="5">⑥ 与 classifier-guidance 对照</button>
+    </div>
+    <div id="cfg-readout">
+      <div class="cfg-line" data-line="0">想法：条件已经给了一个方向，但我们想"比条件更条件"——往（条件 − 无条件）的差量方向多走 $w$ 步。$$\hat s = s(x|c) + w \cdot \big(s(x|c) - s(x)\big)$$</div>
+      <div class="cfg-line" data-line="1">把括号展开：$$\hat s = s(x|c) + w \cdot s(x|c) - w \cdot s(x)$$</div>
+      <div class="cfg-line" data-line="2">合并 $s(x|c)$ 的系数：$$\hat s = (1+w)\,s(x|c) - w\,s(x)$$</div>
+      <div class="cfg-line" data-line="3">用 $\epsilon = -\sigma_t \nabla \log p$，符号反向后系数不变：$$\hat\epsilon = (1+w)\,\epsilon_\theta(x_t, t, c) - w\,\epsilon_\theta(x_t, t, \emptyset)$$ 这就是代码里那一行。</div>
+      <div class="cfg-line" data-line="4">$\hat s$ 是哪个分布的 score？积分回去：$\log p_w \propto (1+w)\log p(x|c) - w\log p(x)$，即 $$p_w(x|c) \propto \frac{p(x|c)^{1+w}}{p(x)^{w}}$$ CFG 在改采样目标。</div>
+      <div class="cfg-line" data-line="5">写成似然比形式：$p_w(x|c) \propto p(x|c)\cdot\big(p(x|c)/p(x)\big)^{w}$。由 Bayes，$p(x|c)/p(x) = p(c|x)/p(c)$ ——后者正是 classifier guidance 用分类器显式提供的东西。CFG 把它<em>隐式内嵌</em>，省去分类器。</div>
+    </div>
+    <script>
+      (function(){
+        const btns = document.querySelectorAll('.cfg-controls button');
+        const lines = document.querySelectorAll('#cfg-readout .cfg-line');
+        function show(step){
+          btns.forEach(b => b.classList.toggle('active', +b.dataset.step === step));
+          lines.forEach(l => l.style.display = (+l.dataset.line === step) ? 'block' : 'none');
+        }
+        btns.forEach(b => b.addEventListener('click', () => show(+b.dataset.step)));
+        show(0);
+      })();
+    </script>
+  </section>
+
+  <section class="concept-example">
+    <h2>手算：$w$ 怎么放大条件信号</h2>
+    <p>设某一步：条件预测 $\epsilon_\theta(x_t, t, c) = 0.8$（标量化简），无条件预测 $\epsilon_\theta(x_t, t, \emptyset) = 0.5$。差量 = $0.8 - 0.5 = 0.3$（条件多出来的部分）。</p>
+    <table class="cfg-table">
+      <thead><tr><th>$w$</th><th>$\hat\epsilon = (1+w)\cdot 0.8 - w\cdot 0.5$</th><th>展开</th><th>解读</th></tr></thead>
+      <tbody>
+        <tr><td>0</td><td>$1\cdot 0.8 - 0\cdot 0.5$</td><td>= 0.80</td><td>纯条件采样</td></tr>
+        <tr><td>1</td><td>$2\cdot 0.8 - 1\cdot 0.5$</td><td>= 1.10</td><td>外推 1 步（差量 ×2）</td></tr>
+        <tr><td>3</td><td>$4\cdot 0.8 - 3\cdot 0.5$</td><td>= 1.70</td><td>外推 3 步（差量 ×4）</td></tr>
+        <tr><td>7</td><td>$8\cdot 0.8 - 7\cdot 0.5$</td><td>= 2.90</td><td>SD 默认附近</td></tr>
+        <tr><td>−1</td><td>$0\cdot 0.8 - (-1)\cdot 0.5$</td><td>= 0.50</td><td>退化成无条件</td></tr>
+      </tbody>
+    </table>
+    <p>验证差量倍数：$\hat\epsilon - \epsilon(x|c) = w\cdot 0.8 - w\cdot 0.5 = w\cdot(0.8 - 0.5) = w\cdot 0.3$。<strong>Why</strong>：CFG 相对纯条件采样<em>多出来的修正量</em>正好是 $w$ 倍的差量——这就是为什么人们把 $w$ 叫"<em>guidance strength</em>"或"<em>guidance scale</em>"，并且只有相对差量被放大、绝对 $\epsilon$ 大小本身并不重要。</p>
+    <p>对 Stable Diffusion 的 $w=7.5$，差量被放大 7.5 倍。这也解释了高 $w$ 下样本变锐、颜色饱和、但<em>多样性骤降</em>——所有样本都被推到"最像条件"的那个尖锐众数；当差量被放大到 $\hat\epsilon$ 远超 $\epsilon$ 网络见过的训练分布时，去噪过程会跑出训练流形，产生饱和过曝、毛刺、伪影。这就是为什么 Imagen 引入了 <em>dynamic thresholding</em>（把超出范围的像素值动态截断）来配合高 $w$ 使用。</p>
+
+    <p>把这条手算结果上升到一般规律：</p>
+    <ul>
+      <li>$w \in [0, 1]$：温和外推，FID 改善、多样性几乎不损失。多数 video diffusion 用 $w \approx 1$。</li>
+      <li>$w \in [3, 8]$：典型文生图区间，质量与多样性的甜蜜点。</li>
+      <li>$w \in [8, 15]$：高锐度但开始出现饱和和重复模式。</li>
+      <li>$w > 15$：失真显著，几乎只能用在 class-conditional ImageNet 这种条件信号极强的场景。</li>
+    </ul>
+  </section>
+
+  <section class="concept-pitfalls">
+    <h2>常见误区</h2>
+    <ol>
+      <li><strong>"$w$ 是 0–1 的混合权重"。</strong>反例：SD 推荐 $w = 7.5$，DiT 论文报告 ImageNet 上 $w=4$ 附近 FID 最优，CFG 实测最佳点常在 5–12。$w=0$ 不是"无条件"，而是"<em>纯</em>条件采样"；要做纯无条件，要么取 $w=-1$、要么直接调用 $\epsilon_\theta(x_t, t, \emptyset)$。把 $w$ 当混合权重写 UI 滑块的人，永远调不到 7.5。</li>
+      <li><strong>"$w$ 越大越好"。</strong>反例：$w=20$ 在 ImageNet class-conditional 上 FID 反而比 $w=4$ 差——样本过饱和、纹理失真、模式坍塌（所有"金毛"长得几乎一样、所有"鹦鹉"色彩同样过曝）。CFG 是 quality–diversity trade-off，<em>不是单调改善</em>。Imagen 的解决方法是 dynamic thresholding，让高 $w$ 仍然可用；不这么做的话 SD 在 $w > 12$ 已经明显退化。</li>
+      <li><strong>"训练时不丢条件，推理直接用 CFG 公式就行"。</strong>反例：若 $p_{\text{drop}} = 0$，$\epsilon_\theta(x_t, t, \emptyset)$ 是网络从没见过的输入——输出几乎是噪声。CFG 公式照样能算（不会报错），但 $\hat\epsilon$ 会包含一个完全错误的 $\epsilon_\theta(x_t, t, \emptyset)$ 项，结果是<em>有规律的彩噪</em>而不是图像。Ho &amp; Salimans 反复强调：训练必须显式 condition dropout；这一行代码缺了，CFG 整套方法就垮了。</li>
+    </ol>
+  </section>
+
+  <section class="concept-seealso">
+    <h2>相关概念</h2>
+    <ul>
+      <li><a href="/video-to-notebook/concepts/classifier-guidance/">Classifier Guidance</a> — CFG 的前驱；用外接分类器显式提供 $\nabla \log p(c|x)$，工程上更贵。</li>
+      <li><a href="/video-to-notebook/concepts/ddim/">DDIM</a> — CFG 通常与 DDIM/DPM-Solver 等确定性采样器配合，扰动方向更清晰。</li>
+      <li><a href="/video-to-notebook/concepts/latent-diffusion/">Latent Diffusion</a> — Stable Diffusion 即 LDM + CFG + cross-attention，是 CFG 工业级实战的标杆。</li>
+      <li><a href="/video-to-notebook/concepts/ddpm/">DDPM</a> — CFG 的去噪基底；$\epsilon_\theta$ 的训练目标与 DDPM 完全相同，只是多了 condition dropout。</li>
+    </ul>
+  </section>
+
+  <section class="concept-sources">
+    <h2>来源</h2>
+    <ol>
+      <li><a href="https://www.youtube.com/watch?v=lPipzIG6rkc&t=52s" target="_blank" rel="noopener">cmu-10799-diffusion-flow · L7 · 「能不能反过来跑？我们今天就讲这个」 · (00:52)</a></li>
+      <li><a href="https://www.youtube.com/watch?v=lPipzIG6rkc&t=215s" target="_blank" rel="noopener">cmu-10799-diffusion-flow · L7 · 「现在全是无条件生成——怎么做条件生成？」 · (03:35)</a></li>
+      <li><a href="https://www.youtube.com/watch?v=lPipzIG6rkc&t=473s" target="_blank" rel="noopener">cmu-10799-diffusion-flow · L7 · 「每加一种条件就要重训一次——核心瓶颈」 · (07:53)</a></li>
+      <li><a href="https://www.youtube.com/watch?v=lPipzIG6rkc&t=525s" target="_blank" rel="noopener">cmu-10799-diffusion-flow · L7 · 「能不能一个网络做所有条件？这才是 diffusion 的妙处」 · (08:45)</a></li>
+      <li><a href="https://www.youtube.com/watch?v=H7MxR3XDt30&t=3339s" target="_blank" rel="noopener">cmu-10799-diffusion-flow · L11 · Luma AI Linqi Zhou：random CFG 训练梯度噪声分析 · (55:39)</a></li>
+    </ol>
+  </section>
+</article>

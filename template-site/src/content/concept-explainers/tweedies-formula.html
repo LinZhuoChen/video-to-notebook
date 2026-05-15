@@ -1,0 +1,276 @@
+<style>
+/* prefix: tw- */
+.tw-quickref{background:var(--surface-soft);border-left:3px solid var(--module-accent);padding:0.8rem 1rem;border-radius:0 4px 4px 0;margin:1rem 0;font-size:0.92rem;}
+.tw-quickref div{margin:0.3rem 0;}
+.tw-svg{display:block;margin:1.2rem auto;max-width:100%;height:auto;}
+.tw-pitfalls ol{padding-left:1.4rem;} .tw-pitfalls li{margin:0.6rem 0;}
+.tw-source{font-style:italic;color:var(--text-muted);border-left:2px solid var(--module-accent);padding:0.3rem 0.9rem;margin:0.6rem 0;font-size:0.92rem;background:var(--surface-soft);border-radius:0 4px 4px 0;}
+.my-addition{display:inline-block;background:var(--module-accent-soft);color:var(--module-accent);padding:0.15rem 0.55rem;border-radius:3px;font-size:0.82rem;font-weight:600;margin:0.4rem 0 0.2rem 0;}
+.tw-controls{display:flex;flex-wrap:wrap;gap:0.4rem;margin:0.8rem 0;}
+.tw-controls button{background:var(--surface-soft);border:1px solid var(--border);color:var(--text);padding:0.35rem 0.75rem;border-radius:4px;cursor:pointer;font-size:0.88rem;font-family:inherit;}
+.tw-controls button.active{background:var(--module-accent);color:var(--surface);border-color:var(--module-accent);}
+#tw-readout{background:var(--surface-soft);border:1px solid var(--border);border-radius:4px;padding:0.9rem 1rem;min-height:5.5rem;font-size:0.92rem;}
+.tw-line{display:none;}
+.tw-line.tw-active-line{display:block;}
+.tw-line code{background:var(--surface);padding:0.05rem 0.3rem;border-radius:3px;}
+.tw-callout{background:var(--red-soft);border-left:3px solid var(--red);padding:0.6rem 0.9rem;border-radius:0 4px 4px 0;margin:0.8rem 0;font-size:0.92rem;}
+</style>
+
+<article class="concept-entry">
+  <header class="concept-header">
+    <span class="concept-eyebrow">概念</span>
+    <h1>Tweedie's Formula</h1>
+    <p class="concept-tagline">— 给我 noisy $y$ 和 score，我直接告诉你最优去噪结果。</p>
+  </header>
+
+  <aside class="tw-quickref">
+    <div><strong>定义</strong> · 对于高斯噪声通道 $y = x + \sigma\epsilon$，$\epsilon \sim \mathcal{N}(0, I)$，最优去噪（后验均值）等于"含噪观测 + 方差 × 噪声边缘分布的 score"。</div>
+    <div><strong>公式</strong> · $\mathbb{E}[x \mid y] \;=\; y \;+\; \sigma^2\, \nabla_y \log p(y)$。</div>
+    <div><strong>易错</strong> · Tweedie<em>不是</em>抽象的贝叶斯练习——它是一条<strong>可执行的去噪指令</strong>：在 $y$ 处沿 score 方向走 $\sigma^2$ 步，就落到后验均值上。这条公式把 diffusion 的 score 网络从"梯度估计器"重新定位为"去噪器"。</div>
+  </aside>
+
+  <section class="concept-intuition">
+    <p>很多人第一次见 Tweedie's formula 会以为它是<strong>关于贝叶斯统计的某个抽象推论</strong>——什么"后验均值的封闭形式"、"指数族的共轭技巧"——听起来像统计系研究生的练习题。这种印象<em>对一半，错一半</em>。对的是它<em>确实</em>出自 1956 年的统计学传统（Tweedie 在伦敦皇家学会的会议上提到，Robbins 同年独立给出经验贝叶斯版本）；错的是它在 diffusion model 里<strong>根本不是抽象统计</strong>——它是一条<em>可执行的去噪指令</em>：拿到一张含噪图 $y$、再问一下"score 指向哪里"，就能直接算出"最佳的干净图猜测" $\mathbb{E}[x\mid y]$。Tweedie 不在告诉你"后验分布存在"，它在告诉你<strong>如何用一行公式把后验均值算出来</strong>。</p>
+
+    <p>Vizuara《Principles of Diffusion Models》Lecture 6 的 Dr. Raj 用一个极朴素的比喻把这件事串起来——他先把 score 比作<strong>指南针</strong>：</p>
+
+    <div class="tw-source">「A score is like a compass which points towards the data. ... if you set out with a compass in the data field you will reach the true data samples as much as possible.」—— Vizuara L6（@01:15）</div>
+
+    <p>这个比喻在 score matching 那一讲已经反复出现：在数据流形外面的任何一点，score $\nabla \log p$ 都是<em>一只指向密集数据区的箭头</em>。Tweedie's formula 把这只箭头<strong>定量化</strong>——它告诉你箭头<em>到底要走多远</em>：从 $y$ 出发，沿 score 方向走 $\sigma^2$ 这么长，就刚好落到"后验均值"上。也就是说，<strong>score 不只是方向，它是带尺度的去噪向量</strong>。这一点很容易被滑过去：在 score matching 一章里你学到的可能只是"score 指向数据"，没人告诉你它的<em>幅值</em>有什么物理意义；Tweedie 把这个空缺补上了——幅值就是"每单位方差需要的去噪位移"。当你把 score 网络的输出乘上 $\sigma^2$，你<em>不是</em>在做某种工程上的缩放，你<em>就是</em>在算后验均值。Vizuara 的另一处比喻把这个尺度感讲得更生动——讲师把 score 训练里的目标说成"创建黑洞 / sink"：</p>
+
+    <div class="tw-source">「This means that we are creating sinks in the data. ... if you go near a black hole, you are pulled inwards.」—— Vizuara L6（@05:30）</div>
+
+    <p>Tweedie 给的就是黑洞的<em>引力公式</em>：你离数据流形多远（由 score 的大小衡量）、噪声方差多大（$\sigma^2$ 决定你能被"拉回去"的力度），合起来就是一步落地的去噪位移 $y + \sigma^2 \nabla_y \log p(y)$。在训练里这件事的对应物是：<strong>score 网络的输出，本质上就是去噪残差除以方差</strong>——也就是说，扩散里你训练的 $s_\theta$ 在功能上完全等价于一个"预测干净图减去含噪图"的去噪器。这是 diffusion model 里最关键、最容易被忽略的统一关系，也是为什么"score matching"和"denoising"这两条看似独立的研究路线，最终被证明是<em>同一件事</em>。</p>
+
+    <p><span class="my-addition">🟡 教材外补充：</span>讲师在 Lecture 6 里把 Tweedie 串到 denoising score matching 的<em>动机</em>里——他先讲了 Hyvärinen 2005 的 implicit score matching 在 $n^2$ 复杂度上的死结（"to calculate the trace we need to calculate all these elements in the matrix"），再引入 Vincent 2011 的 denoising score matching 才"突破封锁"。Tweedie 是这条工程线路<strong>背后的理论钥匙</strong>：之所以 denoising 等价于 score matching，正是因为 Tweedie 已经证明二者只差一个 $\sigma^2$ 的缩放。你可以把 Tweedie 理解为<strong>把"为什么训练去噪器能学到 score"这件事从"经验观察"提升为"代数恒等式"的那把锁</strong>。从历史脉络看，Tweedie 1956 和 Robbins 1956 的工作几乎是<em>同时独立</em>提出的（两人都在伦敦皇家学会的统计讨论里给出后验均值与边缘 score 的关系），但这条公式在 50 年里几乎只在经验贝叶斯的统计学界流传，直到 Vincent 2011 把它和 score matching 串起来、再到 Song & Ermon 2019 把它推向 diffusion 模型的中心，才被深度生成模型社区<em>重新发现</em>。这是一个典型的"<em>统计学早已经有答案，工程界用了半个世纪才接上</em>"的故事——Tweedie 自己当年提出这条公式时根本不可能想到，60 多年后它会成为生成模型最热的一行公式。</p>
+  </section>
+
+  <section class="concept-deepdive">
+    <h2>主公式与几何含义</h2>
+
+    <p>设观测模型为高斯噪声通道：</p>
+
+    $$y = x + \sigma \epsilon, \qquad x \sim p(x), \quad \epsilon \sim \mathcal{N}(0, I).$$
+
+    <p>Tweedie's formula 给出后验均值的封闭式：</p>
+
+    $$\boxed{\;\mathbb{E}[x \mid y] \;=\; y \;+\; \sigma^2\, \nabla_y \log p(y).\;}$$
+
+    <p><strong>Why</strong>：右边只用到两样东西——<em>含噪观测</em> $y$ 本身、以及<em>噪声边缘分布</em> $p(y)$ 的 score。你<em>不需要</em>知道先验 $p(x)$ 的样子，<em>不需要</em>知道似然 $p(y\mid x)$ 的细节（除了它是高斯）；只要能估出 $\nabla_y \log p(y)$，就能算后验均值。这一点在 diffusion 里至关重要：因为 score 网络<em>恰好</em>就是在估 $\nabla_y \log p(y)$。</p>
+
+    <p><strong>几何解读</strong>：把它读作"<em>从 $y$ 出发的最佳一步去噪向量</em>"。score $\nabla_y \log p(y)$ 是单位方向（朝数据密集区），$\sigma^2$ 是步长。$\sigma$ 越大（噪声越重）→ 步长越长（要走得越远才能回到流形）；$\sigma \to 0$ → 步长收缩为 0，因为 $y$ 已经接近干净数据，根本不需要修正。这条"步长与噪声水平挂钩"的几何特性正是 Tweedie 的精髓。</p>
+
+    <svg class="tw-svg" viewBox="0 0 600 320" role="img" aria-label="Tweedie 公式的 2D 几何示意：含噪观测 y 沿 score 方向落到后验均值 E[x|y] 上">
+      <defs>
+        <marker id="tw-ar" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+          <path d="M0,0 L8,4 L0,8 Z" fill="var(--module-accent)"/>
+        </marker>
+        <marker id="tw-ar2" markerWidth="7" markerHeight="7" refX="6" refY="3" orient="auto">
+          <path d="M0,0 L7,3 L0,6 Z" fill="var(--text-muted)"/>
+        </marker>
+      </defs>
+      <g font-family="ui-sans-serif" font-size="11" fill="var(--text)">
+
+        <!-- data manifold (curved blob) -->
+        <path d="M 80 240 Q 200 140 320 200 Q 440 250 540 180"
+              stroke="var(--blue)" stroke-width="3" fill="none" opacity="0.7"/>
+        <text x="100" y="260" font-size="10" fill="var(--blue)">数据流形 supp(p(x))</text>
+
+        <!-- noisy observation y -->
+        <circle cx="380" cy="80" r="6" fill="var(--red)"/>
+        <text x="395" y="78" font-size="11" font-weight="600" fill="var(--red)">y（含噪观测）</text>
+        <text x="395" y="92" font-size="9" fill="var(--text-muted)">y = x + σε</text>
+
+        <!-- score arrow from y towards manifold -->
+        <path d="M 380 86 L 360 200" stroke="var(--module-accent)" stroke-width="2.5"
+              fill="none" marker-end="url(#tw-ar)"/>
+        <text x="290" y="135" font-size="11" font-weight="600" fill="var(--module-accent)">σ² · ∇_y log p(y)</text>
+        <text x="290" y="150" font-size="9" fill="var(--text-muted)">score 方向 × 方差 = 去噪位移</text>
+
+        <!-- posterior mean E[x|y] landed on manifold -->
+        <circle cx="360" cy="200" r="6" fill="var(--module-accent)"/>
+        <text x="375" y="215" font-size="11" font-weight="600" fill="var(--module-accent)">E[x | y]</text>
+        <text x="375" y="228" font-size="9" fill="var(--text-muted)">后验均值（已落到流形）</text>
+
+        <!-- dashed reference line: original clean x somewhere on manifold (not equal to E[x|y]) -->
+        <circle cx="305" cy="183" r="4" fill="none" stroke="var(--text-muted)" stroke-dasharray="2 2"/>
+        <text x="225" y="186" font-size="9" fill="var(--text-muted)">真实 x（不可见，未必等于 E[x|y]）</text>
+
+        <!-- title text -->
+        <text x="300" y="30" font-size="12" font-weight="700" text-anchor="middle">Tweedie：y + σ²·score = E[x | y]</text>
+        <text x="300" y="48" font-size="10" text-anchor="middle" fill="var(--text-muted)">从含噪点出发，沿 score 走 σ² 步，落在后验均值上</text>
+
+        <!-- small legend -->
+        <g transform="translate(40, 280)">
+          <circle cx="5" cy="0" r="4" fill="var(--red)"/>
+          <text x="14" y="3" font-size="9">y（输入）</text>
+          <line x1="80" y1="0" x2="100" y2="0" stroke="var(--module-accent)" stroke-width="2"/>
+          <text x="105" y="3" font-size="9">σ²·score（位移）</text>
+          <circle cx="210" cy="0" r="4" fill="var(--module-accent)"/>
+          <text x="219" y="3" font-size="9">E[x|y]（输出）</text>
+          <path d="M 320 0 Q 360 -8 400 0" stroke="var(--blue)" stroke-width="2" fill="none"/>
+          <text x="405" y="3" font-size="9">数据流形</text>
+        </g>
+      </g>
+    </svg>
+
+    <h2>推导：把 score 写成"对含噪边缘的对数梯度"</h2>
+
+    <p>含噪边缘分布 $p(y)$ 是干净先验 $p(x)$ 经过高斯卷积得到的：</p>
+
+    $$p(y) \;=\; \int p(y \mid x)\, p(x)\, dx \;=\; \int \mathcal{N}(y; x, \sigma^2 I)\, p(x)\, dx.$$
+
+    <p><strong>Why</strong>：这是边缘化 — 把所有可能的"干净 $x$"按其先验加权求和。它对应工程里的"forward process"：把数据集 $\{x_i\}$ 各加一个 $\sigma$ 高斯，得到含噪样本集。</p>
+
+    <p>对 $y$ 求对数梯度：</p>
+
+    $$\nabla_y \log p(y) \;=\; \frac{\nabla_y p(y)}{p(y)} \;=\; \frac{\int \nabla_y \mathcal{N}(y; x, \sigma^2 I)\, p(x)\, dx}{\int \mathcal{N}(y; x, \sigma^2 I)\, p(x)\, dx}.$$
+
+    <p><strong>Why</strong>：第一步是 $\nabla \log f = \nabla f / f$；第二步可以把 $\nabla_y$ 移进积分（被积分函数对 $y$ 光滑），$p(x)$ 不含 $y$ 所以保留不变。</p>
+
+    <p>关键代数：高斯密度对 $y$ 的梯度有一个简洁恒等式</p>
+
+    $$\nabla_y \mathcal{N}(y; x, \sigma^2 I) \;=\; -\frac{y - x}{\sigma^2}\, \mathcal{N}(y; x, \sigma^2 I).$$
+
+    <p><strong>Why</strong>：直接对 $\exp(-\|y-x\|^2 / 2\sigma^2)$ 求导，链式法则把 $-(y-x)/\sigma^2$ 拽出来，剩下的密度本身没变。这是 Tweedie 全部魔法的<em>唯一</em>非平凡步骤。</p>
+
+    <p>代回去：</p>
+
+    $$\nabla_y \log p(y) \;=\; \frac{\int -\frac{y - x}{\sigma^2}\, \mathcal{N}(y; x, \sigma^2 I)\, p(x)\, dx}{\int \mathcal{N}(y; x, \sigma^2 I)\, p(x)\, dx} \;=\; -\frac{1}{\sigma^2}\, \mathbb{E}_{x \sim p(x \mid y)} \big[ y - x \big].$$
+
+    <p><strong>Why</strong>：分母正好是 $p(y)$；分子里的积分（除掉 $-1/\sigma^2$）正好是 $\int (y-x)\, p(y\mid x)\, p(x)\, dx / p(y) = \mathbb{E}[y - x \mid y]$（用 Bayes：$p(x\mid y) = p(y\mid x)p(x)/p(y)$）。这就把"score"重写成"后验期望残差"。</p>
+
+    <p>因为 $y$ 在期望里是常数，$\mathbb{E}[y - x \mid y] = y - \mathbb{E}[x \mid y]$。整理：</p>
+
+    $$\sigma^2\, \nabla_y \log p(y) \;=\; \mathbb{E}[x \mid y] \;-\; y \quad\Longleftrightarrow\quad \mathbb{E}[x \mid y] \;=\; y + \sigma^2 \nabla_y \log p(y).$$
+
+    <p><strong>Why</strong>：这一行<strong>就是</strong>Tweedie's formula。整个证明只用到了：(1) 高斯密度对 $y$ 求导有一个干净的代数形式；(2) Bayes 规则在期望里的一次置换。没有任何工具更复杂——这也是为什么 Tweedie 1956 一篇短信函里就把它讲完了。</p>
+
+    <h2>反向恒等：score = 缩放的去噪残差</h2>
+
+    <p>把上式两边除以 $\sigma^2$，整理出反向关系：</p>
+
+    $$\boxed{\;\nabla_y \log p(y) \;=\; \frac{\mathbb{E}[x \mid y] - y}{\sigma^2}.\;}$$
+
+    <p><strong>Why</strong>：这一行的意义被严重低估——它说<strong>"score" 不是一个抽象的对数密度梯度，它就是"最优去噪向量"除以方差</strong>。如果你训了一个 $D_\theta(y) \approx \mathbb{E}[x\mid y]$ 的去噪器，那 $(D_\theta(y) - y)/\sigma^2$ 立刻等价于一个 score 估计器；反之亦然。这就是 Vincent 2011 "Denoising Score Matching" 的全部数学根基，也是 diffusion 训练里"预测噪声 / 预测干净图 / 预测 score"三种 parameterization <em>等价</em>的根本原因。换句话说，diffusion 社区里争论了很多年的"$\epsilon$-prediction 还是 $x_0$-prediction 还是 score-prediction 更好？"——从 Tweedie 的角度看，<strong>它们是同一件事的三种坐标系</strong>，三个目标网络在做训练时学到的<em>内容</em>是完全等价的，只是输出在不同 $\sigma$ 下的<em>数值尺度</em>不同。EDM (Karras 2022) 论文里那张著名的"统一参数化"表格，每一行就是把同一份信息搬到不同坐标系下；选哪一种，纯粹由数值稳定性、损失加权策略决定，<em>不</em>由理论决定。</p>
+
+    <h2>在 diffusion 里的具体用法</h2>
+
+    <p>在 DDPM 的 forward process 里，第 $t$ 步的 marginal 是高斯：$x_t = \sqrt{\bar\alpha_t}\, x_0 + \sqrt{1-\bar\alpha_t}\, \epsilon$，可以等价改写成"$y = x + \sigma_t \epsilon$"形式（其中 $y = x_t / \sqrt{\bar\alpha_t}$，$\sigma_t^2 = (1-\bar\alpha_t)/\bar\alpha_t$）。Tweedie 立刻给出每一步的<strong>最优 $x_0$ 估计</strong>：</p>
+
+    $$\hat x_0 \;=\; \mathbb{E}[x_0 \mid x_t] \;=\; \frac{1}{\sqrt{\bar\alpha_t}}\Big(x_t + (1-\bar\alpha_t)\, \nabla_{x_t}\log p_t(x_t)\Big).$$
+
+    <p><strong>Why</strong>：把 $y$ 替换成 $x_t/\sqrt{\bar\alpha_t}$，把 $\sigma^2$ 替换成 $(1-\bar\alpha_t)/\bar\alpha_t$，整理即得（一些版本里因为缩放约定不同会差一个 $\sqrt{\bar\alpha_t}$ 因子，但实质相同）。注意：<em>每一步反向</em>，扩散网络其实<strong>都在算 Tweedie 修正</strong>——你以为它在"预测噪声"，但等价于"用 score 把含噪图拉向后验均值"。</p>
+
+    <div class="tw-callout">⚙️ <strong>工程意义</strong>：$\epsilon$-parameterization 的网络 $\epsilon_\theta(x_t,t)$ 与 score 的关系是 $\nabla_{x_t} \log p_t(x_t) = -\epsilon_\theta(x_t,t)/\sqrt{1-\bar\alpha_t}$。代回 Tweedie，立即得到 DDPM 里那个著名的 "predicted $x_0$" 公式：$\hat x_0 = (x_t - \sqrt{1-\bar\alpha_t}\,\epsilon_\theta) / \sqrt{\bar\alpha_t}$。<em>这不是巧合，是 Tweedie 在 $\epsilon$-参数化下的直接翻译</em>。DDIM 反向更新公式 $x_{t-1} = \sqrt{\bar\alpha_{t-1}}\hat x_0 + \sqrt{1-\bar\alpha_{t-1}}\epsilon$ 里那个 $\hat x_0$，就是 Tweedie 给的后验均值。</div>
+
+    <p><span class="my-addition">🟡 教材外补充：</span>Tweedie's formula 在更广的指数族里也有一个推广（Robbins–Tweedie），形式是 $\mathbb{E}[\theta \mid y] = y + \frac{d}{dy}\log m(y)$，其中 $m(y)$ 是观测的边缘 CDF。但 diffusion model 几乎只用高斯版本——这是因为 forward process 被设计成<em>必须</em>是高斯加噪（这样 marginal 才是干净的高斯卷积，Tweedie 才能直接套用）。一旦你换成 Poisson 通道（如低剂量 CT 重建）或 binomial 通道（如离散 token），就要换对应版本的 Tweedie 推广；这也是为什么"diffusion + 离散 token"（如 SEDD、masked diffusion）需要从头重新推导损失函数与采样规则——它们不能"复用 DDPM 的公式换个分布"，因为整条 Tweedie 链条在非高斯通道上根本不长那样。</p>
+
+    <h2>三种身份的统一：score / denoiser / noise predictor</h2>
+
+    <p>读到这里你应该已经能在脑子里把三种网络<em>互相翻译</em>。给定含噪 $y$（在 diffusion 里是 $x_t$）：</p>
+
+    <p>(1) <strong>Score 网络</strong> $s_\theta(y) \approx \nabla_y \log p(y)$ — 直接学对数密度梯度，用 denoising score matching 损失。<br>
+    (2) <strong>去噪器</strong> $D_\theta(y) \approx \mathbb{E}[x \mid y]$ — 直接学后验均值，损失是 $\|D_\theta(y) - x\|^2$ 在 $\{y, x\}$ 配对上求期望。<br>
+    (3) <strong>噪声预测器</strong> $\epsilon_\theta(y) \approx (y - x)/\sigma$（或等价地 $\approx -\sigma\, \nabla_y \log p(y)$）— 学被加进去的高斯噪声本身，DDPM 默认参数化。</p>
+
+    <p>三者间的代数换算（设 $y = x + \sigma\epsilon$）：</p>
+
+    $$D_\theta(y) \;=\; y + \sigma^2\, s_\theta(y) \;=\; y - \sigma\, \epsilon_\theta(y).$$
+
+    $$s_\theta(y) \;=\; \frac{D_\theta(y) - y}{\sigma^2} \;=\; -\frac{\epsilon_\theta(y)}{\sigma}.$$
+
+    <p><strong>Why</strong>：上面两行是 Tweedie 主公式的直接代数重排，再加上"噪声 = 含噪图 − 干净图除以 $\sigma$"的定义。它们告诉你：<em>你训练的是哪一个网络，本质上不重要——三者只差线性变换</em>。但工程上选 $\epsilon_\theta$ 还是 $D_\theta$ 还是 $s_\theta$，会改变损失函数在不同 $\sigma$ 下的权重，进而影响哪些噪声尺度被学得更准。Karras 2022 EDM 论文里花了大量篇幅证明：直接学 $D_\theta$ 在数值上最稳，因为它的输出尺度 $\sim O(1)$ 不随 $\sigma$ 变化；而 $\epsilon_\theta$ 在 $\sigma \to 0$ 时输出尺度仍是 $O(1)$ 但实际"信号"很弱，$s_\theta$ 在 $\sigma \to 0$ 时输出尺度爆炸到 $O(1/\sigma)$。这就是为什么 EDM 选择 $D_\theta$、Stable Diffusion 选择 $\epsilon_\theta$（兼容 DDPM 老训练栈）、early SDE 论文选择 $s_\theta$——选择背后是数值稳定性的工程权衡，而不是建模能力的差异。</p>
+  </section>
+
+  <section class="concept-interact">
+    <p>按钮依次展开 Tweedie 的推导链。<strong>注意看什么不变量</strong>：每一步的右边都<em>只</em>用到含噪观测 $y$ 和 score $\nabla_y \log p(y)$，干净先验 $p(x)$ 始终<em>没出现在最终公式里</em>——这就是为什么 score 网络足够把整个去噪流程封装起来。</p>
+
+    <div class="tw-controls">
+      <button data-step="0" class="active">① 边缘化</button>
+      <button data-step="1">② 取对数梯度</button>
+      <button data-step="2">③ 高斯密度恒等式</button>
+      <button data-step="3">④ 换成后验期望</button>
+      <button data-step="4">⑤ Tweedie 主公式</button>
+      <button data-step="5">⑥ 反向：score=残差</button>
+    </div>
+
+    <div id="tw-readout">
+      <div class="tw-line tw-active-line" data-line="0">
+        $p(y) = \int \mathcal{N}(y; x, \sigma^2 I)\, p(x)\, dx$ — 含噪边缘 = 干净先验经过高斯卷积。
+      </div>
+      <div class="tw-line" data-line="1">
+        $\nabla_y \log p(y) = \dfrac{\int \nabla_y \mathcal{N}(y;x,\sigma^2 I)\, p(x)\, dx}{\int \mathcal{N}(y;x,\sigma^2 I)\, p(x)\, dx}$ — 把 $\nabla_y$ 移进积分（$p(x)$ 与 $y$ 无关）。
+      </div>
+      <div class="tw-line" data-line="2">
+        $\nabla_y \mathcal{N}(y;x,\sigma^2 I) = -\dfrac{y-x}{\sigma^2}\, \mathcal{N}(y;x,\sigma^2 I)$ — 高斯指数对 $y$ 求导的<em>唯一</em>非平凡一步。
+      </div>
+      <div class="tw-line" data-line="3">
+        $\nabla_y \log p(y) = -\dfrac{1}{\sigma^2}\, \mathbb{E}_{x \sim p(x\mid y)}[y - x]$ — 分子分母按 Bayes 重写成后验期望。
+      </div>
+      <div class="tw-line" data-line="4">
+        $\mathbb{E}[x\mid y] = y + \sigma^2 \nabla_y \log p(y)$ — <strong>Tweedie 主公式</strong>：含噪观测 + 方差 × score = 后验均值。
+      </div>
+      <div class="tw-line" data-line="5">
+        $\nabla_y \log p(y) = \dfrac{\mathbb{E}[x\mid y] - y}{\sigma^2}$ — 反过来读：<strong>score 就是"去噪残差除以方差"</strong>。
+      </div>
+    </div>
+
+    <script>
+      (function () {
+        const btns = document.querySelectorAll('.tw-controls button');
+        const lines = document.querySelectorAll('#tw-readout .tw-line');
+        function show(step) {
+          btns.forEach(b => b.classList.toggle('active', +b.dataset.step === step));
+          lines.forEach(l => l.classList.toggle('tw-active-line', +l.dataset.line === step));
+        }
+        btns.forEach(b => b.addEventListener('click', () => show(+b.dataset.step)));
+        show(0);
+      })();
+    </script>
+  </section>
+
+  <section class="concept-example">
+    <h2>手算一例：1D 高斯先验</h2>
+
+    <p>为了让代数闭合可验，取 $p(x) = \mathcal{N}(x; 0, 1)$，噪声水平 $\sigma = 1$。先做<em>解析</em>计算作为对照：含噪边缘 $p(y) = \mathcal{N}(y; 0, 2)$（两个独立高斯之和的方差是 $1+1=2$）。它的 score 是</p>
+
+    $$\nabla_y \log p(y) \;=\; -\frac{y}{2}.$$
+
+    <p>Tweedie 给出后验均值：</p>
+
+    $$\mathbb{E}[x \mid y] \;=\; y + \sigma^2 \nabla_y \log p(y) \;=\; y + 1 \cdot \Big(-\frac{y}{2}\Big) \;=\; \frac{y}{2}.$$
+
+    <p>这<em>正好</em>等于经典高斯-高斯共轭后验的均值（先验方差 1、似然方差 1，后验均值 = $y \cdot 1/(1+1) = y/2$）。两条独立路径给出一样的结果——Tweedie 没有作弊。</p>
+
+    <p>带数字：取 $y = 3$，则 $\mathbb{E}[x\mid 3] = 3/2 = 1.5$。几何上：你看到一个含噪观测落在 $y=3$，先验告诉你 $x$ 大概率在 0 附近；Tweedie 把 $y=3$ 沿 score 方向（朝 0）拉，每单位方差走 $-y/2$ 这么远，最终落在 $1.5$——介于"先验中心 0"和"观测 3"之间，符合 shrinkage 直觉。把 $\sigma$ 换成 0.1（噪声很轻）：$p(y) = \mathcal{N}(0, 1.01)$，score $\approx -y/1.01$，Tweedie 给 $\mathbb{E}[x\mid 3] \approx 3 - 0.01 \cdot 3/1.01 \approx 2.97$——几乎不修正，因为观测<em>本身</em>已经很可信。再换 $\sigma=10$：$p(y) = \mathcal{N}(0, 101)$，score $\approx -y/101$，Tweedie 给 $\mathbb{E}[x\mid 3] \approx 3 - 100 \cdot 3/101 \approx 0.03$——几乎全靠先验，因为观测被噪声淹没。<strong>三个数字（2.97, 1.5, 0.03）把"$\sigma$ 决定 shrinkage 强度"刻画得很清楚</strong>。</p>
+
+    <p>这个 toy 同时演示了 Tweedie 的<em>另一个</em>性质：当 $\sigma$ 很小（噪声轻），Tweedie 修正几乎是恒等映射 $\mathbb{E}[x\mid y] \approx y$——也就是 diffusion 反向链的<em>末端</em>步骤（接近 $t=0$、$\sigma_t$ 很小）几乎不需要修正。这也解释了为什么 DDIM 在 $T$ 步压缩到 50 步、20 步、甚至 4 步仍然能产出像样图：靠后的反向步本来就接近"恒等映射 + 一点点 Tweedie 修正"，省掉中间几十步对最终样本质量影响有限。反过来，靠近 $t=T$（$\sigma_t$ 很大）的反向步必须老老实实跑——那里 Tweedie 给的位移又大又关键。这是采样调度策略（比如 EDM 的 $\sigma$ schedule、DDIM 的 $\tau$ subset）背后的几何直觉。</p>
+  </section>
+
+  <section class="concept-pitfalls">
+    <h2>常见误区</h2>
+    <ol>
+      <li><strong>"Tweedie 给的是后验众数 / MAP 估计"。</strong>反例：取 $p(x)$ 为双峰分布（两个高斯混合），$y$ 落在两峰中间。MAP 会偏向较高峰的中心；Tweedie 给的<em>均值</em>则可能落在两峰之间的低密度区——它是<strong>后验期望</strong>，不是后验模式。在 diffusion 里这一点解释了一个常见现象：在 $x_t$ 含噪很重的早期步骤里，$\hat x_0 = \mathbb{E}[x_0 \mid x_t]$ 经常看起来是"模糊平均图"——比如对 MNIST 是各位数字的均值脸——因为 Tweedie 取的就是期望，不是"最像的那张图"。要拿到清晰图，必须迭代多步反向采样，把方差逐渐降下来。</li>
+      <li><strong>"Tweedie 只在高斯先验下成立"。</strong>反例：上面推导<em>没用</em>到 $p(x)$ 的任何形式——它对任意先验 $p(x)$（混合高斯、Laplace、自然图像分布……）都成立。<strong>真正的</strong>条件是<em>噪声通道</em>是高斯（即似然 $p(y\mid x) = \mathcal{N}(y;x,\sigma^2 I)$）。如果噪声是 Poisson（如低剂量 CT 探测器读数）或 Bernoulli（如离散 token mask），主公式形式变化，需要 Robbins–Tweedie 的指数族推广版本——这就是 SEDD（score entropy discrete diffusion）等离散扩散模型需要重新推导损失函数的根本原因。</li>
+      <li><strong>"score 是『梯度估计器』，Tweedie 是『另一个工具』"。</strong>反例：这条公式 $\nabla_y \log p(y) = (\mathbb{E}[x\mid y] - y)/\sigma^2$ 说明二者<strong>是同一个对象的两种参数化</strong>。如果你训一个网络去预测 score $s_\theta(y) \approx \nabla_y \log p(y)$ 和你训一个网络去预测干净图 $D_\theta(y) \approx \mathbb{E}[x\mid y]$，两个网络的<em>输出</em>只差一个常数缩放 $D_\theta(y) = y + \sigma^2 s_\theta(y)$。这就是为什么 EDM (Karras 2022) 的 "$D_\theta$-parameterization" 在数值上比 $\epsilon$-参数化更稳：直接预测 $\mathbb{E}[x\mid y]$ 的网络输出尺度<em>不随 $\sigma$ 爆炸</em>，而预测 score 或 $\epsilon$ 的输出在 $\sigma \to 0$ 时尺度会奇异。<strong>本质上是同一份信息</strong>，但工程数值表现差别很大。一个直接的检验方法：拿一个训好的 DDPM 模型，把它的 $\epsilon_\theta$ 输出按 $-\epsilon_\theta/\sqrt{1-\bar\alpha_t}$ 换算成 score，再用 Tweedie 主公式算后验均值，应该和原始 DDPM 的 "predicted $x_0$" 公式给出<em>完全一样</em>的数字（误差只在浮点精度量级）。如果差距很大，说明你某处掉了一个 $\sqrt{\bar\alpha_t}$ 因子——这正是 diffusion 代码 review 时最常踩的坑。</li>
+    </ol>
+  </section>
+
+  <section class="concept-seealso">
+    <h2>相关概念</h2>
+    <ul>
+      <li><a href="/video-to-notebook/concepts/score-matching/">Score Matching</a> — Tweedie 是它的理论钥匙：denoising score matching 之所以成立，正因为 Tweedie 证明 score = 去噪残差除以方差。</li>
+      <li><a href="/video-to-notebook/concepts/ddpm/">DDPM</a> — DDPM 反向步里的 "predicted $x_0$" 公式 $\hat x_0 = (x_t - \sqrt{1-\bar\alpha_t}\,\epsilon_\theta)/\sqrt{\bar\alpha_t}$ 就是 Tweedie 在 $\epsilon$-参数化下的直接翻译。</li>
+    </ul>
+  </section>
+
+  <section class="concept-sources">
+    <h2>来源</h2>
+    <ol>
+      <li><a href="https://www.youtube.com/watch?v=6ELzfPXUqps&t=75s" target="_blank" rel="noopener">diffusion-principles-vizuara · L6 · "compass which points towards the data" · (1:15)</a></li>
+      <li><a href="https://www.youtube.com/watch?v=6ELzfPXUqps&t=307s" target="_blank" rel="noopener">diffusion-principles-vizuara · L6 · "creating sinks in the data, like a black hole" · (5:07)</a></li>
+      <li><a href="https://www.youtube.com/watch?v=6ELzfPXUqps&t=757s" target="_blank" rel="noopener">diffusion-principles-vizuara · L6 · 引出 denoising score matching 与 Tweedie 路径 · (12:37)</a></li>
+    </ol>
+  </section>
+</article>

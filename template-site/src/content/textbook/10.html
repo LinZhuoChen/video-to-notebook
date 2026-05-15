@@ -1,0 +1,650 @@
+<style>
+  .scorematch-ch { line-height: 1.7; }
+  .scorematch-ch svg { display: block; margin: 1.2rem auto; max-width: 100%; height: auto; }
+  .scorematch-ch .clip-frame { max-width: 720px; margin: 1.4rem auto; }
+  .scorematch-ch .clip-frame iframe { width: 100%; aspect-ratio: 16/9; border: 0; border-radius: 6px; }
+  .scorematch-ch .clip-frame figcaption { color: var(--text-muted); font-size: 0.85rem; margin-top: 0.4rem; text-align: center; }
+  .scorematch-ch .tldr { background: var(--surface-soft); border-left: 4px solid var(--module-accent); padding: 1rem 1.2rem; border-radius: 0 6px 6px 0; margin: 1.4rem 0; }
+  .scorematch-ch .tldr h2 { margin-top: 0; font-size: 1.05rem; }
+  .scorematch-ch .callout { padding: 0.7rem 1rem; margin: 1rem 0; border-radius: 0 6px 6px 0; }
+  .scorematch-ch .callout-info { background: #eef6fc; border-left: 4px solid #2b80c4; }
+  .scorematch-ch .callout-note { background: #f3f0fa; border-left: 4px solid #6f4dd0; }
+  .scorematch-ch .callout-warning { background: #fff6e0; border-left: 4px solid #d4a017; }
+  .scorematch-ch .callout-tip { background: #e8f5e9; border-left: 4px solid #0b5; }
+  .scorematch-ch .callout-quote { background: var(--surface-soft); border-left: 3px solid var(--border-strong); padding: 0.5rem 1rem; margin: 0.8rem 0; font-style: italic; color: var(--text-muted); }
+  .scorematch-ch .my-addition { background: #fff7d6; border-left: 4px solid #b8860b; padding: 0.7rem 1rem; margin: 1rem 0; border-radius: 0 6px 6px 0; }
+  .scorematch-ch pre { background: #1f1f1f; color: #f6f4ee; padding: 1rem; border-radius: 6px; font-size: 0.86rem; line-height: 1.55; overflow-x: auto; }
+  .scorematch-ch code:not(pre code) { background: var(--surface-soft); padding: 0.1rem 0.35rem; border-radius: 3px; font-size: 0.9em; }
+  .scorematch-ch h2 { border-bottom: 1px solid var(--border); padding-bottom: 0.3rem; margin-top: 2.4rem; }
+  .scorematch-ch h3 { color: var(--module-accent); margin-top: 1.6rem; }
+  .scorematch-ch .deriv-step { margin: 0.8rem 0; padding: 0.6rem 0.8rem; background: var(--surface-soft); border-radius: 4px; }
+  .scorematch-ch .deriv-step strong { color: var(--module-accent); }
+  @keyframes score-arrow { 0%, 100% { transform: translate(0, 0); } 50% { transform: translate(6px, -6px); } }
+  .scorematch-ch .score-arrow { animation: score-arrow 2.4s ease-in-out infinite; transform-origin: center; transform-box: fill-box; }
+</style>
+
+<article class="scorematch-ch">
+
+<h1>10. Score Matching 与 Tweedie 公式</h1>
+
+<p style="font-size:0.95rem; color:var(--text-muted);">主源：CMU 10799 S26 Lecture 4「Score-based Models」（讲师 Yilun Du / Dora）；副源：Vizuara《Principles of Diffusion Models》Lecture 6（Denoising Score Matching）、Lecture 7（NCSN）。</p>
+
+<div class="tldr">
+  <h2>📌 TL;DR</h2>
+  <p>上一章我们说"DDPM 训的就是 $\epsilon$ 预测器"，但这条路只是 diffusion 的 <strong>DDPM 视角</strong>。本章打开 <strong>score 视角</strong>：与其学一个 noise predictor，不如直接学 <strong>score function</strong></p>
+  $$s_\theta(x) \;\approx\; \nabla_x \log p(x).$$
+  <p>困难是 $\log p(x)$ 本身不可达，所以 naive 的回归不可行。本章给两条等价路径：</p>
+  <ul>
+    <li><strong>Hyvärinen (2005) Implicit Score Matching</strong>：通过分部积分，把无法计算的 $\nabla \log p_\text{data}$ 替换成 <strong>Jacobian 迹 + L2 自身范数</strong>——绕过了对真实 score 的依赖；但 Jacobian 太贵。</li>
+    <li><strong>Vincent (2011) Denoising Score Matching</strong>：先给数据加高斯噪声 $\tilde x = x + \sigma \epsilon$，让目标变成 <strong>预测 $-\epsilon/\sigma$</strong>。这就是 <strong>DDPM 的 $\epsilon$-loss 在每个噪声层级上的 score-matching 解释</strong>。</li>
+  </ul>
+  <p>最后用 <strong>Tweedie 公式</strong> $\mathbb{E}[x \mid y] = y + \sigma^2 \nabla_y \log p(y)$ 把"score = (干净估计 − 含噪观测) / 方差"打通，统一 <em>denoising</em> 与 <em>scoring</em> 两种说法。</p>
+  <p><strong>开篇用 score 视角的理由</strong>：DDPM 推到 SDE / Flow Matching / consistency model 时，原来的 $\epsilon$-prediction 框架会变窄；而 score 框架可以无缝扩到任意噪声分布、任意时间连续过程。本章是 Module 3 的地基。</p>
+</div>
+
+<h2>零、为什么要单独有一章讲 score matching？</h2>
+
+<p>读到这里你可能心里嘀咕：上一章 DDPM 已经能跑了，损失就是简单的 $\|\epsilon - \epsilon_\theta\|^2$，<em>为什么还要换个视角讲一遍</em>？三个答案：</p>
+
+<ol>
+  <li><strong>它讲清了 DDPM 的"为什么"</strong>：DDPM 的 $\epsilon$-loss 并不是凭空设计的工程 trick，它在数学上等价于"score matching"——一个 2005 年就有的统计学问题。理解了 score matching，你就能<em>把 DDPM 推导出来</em>，而不仅是<em>记住它</em>。</li>
+  <li><strong>它是后续所有连续时间方法的入口</strong>：Score SDE、Flow Matching、Consistency Models、Rectified Flow 全部建立在 score 视角上。如果你只懂 DDPM 视角，看 2022 年后的论文会处处卡壳。</li>
+  <li><strong>它让你能复用"非高斯"想法</strong>：score 视角天然兼容任意可微噪声扰动；DDPM 的 $\epsilon$-loss 只对加性高斯成立。前者是"研究语言"，后者是"教学语言"。</li>
+</ol>
+
+<h2>一、从似然窘境开篇：CMU 讲师为什么不走 likelihood？</h2>
+
+<p>CMU 10799 Lecture 4 一开场就回顾上一讲（DDPM）：训练时回归噪声 $\epsilon$，采样时一步步去噪。讲师随即把镜头拉远，问一个更基础的问题：</p>
+
+<div class="callout-quote">
+"likelihood is very difficult to calculate. Why? Because uh for example if you have a auto regressive model then you need to break things up by the chain rule and then you need to calculate each components one by one... If you have a very high dimensional data like image then you're going to be calculating the chain rule for for each pixel and that's just like really really painful."
+</div>
+
+<p>讲师把所有"显式估计 likelihood"的方法过了一遍，每个都判了死刑：</p>
+
+<ul>
+  <li><strong>Autoregressive</strong>（如 PixelCNN）：链式法则下逐像素算条件概率，高维数据下慢到无法接受；</li>
+  <li><strong>VAE</strong>：你不是在算 $\log p(x)$，而是在最大化 <a href="/video-to-notebook/textbook/2/">ELBO</a>（一个 surrogate loss）—— 即使做了那么多硬数学，本质还是"次优"；</li>
+  <li><strong>Normalizing Flow</strong>：必须设计可逆架构，"weird architectures"，灵活性受限；</li>
+  <li><strong>EBM</strong>（能量模型）：分母里的 <strong>partition function</strong> $Z = \int e^{-E(x)} dx$ 一般 <em>intractable</em>。</li>
+</ul>
+
+<p>讲师随后甩出一个关键反问：</p>
+
+<blockquote>"is there a better way to do sort of likelihood free training? ... if we just want to do sampling, uh do we actually need to have a model to actually predict the likelihood of the data to sample from?"</blockquote>
+
+<p>答案是：<strong>不需要</strong>。我们想要的只是<em>采样</em>——一台能产出像训练数据的样本的机器。所以问题可以缩窄成："<strong>怎么把一个起始分布的样本变换到目标分布的样本</strong>？"</p>
+
+<div class="callout callout-tip">
+💡 <strong>本章核心问题</strong>：若我们只需要"沿着数据密度的梯度走"，那能不能不学 $p(x)$ 本身，而是直接学 $\nabla_x \log p(x)$？这条路被称为 <strong>likelihood-free + gradient-based</strong>，也就是 score-based generative modeling。
+</div>
+
+<h2>二、Score Function：把"指南针"放进数据空间</h2>
+
+<p>CMU 讲师在白板上画了一个二维平面，上面散落着不同颜色的点（混合高斯）。然后说：</p>
+
+<div class="callout-quote">
+"you can start from anywhere on the data space ... and then you just follow the arrow ... follow the flow essentially. So this is your gradient and then just like go and then you're going to eventually wind up at some somewhere where it's supposed to be high density."
+</div>
+
+<p>正式定义：</p>
+
+$$s(x) \;\triangleq\; \nabla_x \log p(x).$$
+
+<p>这是 $x$ 的<strong>函数</strong>——平面上每个点都对应一个向量，它指向<em>对数密度上升最快的方向</em>。这就是 <strong>score function</strong>。讲师反复强调："we don't really actually need the likelihood ... all we need is sort of like the gradient of the log likelihood."</p>
+
+<p>Vizuara Lecture 6 给了一个更口语的比方：</p>
+
+<div class="callout-quote">
+"A score is like a compass which points towards the data. So let's say you have data lying around in space and you go in that space with a compass..."
+</div>
+
+<p>把这两版合并：<strong>score 就是数据空间上每点的指南针，永远指向最近的高密度区域</strong>。</p>
+
+<h3>2.1 为什么是 $\log p$ 的梯度，不直接是 $p$ 的梯度？</h3>
+
+<p>讲师在被同学打断时给了个简洁回答："log is easier to calculate in many cases."。展开两条理由：</p>
+
+<ol>
+  <li><strong>数值稳定</strong>：$p(x)$ 在高维下数值上接近 0，梯度更接近 0；$\log p(x)$ 把它拉回可计算的范围。</li>
+  <li><strong>归一化常数消失</strong>：若 $p(x) = \tilde p(x) / Z$，则 $\nabla_x \log p(x) = \nabla_x \log \tilde p(x) - \nabla_x \log Z = \nabla_x \log \tilde p(x)$。<strong>partition function $Z$ 不依赖 $x$，对 $x$ 求导就消失了</strong>——score 视角天然绕开了 EBM 最大的难题。</li>
+</ol>
+
+<div class="callout callout-info">
+🧠 <strong>三句话锚定 score</strong>：① 它是 <em>向量场</em>，不是标量；② 它指向 <em>高密度</em>，不是低密度；③ 它<strong>不依赖归一化常数</strong>，所以即使你只知道 $p$ 的形状不知道总积分，也能算 score。这是 score 视角的根本红利。
+</div>
+
+<h3>2.2 拿到 score 之后怎么用？Langevin 采样的预告</h3>
+
+<p>CMU 讲师在这里没展开，但暗示了下一章的伏笔：一旦你有了 $s(x) \approx \nabla \log p(x)$，就可以用<strong>朗之万动力学</strong>从噪声出发"爬"到高密度区：</p>
+
+$$x_{k+1} \;=\; x_k + \frac{\eta}{2} s(x_k) + \sqrt{\eta}\, \xi_k, \quad \xi_k \sim \mathcal{N}(0, I).$$
+
+<p>这就是 Stein "gradient flow" 的离散化，类似带噪声版本的梯度上升。你可以把它想成"<strong>带温度的优化器</strong>"——主项 $\frac{\eta}{2} s(x_k)$ 是沿 score 上升，附加项 $\sqrt{\eta}\, \xi_k$ 是高斯抖动；少了抖动你只能爬到某个局部模式，加了抖动你才能"跳出来"按真实密度采样。<a href="/video-to-notebook/textbook/11/">下一章</a>会专门讲它怎么从 score 出发把噪声变成数据，本章只要把"sampler 只需 score"这件事认下。</p>
+
+<h3>2.3 起点分布的限制</h3>
+
+<p>有同学问 CMU 讲师："如果用 score 沿着梯度走，起点是不是要在某个特定分布上？" 讲师回答：</p>
+
+<div class="callout-quote">
+"your source distribution and your target distribution should always be in the same space. So here our desired distribution are these like colored mixture of gausians here ... we are just randomly sample and follow the gradient of the log density to get to the high density region of our desired distribution."
+</div>
+
+<p>翻译过来：起点可以是<em>同一个空间</em>里任何方便采样的分布（比如各向同性高斯），只要它的支撑覆盖了目标分布所在区域。score 流动会把它"梳"到目标分布。"<strong>同空间但不同分布</strong>"是 score-based 采样最朴素的设置。</p>
+
+<svg viewBox="0 0 600 260" role="img" aria-label="数据空间中的 score 向量场示意">
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,10 L10,5 z" fill="#2b80c4"/>
+    </marker>
+  </defs>
+  <rect x="20" y="20" width="560" height="220" fill="#f9fbfd" stroke="#d0d7de"/>
+  <text x="300" y="40" text-anchor="middle" font-family="ui-sans-serif" font-size="13" font-weight="600">数据空间上的 score 向量场（箭头指向高密度区）</text>
+  <g fill="#e8475c" opacity="0.65">
+    <ellipse cx="170" cy="150" rx="42" ry="32"/>
+    <ellipse cx="420" cy="170" rx="38" ry="30"/>
+    <ellipse cx="320" cy="100" rx="28" ry="22"/>
+  </g>
+  <g stroke="#2b80c4" stroke-width="1.6" marker-end="url(#arrow)" fill="none">
+    <line x1="80" y1="90" x2="135" y2="130"/>
+    <line x1="250" y1="60" x2="305" y2="92"/>
+    <line x1="500" y1="100" x2="450" y2="150"/>
+    <line x1="520" y1="220" x2="455" y2="190"/>
+    <line x1="100" y1="220" x2="155" y2="180"/>
+    <line x1="370" y1="220" x2="410" y2="185"/>
+    <line x1="265" y1="200" x2="220" y2="170"/>
+  </g>
+  <g class="score-arrow" stroke="#0b5" stroke-width="2.2" marker-end="url(#arrow)" fill="none">
+    <line x1="60" y1="60" x2="125" y2="120"/>
+  </g>
+  <text x="48" y="55" font-family="ui-sans-serif" font-size="11" fill="#0b5">起点</text>
+  <text x="155" y="148" font-family="ui-sans-serif" font-size="11" fill="#a01827">高密度</text>
+  <text x="300" y="245" text-anchor="middle" font-family="ui-sans-serif" font-size="11" fill="#666">每个点都有一个 $\nabla_x \log p(x)$ 向量</text>
+</svg>
+
+<h2>三、Naive 思路为什么不行：你算不出真实的 $\nabla \log p_\text{data}$</h2>
+
+<p>最直觉的训练目标是<strong>显式 score matching</strong>（Hyvärinen 2005，简称 ESM）：</p>
+
+$$J_\text{ESM}(\theta) \;=\; \tfrac{1}{2}\,\mathbb{E}_{x \sim p_\text{data}}\!\left[\,\big\|\,s_\theta(x) - \nabla_x \log p_\text{data}(x)\,\big\|^2\,\right].$$
+
+<p>语义直白：让神经网络输出的向量 $s_\theta(x)$ 尽量贴近真实数据分布的 score。<strong>问题</strong>：</p>
+
+<ul>
+  <li>我们只有<em>有限训练样本</em> $\{x_1, x_2, \dots, x_N\}$；</li>
+  <li>不知道 $p_\text{data}(x)$ 的解析形式，更别说它的对数梯度。</li>
+</ul>
+
+<p>"用经验分布 $\hat p$ 代替 $p_\text{data}$" 也救不了——$\hat p$ 是一堆 delta 函数之和，对它求 $\nabla \log \hat p$ 在样本点上是无穷大、其他地方是 0，几乎处处不可用。</p>
+
+<div class="callout callout-warning">
+⚠️ <strong>这正是 score matching 的核心困境</strong>：训练目标里出现了"我们想学的东西"。如果我们已经知道 $\nabla \log p_\text{data}$，就不需要学了。所以必须找<em>一个不依赖 $\nabla \log p_\text{data}$ 但和 $J_\text{ESM}$ 等价的目标</em>。这正是 Hyvärinen 2005 的核心贡献。
+</div>
+
+<p>Vizuara Lecture 7 用一个磁铁比喻把这种"目标依赖未知量"的怪圈讲透：</p>
+
+<div class="callout-quote">
+"Imagine that there are a bunch of magnets kept on a table and you have access to only a few of those magnets. Many of the other magnets are hidden from you. Now the idea or the objective is to calculate given any point on this table what is the direction in which the nearest magnet is pulling you. ... Now, inherently this is a very hard problem because we do not know the exact location of the magnets."
+</div>
+
+<p>"看不见的磁铁"就是隐藏的 $p_\text{data}$，"被磁场拉的方向"就是 score。<strong>我们要在不知道磁铁位置的前提下估计磁场</strong>——这就是 score matching 解决的问题。</p>
+
+<h2>四、Hyvärinen 的魔术：分部积分把 $\nabla \log p_\text{data}$ 变没</h2>
+
+<p>这是本章最重要的数学推导。我们要把 $J_\text{ESM}$ 一步步变形，<strong>让最终目标里完全没有 $p_\text{data}$ 的 score</strong>。下面给完整 6 步。</p>
+
+<div class="deriv-step">
+<strong>步骤 1：展开平方项</strong>
+$$J_\text{ESM}(\theta) = \tfrac{1}{2}\,\mathbb{E}_{p_\text{data}}\!\left[\,\|s_\theta(x)\|^2 - 2\, s_\theta(x)^\top \nabla \log p_\text{data}(x) + \|\nabla \log p_\text{data}(x)\|^2\,\right]$$
+<em>Why</em>：$\|a-b\|^2 = \|a\|^2 - 2 a^\top b + \|b\|^2$。最后一项 $\|\nabla \log p_\text{data}\|^2$ 与 $\theta$ 无关，<strong>是个常数，优化时可丢掉</strong>。
+</div>
+
+<div class="deriv-step">
+<strong>步骤 2：剩下两项的优化等价目标</strong>
+$$J_\text{ESM}(\theta) \;\overset{c}{=}\; \mathbb{E}_{p_\text{data}}\!\left[\,\tfrac{1}{2}\|s_\theta(x)\|^2 - s_\theta(x)^\top \nabla \log p_\text{data}(x)\,\right]$$
+<em>Why</em>："$\overset{c}{=}$" 表示"忽略与 $\theta$ 无关的常数后相等"。麻烦在第二项里仍然有未知的 $\nabla \log p_\text{data}$。下一步处理它。
+</div>
+
+<div class="deriv-step">
+<strong>步骤 3：把第二项写成积分形式</strong>
+$$-\mathbb{E}_{p_\text{data}}\!\left[\,s_\theta(x)^\top \nabla \log p_\text{data}(x)\,\right] \;=\; -\int p_\text{data}(x) \, s_\theta(x)^\top \nabla \log p_\text{data}(x) \, dx$$
+<em>Why</em>：期望就是积分。下一步关键代换：
+$$p_\text{data}(x) \cdot \nabla \log p_\text{data}(x) \;=\; p_\text{data}(x) \cdot \frac{\nabla p_\text{data}(x)}{p_\text{data}(x)} \;=\; \nabla p_\text{data}(x).$$
+所以这一项变成：
+$$= -\int s_\theta(x)^\top \nabla p_\text{data}(x) \, dx.$$
+<em>这一步是整个推导的<strong>命门</strong></em>：原本是"在 $p_\text{data}$ 加权下求 $\nabla \log p$"，现在变成了"直接对 $\nabla p_\text{data}$ 积分"。
+</div>
+
+<div class="deriv-step">
+<strong>步骤 4：分部积分（integration by parts）</strong>
+对每一维 $i$，有
+$$-\int s_\theta(x)_i \cdot \frac{\partial p_\text{data}(x)}{\partial x_i} \, dx \;=\; \int p_\text{data}(x) \cdot \frac{\partial s_\theta(x)_i}{\partial x_i} \, dx - \underbrace{\big[\,s_\theta(x)_i \cdot p_\text{data}(x)\,\big]_{-\infty}^{+\infty}}_{=\,0}.$$
+<em>Why</em>：一维分部积分 $\int u \, dv = uv - \int v \, du$，这里 $u = s_\theta(x)_i$、$dv = \partial_i p_\text{data}\, dx$，所以 $v = p_\text{data}$、$du = \partial_i s_\theta(x)_i \, dx$。<br>
+<em>边界项为 0 的条件</em>：当 $\|x\| \to \infty$ 时 $p_\text{data}(x) \to 0$ 且 $s_\theta(x)$ 增长不超过指数级，乘积趋于 0。这一温和的"<em>regularity assumption</em>"是 Hyvärinen 2005 的核心假设。
+</div>
+
+<div class="deriv-step">
+<strong>步骤 5：把所有维度加起来</strong>
+$$-\mathbb{E}_{p_\text{data}}\!\left[\,s_\theta(x)^\top \nabla \log p_\text{data}(x)\,\right] \;=\; \mathbb{E}_{p_\text{data}}\!\left[\,\sum_{i=1}^d \frac{\partial s_\theta(x)_i}{\partial x_i}\,\right] \;=\; \mathbb{E}_{p_\text{data}}\!\left[\,\operatorname{tr}\!\big(\nabla_x s_\theta(x)\big)\,\right].$$
+<em>Why</em>：$\sum_i \partial s_i / \partial x_i = \operatorname{tr}(\nabla_x s)$ —— Jacobian 矩阵的对角和。
+</div>
+
+<div class="deriv-step">
+<strong>步骤 6：合并，得到 Implicit Score Matching (ISM)</strong>
+$$\boxed{\;J_\text{ISM}(\theta) \;=\; \mathbb{E}_{p_\text{data}}\!\left[\,\operatorname{tr}\!\big(\nabla_x s_\theta(x)\big) + \tfrac{1}{2}\|s_\theta(x)\|^2\,\right]\;}$$
+<em>Why</em>：把步骤 5 代回步骤 2。<strong>所有出现 $\nabla \log p_\text{data}$ 的项都被替换成了 $s_\theta$ 自己的导数</strong>，目标里只剩两个能算的东西：
+<ul>
+  <li>$\operatorname{tr}(\nabla_x s_\theta(x))$：score 网络<strong>自己</strong>的 Jacobian 迹（用 autograd 算）；</li>
+  <li>$\|s_\theta(x)\|^2$：score 网络输出的范数平方（直接算）。</li>
+</ul>
+两者期望都在 $p_\text{data}$ 下取——而 $p_\text{data}$ 的期望可以用<em>有限训练样本</em>的经验均值近似！
+</div>
+
+<div class="callout callout-tip">
+💡 <strong>核心 trick 的本质</strong>：分部积分把"对未知 $p$ 求导"翻译成了"对已知 $s_\theta$ 求导"——<strong>把不可计算量挪到了我们能控制的网络这边</strong>。Hyvärinen 2005 这一招让 score matching 从理论变成了可执行算法。
+</div>
+
+<h3>4.1 用一个一维玩具例子手算 ISM</h3>
+
+<p>抽象推导容易把人绕晕，给一个最小例子坐实 ISM 真的能跑：假设 $p_\text{data}(x) = \mathcal{N}(x; 0, 1)$（虽然现实里我们不会知道这件事，但用它能验证 ISM 的正确性），并让 $s_\theta(x) = -\theta x$（线性 score 网络，一个标量参数）。理论真实 score 是 $\nabla \log p(x) = -x$，所以最优 $\theta^* = 1$。</p>
+
+<p>把 $s_\theta(x) = -\theta x$ 代入 ISM：</p>
+
+$$J_\text{ISM}(\theta) = \mathbb{E}_p\!\left[\frac{\partial(-\theta x)}{\partial x} + \tfrac{1}{2}(-\theta x)^2\right] = \mathbb{E}_p\!\left[-\theta + \tfrac{1}{2}\theta^2 x^2\right] = -\theta + \tfrac{1}{2}\theta^2 \mathbb{E}_p[x^2].$$
+
+<p>$\mathbb{E}_p[x^2] = 1$（标准正态的方差），所以 $J_\text{ISM}(\theta) = -\theta + \tfrac{1}{2}\theta^2$。对 $\theta$ 求导令零：$-1 + \theta = 0 \Rightarrow \theta^* = 1$。<strong>和真实 score 完全一致</strong>。</p>
+
+<p>注意整个推导过程里我们<em>从未用到</em> $-x$ 这个真实 score 的表达式——只用了样本的二阶矩 $\mathbb{E}[x^2]$ 和网络自身的导数 $-1$。这就是 Hyvärinen trick 的力量在最小例子里的体现。</p>
+
+<h2>五、ISM 也有问题：Jacobian 迹太贵</h2>
+
+<p>ISM 看似完美，但有一个工程灾难：</p>
+
+<ul>
+  <li>$s_\theta$ 输入是 $d$ 维（比如 $32 \times 32 \times 3 = 3072$ 维的图像），输出也是 $d$ 维；</li>
+  <li>$\nabla_x s_\theta(x)$ 是 $d \times d$ 的 Jacobian 矩阵；</li>
+  <li>算迹 $\operatorname{tr}(\nabla_x s_\theta)$ 需要 $d$ 次反向传播（每次只算一个对角元）；</li>
+  <li>对一张 $256 \times 256 \times 3$ 的图像，$d = 196{,}608$——<strong>训练一步要做 20 万次反传</strong>。</li>
+</ul>
+
+<p>实际可用的折中包括：</p>
+
+<ol>
+  <li><strong>Sliced Score Matching</strong>（Song et al. 2019）：用随机投影方向估计迹，把开销从 $d$ 次反传降到 1 次（带方差）；</li>
+  <li><strong>Denoising Score Matching</strong>（Vincent 2011）：彻底绕开 Jacobian，靠"加噪声 + 解析 score"换来闭式目标。<strong>这就是 DDPM 实际在用的方法</strong>，也是下一节的主题。</li>
+</ol>
+
+<h2>六、Denoising Score Matching：换一个噪声分布把目标变成回归</h2>
+
+<p>Vincent (2011) 的洞察：与其学 $p_\text{data}$ 的 score，<strong>不如学"加了噪声的 $p_\text{data}$"的 score</strong>。具体地，定义噪声扰动分布</p>
+
+$$q_\sigma(\tilde x \mid x) \;=\; \mathcal{N}\!\big(\tilde x;\, x,\, \sigma^2 I\big), \qquad q_\sigma(\tilde x) \;=\; \int q_\sigma(\tilde x \mid x)\, p_\text{data}(x)\, dx.$$
+
+<p>我们改成学 $s_\theta(\tilde x) \approx \nabla_{\tilde x} \log q_\sigma(\tilde x)$。Vincent 证明：</p>
+
+$$\underbrace{\tfrac{1}{2}\mathbb{E}_{q_\sigma(\tilde x)}\!\left[\,\big\|s_\theta(\tilde x) - \nabla_{\tilde x} \log q_\sigma(\tilde x)\big\|^2\,\right]}_{\text{扰动后的 ESM（仍不可算）}} \;\overset{c}{=}\; \underbrace{\tfrac{1}{2}\mathbb{E}_{p_\text{data}(x)\, q_\sigma(\tilde x \mid x)}\!\left[\,\big\|s_\theta(\tilde x) - \nabla_{\tilde x} \log q_\sigma(\tilde x \mid x)\big\|^2\,\right]}_{\text{Denoising SM（可算）}}.$$
+
+<p>左边的目标依然依赖未知的 $\log q_\sigma(\tilde x)$；但<strong>右边的目标只依赖条件 score</strong> $\nabla_{\tilde x} \log q_\sigma(\tilde x \mid x)$，而这个对高斯条件分布有<em>解析解</em>：</p>
+
+$$\nabla_{\tilde x} \log q_\sigma(\tilde x \mid x) \;=\; \nabla_{\tilde x}\left[-\frac{\|\tilde x - x\|^2}{2\sigma^2}\right] \;=\; -\frac{\tilde x - x}{\sigma^2} \;=\; -\frac{\sigma \epsilon}{\sigma^2} \;=\; -\frac{\epsilon}{\sigma}.$$
+
+<p>（这里用了 $\tilde x = x + \sigma \epsilon$，所以 $\tilde x - x = \sigma \epsilon$。）</p>
+
+<p>所以 DSM 目标可写成：</p>
+
+$$J_\text{DSM}(\theta) \;=\; \tfrac{1}{2}\,\mathbb{E}_{x \sim p_\text{data},\, \epsilon \sim \mathcal{N}(0, I)}\!\left[\,\left\|\, s_\theta(x + \sigma \epsilon) + \frac{\epsilon}{\sigma}\,\right\|^2\,\right].$$
+
+<div class="callout callout-info">
+🔑 <strong>DSM 的训练循环</strong>：① 从数据集采 $x$；② 采高斯噪声 $\epsilon$；③ 算 $\tilde x = x + \sigma \epsilon$；④ 让 $s_\theta(\tilde x)$ 去回归 $-\epsilon/\sigma$。<strong>整个过程没有任何 Jacobian、没有任何分部积分、没有任何对真实 $p_\text{data}$ 的依赖</strong>——只有一个最朴素的均方误差回归。
+</div>
+
+<h3>6.1 DSM = "教网络做去噪"</h3>
+
+<p>Vizuara Lecture 6 用一句口语把 DSM 包装成"<em>训练一个去噪器</em>"：</p>
+
+<div class="callout-quote">
+"You're literally just teaching the network: given a noisy version of the data, point me back to the clean data. The direction you should point is $-\epsilon/\sigma$."
+</div>
+
+<p>这就把 score matching 和 denoising 直接画了等号。"<strong>score = pointer back to clean data</strong>"。我们后面会用 Tweedie 公式把这句话<em>精确</em>说出来。</p>
+
+<p>用磁铁的比喻再补一刀：Vizuara Lecture 7 接着上一节的磁铁问题问——既然你看不见所有磁铁、只看得见<em>桌上的钢珠</em>（训练样本），那"<strong>把钢珠拖到桌边再松手</strong>"就行了。钢珠被磁场拖回原位置的方向，就是你想学的 score。这正是 DSM 的物理直觉：</p>
+
+<ul>
+  <li>从数据集采 $x$（钢珠原位）；</li>
+  <li>拖到 $\tilde x = x + \sigma \epsilon$（钢珠被推走）；</li>
+  <li>让网络预测"被拖走的反方向"$-\epsilon/\sigma$ —— 即"磁铁回拉的方向"；</li>
+  <li>所有训练样本一起<em>采样</em>了整个磁场，模型由此学到 score 向量场。</li>
+</ul>
+
+<p>这个比喻的精妙之处：你不需要知道磁铁的位置（$p_\text{data}$ 的解析形式），只要给"钢珠 + 推力"对子，磁场就能反推出来。</p>
+
+<h3>6.2 DSM 和 DDPM 的 $\epsilon$-loss 是同一个东西</h3>
+
+<p>回想 <a href="/video-to-notebook/textbook/7/">第 7 章</a> 我们写过的 DDPM 简化损失：</p>
+
+$$L_\text{simple} = \mathbb{E}_{t, x_0, \epsilon}\!\left[\,\|\epsilon - \epsilon_\theta(x_t, t)\|^2\,\right], \quad x_t = \sqrt{\bar\alpha_t}\, x_0 + \sqrt{1 - \bar\alpha_t}\, \epsilon.$$
+
+<p>把 noise predictor 换写成 score：</p>
+
+$$s_\theta(x_t, t) \;\triangleq\; -\frac{\epsilon_\theta(x_t, t)}{\sqrt{1 - \bar\alpha_t}}.$$
+
+<p>那 $L_\text{simple}$ 就<strong>等价于</strong>在每个噪声层级 $\sigma_t = \sqrt{1 - \bar\alpha_t}$ 上做 DSM——目标是 $-\epsilon/\sigma_t$。这就是 score-based 视角（Song & Ermon 2019）和 DDPM 视角（Ho et al. 2020）的<strong>真正统一公式</strong>。</p>
+
+<div class="callout callout-tip">
+💡 <strong>本章最重要的"恍然大悟"</strong>：DDPM 当年用 noise prediction loss 是"trick"地把扩散过程简化，但事后看，<strong>这正是 Vincent 2011 DSM 在多噪声层级上的应用</strong>。Yang Song 2019 的 score-based 论文与 Ho 2020 的 DDPM 论文是<em>从两个方向爬到了同一座山顶</em>。Module 3 接下来几章都建在这个统一性之上。
+</div>
+
+<h3>6.3 工程细节：在多噪声层级训一个网络</h3>
+
+<p>NCSN（Noise Conditional Score Network, Song & Ermon 2019）的关键工程选择是：</p>
+
+<ul>
+  <li><strong>单一网络</strong>，输入是 $(\tilde x, \sigma)$（或者时间步 $t$）——条件化噪声层级；</li>
+  <li>训练目标按 $\sigma$ 加权：噪声大时给小权重（梯度幅值天然大），噪声小时给大权重（梯度容易消失）；</li>
+  <li>常用加权 $\lambda(\sigma) = \sigma^2$，让每个层级对 loss 的贡献量纲一致。</li>
+</ul>
+
+<p>Vizuara Lecture 7 把这套思路概括为"<strong>从大噪声一直退到小噪声，score 网络全程在场</strong>"——score 视角下的 DDPM 自然是 noise-conditional 的，这一点 DDPM 视角不是那么显眼。</p>
+
+<p><strong>为什么不能只训一个 $\sigma$？</strong> Song & Ermon 2019 的原始论文里给了一个直观图：低密度区域的 score 估计在<em>单一</em>噪声层级下方差极大（因为那里几乎没训练样本），所以朗之万会卡在低密度区出不来。解决办法是<strong>退火</strong>（annealed Langevin）：</p>
+
+<ol>
+  <li>先用大 $\sigma$ 训一个粗糙 score，让它在<em>整个空间</em>都有合理估计（大噪声把数据"涂抹"到整个空间）；</li>
+  <li>再用小 $\sigma$ 训一个精细 score，让它在<em>数据流形附近</em>给出锐利方向；</li>
+  <li>采样时<strong>从大到小依次过 $\sigma$</strong>——这就是 DDPM 的反向时间步！</li>
+</ol>
+
+<p>所以 DDPM 的"<strong>从 $T$ 到 1 逐步去噪</strong>"和 NCSN 的"<strong>从大 $\sigma$ 退火到小 $\sigma$</strong>"是同一件事的两种语言。后续 <a href="/video-to-notebook/textbook/12/">Score SDE 章</a> 会把它们正式焊接。</p>
+
+<div class="callout callout-note">
+🛠️ <strong>实践要点</strong>：训练时 $\sigma$ 的采样分布很关键。NCSN 用 log-uniform（保证小 $\sigma$ 和大 $\sigma$ 被等概率训练）；EDM (Karras 2022) 用 log-normal（集中精力在"loss 信噪比高"的中段 $\sigma$）。<em>$\sigma$ 采样策略直接决定生成质量</em>，是工程团队反复调参的核心钮。
+</div>
+
+<h2>七、Tweedie 公式：denoising 与 scoring 的桥梁</h2>
+
+<p>到此我们有两个看似不同的目标：</p>
+
+<ul>
+  <li><strong>denoising</strong>：给定含噪 $\tilde x$，估计干净 $x$；</li>
+  <li><strong>scoring</strong>：给定含噪 $\tilde x$，估计 $\nabla_{\tilde x} \log q_\sigma(\tilde x)$。</li>
+</ul>
+
+<p>看上去这是两件事，但 <strong>Tweedie 公式</strong>（Robbins 1956, popularized by Efron）告诉我们它们在高斯噪声下是<em>同一个东西</em>。</p>
+
+<h3>7.1 公式陈述</h3>
+
+<p>设 $x$ 的先验为 $p(x)$，含噪观测 $y = x + \sigma \epsilon$（$\epsilon \sim \mathcal{N}(0, I)$）。则：</p>
+
+$$\boxed{\;\mathbb{E}[x \mid y] \;=\; y + \sigma^2\, \nabla_y \log p(y),\;}$$
+
+<p>其中 $p(y) = \int p(x) \mathcal{N}(y; x, \sigma^2 I) dx$ 是边缘观测分布。</p>
+
+<h3>7.2 推导（三步）</h3>
+
+<div class="deriv-step">
+<strong>步骤 1：贝叶斯展开后验</strong>
+$$p(x \mid y) = \frac{p(y \mid x)\, p(x)}{p(y)} = \frac{p(x)}{p(y)} \cdot \frac{1}{(2\pi\sigma^2)^{d/2}} \exp\!\left(-\frac{\|y - x\|^2}{2\sigma^2}\right).$$
+<em>Why</em>：贝叶斯 + 高斯似然。
+</div>
+
+<div class="deriv-step">
+<strong>步骤 2：对边缘 $p(y)$ 求 $\nabla_y$</strong>
+$$\nabla_y p(y) = \nabla_y \int p(x) \, \mathcal{N}(y; x, \sigma^2 I)\, dx = \int p(x) \cdot \nabla_y \mathcal{N}(y; x, \sigma^2 I)\, dx.$$
+关键代换：$\nabla_y \mathcal{N}(y; x, \sigma^2 I) = -\frac{y - x}{\sigma^2} \mathcal{N}(y; x, \sigma^2 I)$。代入：
+$$\nabla_y p(y) = -\frac{1}{\sigma^2} \int (y - x) \, p(x) \, \mathcal{N}(y; x, \sigma^2 I)\, dx.$$
+<em>Why</em>：高斯密度对 $y$ 求导的标准结果。
+</div>
+
+<div class="deriv-step">
+<strong>步骤 3：除以 $p(y)$，识别后验期望</strong>
+$$\nabla_y \log p(y) = \frac{\nabla_y p(y)}{p(y)} = -\frac{1}{\sigma^2} \int (y - x) \cdot \underbrace{\frac{p(x) \mathcal{N}(y;x,\sigma^2 I)}{p(y)}}_{= p(x \mid y)}\, dx = -\frac{1}{\sigma^2}\big(y - \mathbb{E}[x \mid y]\big).$$
+移项即得 Tweedie 公式。 <em>Why</em>：把"被积函数中的核函数除以归一化"识别为后验密度，剩下的就是后验期望。
+</div>
+
+<h3>7.3 几何与语义</h3>
+
+<p>把公式重排：</p>
+
+$$\sigma^2 \,\nabla_y \log p(y) \;=\; \mathbb{E}[x \mid y] - y \;=\; \underbrace{\text{后验均值（干净估计）}}_{\hat x_\text{MMSE}} - \underbrace{\text{含噪观测}}_{y}.$$
+
+<p>把它说出来：</p>
+
+<blockquote><strong>Score = (干净数据的后验均值估计 − 当前含噪点) / 噪声方差。</strong></blockquote>
+
+<p>换言之，<strong>score 向量从含噪点指向"最有可能的干净点"，幅值由噪声方差缩放</strong>。这就是为什么 score matching 和 denoising 是一回事——它们都在估计"我应该往数据流形的哪个方向偏移"。</p>
+
+<p>三种值得反复念的等价表述：</p>
+
+<ol>
+  <li><strong>统计学家说法</strong>：score 是含噪点到 MMSE 估计的位移，除以方差。</li>
+  <li><strong>几何学家说法</strong>：score 是从当前点到数据流形最近高密度区的"重力方向"，被 $\sigma^2$ 拉伸。</li>
+  <li><strong>工程师说法</strong>：score 网络其实就是一个隐式 denoiser，把"它在算 score"和"它在估 $x_0$"看成同一件事。</li>
+</ol>
+
+<p>这种"<strong>一公式三身份</strong>"是 Tweedie 在 diffusion 教学里地位崇高的原因——它把无关联的三个概念绑成一个数学对象。</p>
+
+<svg viewBox="0 0 600 280" role="img" aria-label="Tweedie 几何：含噪点沿 score 方向被拉回数据流形">
+  <rect x="20" y="20" width="560" height="240" fill="#f9fbfd" stroke="#d0d7de"/>
+  <text x="300" y="42" text-anchor="middle" font-family="ui-sans-serif" font-size="13" font-weight="600">Tweedie 几何：score 把含噪 $y$ 拉回干净 $\mathbb{E}[x|y]$</text>
+
+  <path d="M 60 200 Q 220 100 380 160 Q 480 200 540 130" stroke="#0b5" stroke-width="2.5" fill="none"/>
+  <text x="540" y="115" font-family="ui-sans-serif" font-size="11" fill="#0b5">数据流形（高密度区）</text>
+
+  <circle cx="380" cy="160" r="6" fill="#0b5"/>
+  <text x="395" y="158" font-family="ui-sans-serif" font-size="11" fill="#0b5">$\mathbb{E}[x \mid y]$ 干净估计</text>
+
+  <circle cx="450" cy="80" r="6" fill="#e8475c"/>
+  <text x="465" y="78" font-family="ui-sans-serif" font-size="11" fill="#e8475c">$y$ 含噪观测</text>
+
+  <defs>
+    <marker id="arrow2" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,10 L10,5 z" fill="#2b80c4"/>
+    </marker>
+  </defs>
+  <line x1="450" y1="80" x2="390" y2="155" stroke="#2b80c4" stroke-width="2.4" marker-end="url(#arrow2)"/>
+  <text x="395" y="115" font-family="ui-sans-serif" font-size="11" fill="#2b80c4" font-style="italic">$\sigma^2 \nabla_y \log p(y)$（score × $\sigma^2$）</text>
+
+  <text x="300" y="235" text-anchor="middle" font-family="ui-sans-serif" font-size="11" fill="#666">score 永远指向 $\mathbb{E}[x \mid y]$，方向 = 朝数据流形偏移；幅值 = 偏移量 ÷ $\sigma^2$</text>
+</svg>
+
+<h3>7.4 Tweedie 把 score predictor 和 noise predictor 也统一了</h3>
+
+<p>把 $\tilde x = x + \sigma \epsilon$ 代入 Tweedie：</p>
+
+$$\mathbb{E}[x \mid \tilde x] = \tilde x + \sigma^2 \nabla_{\tilde x} \log q_\sigma(\tilde x) = \tilde x + \sigma^2 \cdot s_\theta(\tilde x).$$
+
+<p>另一方面，若网络学的是 $\epsilon$-predictor $\epsilon_\theta(\tilde x)$，则<strong>同样的后验均值</strong>是：</p>
+
+$$\mathbb{E}[x \mid \tilde x] \approx \tilde x - \sigma \cdot \epsilon_\theta(\tilde x).$$
+
+<p>对比两式得到三大预测目标的<strong>三角恒等式</strong>：</p>
+
+$$\boxed{\;s_\theta(\tilde x) \;=\; -\frac{\epsilon_\theta(\tilde x)}{\sigma} \;=\; \frac{\hat x_0(\tilde x) - \tilde x}{\sigma^2}\;}$$
+
+<p>这三种"参数化"（score / noise / $x_0$-prediction）在数学上完全等价。<strong>选哪个只是训练稳定性和工程便利的问题</strong>，不是表达力的问题。</p>
+
+<div class="callout callout-note">
+🧰 <strong>实践中的选择</strong>：DDPM 原文用 $\epsilon$-prediction（数值范围稳定，方差为 1）；EDM (Karras 2022) 用 $x_0$-prediction 配合特定预条件化；DDIM/Flow Matching 等用 velocity-prediction $v$（介于二者）。<strong>底层都是 Tweedie 在做翻译</strong>。
+</div>
+
+<h2>八、把 Tweedie 用到极致：score 网络究竟在算什么？</h2>
+
+<p>给定一个训练好的 score 网络 $s_\theta(x_t, t)$，Tweedie 让我们能<strong>立刻读出网络的"隐藏估计"</strong>：</p>
+
+<ol>
+  <li><strong>当前对干净图的最佳猜测</strong>：$\hat x_0(x_t) = x_t + \sigma_t^2 \cdot s_\theta(x_t, t)$。</li>
+  <li><strong>当前残余噪声的估计</strong>：$\hat \epsilon(x_t) = -\sigma_t \cdot s_\theta(x_t, t)$。</li>
+</ol>
+
+<p>这两条让 score 网络变成了一个<strong>可视化诊断工具</strong>：训练过程中你可以在每个 $t$ 取一张图，输出 $\hat x_0$，看它什么时候开始"像数据"。在 DDPM/EDM 工程里这是标准 sanity check。</p>
+
+<p><strong>一个具体诊断流程</strong>：训完后取一组随机 $\sigma_t$，把同一张噪声 $x_t$ 喂给网络，把 $\hat x_0$ 渲染成图：</p>
+
+<ul>
+  <li>大 $\sigma$（接近纯噪声）：$\hat x_0$ 应该是<strong>模糊轮廓</strong>——网络只能猜大致结构（"是个人脸吗？"）；</li>
+  <li>中等 $\sigma$：$\hat x_0$ 应该出现<strong>清晰的中层结构</strong>（五官位置）；</li>
+  <li>小 $\sigma$（接近干净）：$\hat x_0$ 应该是<strong>细节清晰的图像</strong>。</li>
+</ul>
+
+<p>如果你训出来的网络在大 $\sigma$ 下就给出<em>清晰但错的</em> $\hat x_0$，那是过拟合到训练集；如果在小 $\sigma$ 下还在出模糊图，那是欠拟合或 schedule 没对齐。<strong>$\hat x_0$ 可视化是 diffusion 调参的第一把尺</strong>。</p>
+
+<div class="my-addition">
+🟡 <strong>教材外补充</strong>：现代 diffusion sampler（DDIM、PNDM、DPM-Solver）几乎都依赖 $\hat x_0$ 形式做"foresight"——预测当前 $x_t$ 对应的 $\hat x_0$ 然后线性外推。所以即使你训的是 $\epsilon$-predictor，<strong>采样时还是要回到 Tweedie</strong>。详见<a href="/video-to-notebook/textbook/14/">第 14 章 DDIM</a>。
+</div>
+
+<h2>九、PyTorch 训练骨架（DSM in one screen）</h2>
+
+<p>下面是一个完整可跑的 single-$\sigma$ Denoising Score Matching 训练循环。把它扩成 multi-$\sigma$ 就是 NCSN；再加上线性 $\bar\alpha_t$ schedule 就是 DDPM：</p>
+
+<pre><code>import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+class ScoreNet(nn.Module):
+    """最小 score 网络：输入 (x, sigma)，输出与 x 同维的 score 向量。"""
+    def __init__(self, x_dim=784, h=512):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(x_dim + 1, h), nn.SiLU(),
+            nn.Linear(h, h), nn.SiLU(),
+            nn.Linear(h, x_dim),
+        )
+
+    def forward(self, x, sigma):
+        # sigma: (B, 1) 当成额外输入条件化噪声层级
+        s = self.net(torch.cat([x, sigma], dim=-1))
+        return s
+
+
+def dsm_loss(model, x, sigma_min=0.01, sigma_max=1.0):
+    B = x.size(0)
+    # 1) 随机采一个噪声层级（log-uniform）
+    log_sigma = torch.empty(B, 1, device=x.device).uniform_(
+        torch.log(torch.tensor(sigma_min)),
+        torch.log(torch.tensor(sigma_max)),
+    )
+    sigma = log_sigma.exp()
+    # 2) 加高斯噪声
+    eps = torch.randn_like(x)
+    x_noisy = x + sigma * eps        # x̃ = x + σε
+    # 3) 网络预测 score
+    s = model(x_noisy, sigma)        # s_θ(x̃, σ)
+    # 4) 目标 score = -ε/σ（Vincent 2011 闭式）
+    target = -eps / sigma
+    # 5) 加权 L2（λ(σ)=σ²，让各噪声层级 loss 量纲一致）
+    loss = ((s - target).pow(2) * sigma.pow(2)).mean()
+    return loss
+
+
+# 训练循环（伪代码骨架）
+model = ScoreNet()
+opt = torch.optim.Adam(model.parameters(), lr=2e-4)
+for step, x in enumerate(loader):
+    loss = dsm_loss(model, x)
+    opt.zero_grad(); loss.backward(); opt.step()</code></pre>
+
+<p>每一行的对应：</p>
+
+<ul>
+  <li><code>sigma</code> 采样：对应 NCSN 的"<strong>多噪声层级训练</strong>"思路；</li>
+  <li><code>x_noisy = x + sigma * eps</code>：对应 $\tilde x = x + \sigma \epsilon$；</li>
+  <li><code>target = -eps / sigma</code>：对应 Vincent 2011 的闭式条件 score $-\epsilon/\sigma$；</li>
+  <li><code>sigma.pow(2)</code> 加权：对应 $\lambda(\sigma)=\sigma^2$ 让损失在各 $\sigma$ 下量纲一致；</li>
+  <li>没有 Jacobian！没有 ISM！全程只是 MSE 回归。</li>
+</ul>
+
+<div class="callout callout-warning">
+⚠️ <strong>常见坑</strong>：很多人初次实现把 <code>target = -eps</code>（漏掉 $1/\sigma$）—— 这样在 $\sigma$ 很小时目标会趋向 $-\epsilon$ 而非 $-\epsilon/\sigma$，把不同噪声层级混在一起训练，模型死活学不到细噪声。<strong>记住：score 的量纲是 $1/x$，越小的 $\sigma$ score 越大</strong>。
+</div>
+
+<h2>十、ESM vs ISM vs DSM 一张表回顾</h2>
+
+<p>把三种 score matching 目标的关键差异列出来：</p>
+
+<div class="callout callout-info">
+<strong>目标函数对比</strong>
+
+<ul>
+  <li><strong>ESM (Explicit Score Matching, Hyvärinen 2005)</strong>
+    <br>$J = \tfrac{1}{2}\mathbb{E}_p[\|s_\theta(x) - \nabla \log p(x)\|^2]$
+    <br>✗ 需要 $\nabla \log p$，<strong>不可用</strong>，只是理论起点。</li>
+  <li><strong>ISM (Implicit Score Matching, Hyvärinen 2005)</strong>
+    <br>$J = \mathbb{E}_p[\operatorname{tr}(\nabla s_\theta) + \tfrac{1}{2}\|s_\theta\|^2]$
+    <br>✓ 不需要 $p$ 的 score；✗ Jacobian 迹 $O(d)$ 反传，<strong>高维图像几乎不可行</strong>。</li>
+  <li><strong>DSM (Denoising Score Matching, Vincent 2011)</strong>
+    <br>$J = \tfrac{1}{2}\mathbb{E}_{p, \epsilon}[\|s_\theta(\tilde x) + \epsilon/\sigma\|^2]$
+    <br>✓ 闭式条件 score；✓ 只是 MSE 回归；✗ 学的是 $q_\sigma$ 的 score 而非 $p$ 的——只在 $\sigma \to 0$ 极限下逼近 $p_\text{data}$。</li>
+  <li><strong>SSM (Sliced Score Matching, Song et al. 2019)</strong>
+    <br>用随机投影估计 ISM 中的 Jacobian 迹。<strong>当目标是真实 $p_\text{data}$ 时</strong>仍是首选，但实际生成中很少用。</li>
+</ul>
+</div>
+
+<h2>十一、Score 视角 vs DDPM 视角：什么时候用哪个？</h2>
+
+<p>三种视角的能力边界（教材外的现代综合，标黄）：</p>
+
+<div class="my-addition">
+🟡 <strong>教材外补充：三种视角的扩展性</strong>
+
+<ul>
+  <li><strong>DDPM 视角</strong>（ELBO + $\epsilon$-loss）：直观、训练稳定、与 VAE 共享数学骨架。<em>但当噪声不是高斯、或者过程是连续时间时</em>，ELBO 框架变得很难写。</li>
+  <li><strong>Score 视角</strong>：直接学向量场 $\nabla \log p$，<strong>对噪声分布、时间离散化都不敏感</strong>。它能无缝扩到 Score SDE（Song 2021）、Flow Matching（Lipman 2023）、Consistency Models（Song 2023）。</li>
+  <li><strong>x_0-prediction 视角</strong>（EDM、Karras 2022）：直接学 denoiser，工程上数值最稳。<strong>SOTA 图像 diffusion 多数用这个</strong>（SDXL、SD3 内部都是 v-pred / x_0-pred）。</li>
+</ul>
+
+三者用 Tweedie 互相翻译。<strong>研究层面用 score 思考、工程层面用 x_0 或 v 训练、教学层面用 $\epsilon$ 入门</strong>，是 2024 年起业界形成的默契分工。
+</div>
+
+<figure class="clip-frame">
+  <iframe src="https://www.youtube.com/embed/UEJxHpFEb04?start=660" title="CMU 10799 L4: gradient flow on data space → score function" allowfullscreen></iframe>
+  <figcaption>📺 CMU 10799 S26 Lecture 4（11:00 起）—— 讲师在白板上演示二维数据空间中的 score 向量场与"follow the flow"采样直觉。</figcaption>
+</figure>
+
+<h2>十二、常见误解纠偏</h2>
+
+<p>本章数学不复杂，但<em>容易被滑过去的细节</em>不少。下面列三条新手最常踩的坑：</p>
+
+<div class="callout callout-warning">
+⚠️ <strong>误解 1：DSM 学的就是 $p_\text{data}$ 的 score</strong><br>
+不是。DSM 学的是 <strong>加了噪声后</strong> $q_\sigma$ 的 score。只有当 $\sigma \to 0$ 时 $q_\sigma \to p_\text{data}$，二者才趋于一致。<strong>训出来的 score 网络在 $\sigma$ 很小时反而最不准</strong>（因为流形薄、数据稀疏），所以采样末段总是不稳——这是 NCSN/DDPM 都会遇到的问题。
+</div>
+
+<div class="callout callout-warning">
+⚠️ <strong>误解 2：score 越大越接近数据</strong><br>
+反了。<strong>score 越大说明你<em>离</em>高密度区越远</strong>——你需要走的步子越大。在数据中心 $\nabla \log p \approx 0$，因为那里是密度的局部极大点。直觉记法："score 是引力，离星球越远引力越强（直到无穷远，但近邻区力最足）"。
+</div>
+
+<div class="callout callout-warning">
+⚠️ <strong>误解 3：Tweedie 公式只对高斯噪声成立</strong><br>
+对。Tweedie 在原本形式下要求是高斯通道 $y = x + \sigma \epsilon$。其他噪声（泊松、椒盐、blur）有自己的"广义 Tweedie"形式，但都没有 $y + \sigma^2 \nabla \log p$ 这么干净。<em>所以 diffusion 默认用高斯噪声，不只是因为方便，而是因为高斯通道让"score = denoiser"的对偶成立</em>。
+</div>
+
+<h2>十三、回到 Module 3 的脉络</h2>
+
+<p>本章把 score 视角的<strong>训练问题</strong>讲完了：</p>
+
+<ol>
+  <li>我们要学的目标是向量场 $s_\theta(x) \approx \nabla \log p(x)$；</li>
+  <li>Hyvärinen 2005 用分部积分把不可算的 ESM 变成可算的 ISM——但 Jacobian 太贵；</li>
+  <li>Vincent 2011 用"先加噪、再回归"把 ISM 简化成 MSE 形式的 DSM；</li>
+  <li>Tweedie 公式把 score / noise / $x_0$ 三种预测目标焊死成同一组等式；</li>
+  <li>DDPM 的 $\epsilon$-loss 在每个 $\sigma_t$ 上其实就是 DSM，确认了 score-based 与 DDPM 是<em>同一座山</em>的两面。</li>
+</ol>
+
+<p>下一章我们要解决<strong>采样问题</strong>：训好的 score 网络怎么生成样本？答案是 <a href="/video-to-notebook/textbook/11/">Langevin 动力学</a>——把 score 当成势能场，让粒子沿场流动到高密度区。再下一章把 Langevin 升级到 <a href="/video-to-notebook/textbook/12/">Score SDE</a>，把整个 diffusion 统一成连续时间随机微分方程，最终在<a href="/video-to-notebook/textbook/13/">概率流 ODE</a> 把随机过程拉成确定性的。</p>
+
+<div class="takeaways" style="background:#0b5; color:#fff; padding:1.4rem; border-radius:8px; margin-top:2rem;">
+  <h3 style="margin-top:0; color:#fff;">本章要记住的（讲师亲口给的核心）</h3>
+  <ol>
+    <li><strong>Score = 数据空间上的指南针</strong>（Vizuara："a compass which points towards the data"；CMU："follow the flow")。它是 $\nabla_x \log p(x)$，一个向量场，永远指向高密度区。</li>
+    <li><strong>likelihood-free 路线</strong>：CMU 讲师把 likelihood 路线判死刑——high-dim 时算不动。score 不需要归一化常数，绕开了 partition function。</li>
+    <li><strong>Hyvärinen 的分部积分魔术</strong>：从 ESM 6 步推出 ISM，把 $\nabla \log p_\text{data}$ 替换成网络自身的 Jacobian 迹——<em>"看不见的磁铁"问题被代数变没了</em>。</li>
+    <li><strong>Vincent 2011 用"加噪声"换闭式</strong>：DSM 目标是回归 $-\epsilon/\sigma$，完全闭式、没有 Jacobian，工程上几乎免费。</li>
+    <li><strong>DDPM 的 $\epsilon$-loss = 多噪声层级上的 DSM</strong>。Ho 2020 与 Song & Ermon 2019 殊途同归——这是 Module 3 的核心统一性。</li>
+    <li><strong>Tweedie 公式</strong>：$\mathbb{E}[x|y] = y + \sigma^2 \nabla_y \log p(y)$，把"denoising"和"scoring"焊在一起；并给出 score / $\epsilon$ / $x_0$ 三种预测目标的三角恒等式 $s = -\epsilon/\sigma = (\hat x_0 - \tilde x)/\sigma^2$。</li>
+    <li><strong>工程默契</strong>：用 score 思考、用 x_0 或 v 训练、用 $\epsilon$ 入门，靠 Tweedie 互相翻译——这是 2024 年起 SOTA diffusion 工程线的标准分工。</li>
+  </ol>
+</div>
+
+</article>

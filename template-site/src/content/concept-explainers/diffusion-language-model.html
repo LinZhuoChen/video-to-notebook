@@ -1,0 +1,257 @@
+<style>
+/* prefix: dlm- */
+.dlm-quickref{background:var(--surface-soft);border-left:3px solid var(--module-accent);padding:0.8rem 1rem;border-radius:0 4px 4px 0;margin:1rem 0;font-size:0.92rem;}
+.dlm-quickref div{margin:0.3rem 0;}
+.dlm-svg{display:block;margin:1.2rem auto;max-width:100%;height:auto;}
+.dlm-pitfalls ol{padding-left:1.4rem;} .dlm-pitfalls li{margin:0.6rem 0;}
+.dlm-source{font-style:italic;color:var(--text-muted);border-left:2px solid var(--border);padding:0.25rem 0.8rem;margin:0.5rem 0;font-size:0.9rem;}
+.dlm-callout{background:var(--module-accent-soft);border:1px solid var(--border);border-radius:6px;padding:0.6rem 0.9rem;margin:0.8rem 0;font-size:0.92rem;}
+.my-addition{background:var(--accent-soft);border-left:3px solid var(--accent);padding:0.3rem 0.7rem;margin:0.6rem 0;font-size:0.9rem;color:var(--text);border-radius:0 4px 4px 0;}
+.dlm-controls{display:flex;flex-wrap:wrap;gap:6px;margin:0.6rem 0;}
+.dlm-controls button{background:var(--surface-soft);border:1px solid var(--border);color:var(--text);padding:0.35rem 0.7rem;border-radius:4px;cursor:pointer;font-size:0.85rem;font-family:inherit;}
+.dlm-controls button.active{background:var(--module-accent);color:var(--surface);border-color:var(--module-accent);}
+.dlm-readout{background:var(--surface-soft);border:1px solid var(--border);border-radius:6px;padding:0.6rem;min-height:60px;}
+.dlm-tag{display:inline-block;padding:1px 6px;border-radius:3px;font-size:0.75rem;font-family:ui-monospace,monospace;margin-right:4px;background:var(--surface-soft);border:1px solid var(--border);}
+.dlm-tag-mask{background:var(--red-soft);color:var(--red);border-color:var(--red);}
+.dlm-tag-fix{background:var(--module-accent-soft);color:var(--text);border-color:var(--module-accent);}
+.dlm-tag-new{background:var(--blue-soft);color:var(--blue);border-color:var(--blue);}
+.dlm-compare{display:grid;grid-template-columns:1fr 1fr;gap:0.8rem;margin:0.8rem 0;}
+.dlm-compare>div{background:var(--surface-soft);border:1px solid var(--border);border-radius:6px;padding:0.6rem 0.8rem;font-size:0.9rem;}
+.dlm-compare h4{margin:0 0 0.3rem;font-size:0.95rem;}
+@media (max-width:560px){.dlm-compare{grid-template-columns:1fr;}}
+</style>
+
+<article class="concept-entry">
+  <header class="concept-header">
+    <span class="concept-eyebrow">概念</span>
+    <h1>Diffusion Language Model</h1>
+    <p class="concept-tagline">— 用离散扩散过程替代自回归 next-token；并行去噪生成整段文本。</p>
+  </header>
+
+  <aside class="dlm-quickref">
+    <div><strong>定义</strong> · 把一段 token 序列 $\mathbf{x}_0$ 逐步替换为 <code>[MASK]</code>（或随机 token）得到 $\mathbf{x}_T$，训练一个网络 $p_\theta(\mathbf{x}_{t-1}\mid\mathbf{x}_t)$ 反向去噪；推理时<em>整段同时</em>预测，而非从左到右一个一个出 token。</div>
+    <div><strong>公式</strong> · 训练目标常写作 cross-entropy 在被 mask 位置上的加权：$\mathcal{L} = \mathbb{E}_{t,\mathbf{x}_0,\mathbf{x}_t}\!\left[\frac{1}{t}\sum_{i:\,x_t^i=\mathtt{[M]}} -\log p_\theta(x_0^i \mid \mathbf{x}_t)\right]$。</div>
+    <div><strong>易错</strong> · 不是「BERT + 多步」——BERT 只学一个固定 mask ratio；DLM 学的是<em>任意</em> mask ratio $t\in(0,1]$，从而可以反向迭代采样。</div>
+  </aside>
+
+  <section class="concept-intuition">
+    <p>很多人第一眼看到「diffusion language model」会以为：<em>那不就是 BERT 训练完拿来生成嘛？</em> 不是。BERT 只在一个<strong>固定的 15% mask ratio</strong> 上学了一次预测，它无法构造一个连续的 $t=1\to 0$ 反向过程，因为反向链条上每一步对应的 mask 比例都不一样——从 100% 一路降到 0%，BERT 只见过其中一个切片。而 DLM 在所有 mask 比例上联合训练，因此能像图像扩散那样从「整段全是 <code>[MASK]</code>」的纯噪声出发，多步迭代去噪出完整句子。Karpathy 2025 年那条触发了整波研究热潮的推文戳的就是这件事——大多数你见到的 LLM 都是从左到右预测 token 的「克隆体」，扩散不一样，它不从左到右，它一次性把整段 token 流去噪出来。</p>
+
+    <div class="dlm-source">「大多数 LLM 在核心建模上是克隆体——都是 auto-regressive、从左到右预测 token。Diffusion 不一样，它不从左到右，它<strong>一次性全部出</strong>。你从噪声开始，逐步去噪成 token 流。」—— Vizuara《Diffusion LLM》L2 @0:02（Karpathy 推文转述）</div>
+
+    <p>Vizuara 的 Dr. Raj 在 L5 抛出了贯穿整门课的灵魂提问。他把这个问题当成研究者应该养成的「反直觉」思维训练例：明明扩散在图像、视频上已经几乎取代了所有自回归方法，为什么唯独文本死守 next-token prediction？</p>
+
+    <div class="dlm-source">「为什么图像偏好 diffusion，文本偏好 auto-regression？这件事对我和很多研究者来说至今是个谜。<strong>文本是唯一被甩在后面的模态</strong>。我们脑子里是不是有某种偏见？这正是研究者应该问的那种反直觉问题。」—— Vizuara《Diffusion LLM》L5 @0:02</div>
+
+    <p>《Principles of Diffusion Models》课程从图像扩散的成功一路推过来，到这门姊妹课 DLM 时把这个问题正式拎出来作为切入点——课程开篇的逻辑链条很清晰：2022 年 Midjourney 和 Stable Diffusion 让 generative AI 在图像上彻底完成 paradigm shift，而文本的对应转变直到 2024–2025 年才借 MDLM、SEDD、LLaDA 这一波工作真正发生。</p>
+
+    <p>把概念定位回 ML 上下文：在训练里，DLM 对应一种全新的语言模型范式——decoder 不再是 causal Transformer，而是<em>双向 attention</em>的 Transformer，输入是带 <code>[MASK]</code> 的整段序列，输出是每个被 mask 位置上的 vocabulary 分布。这把第 1 章那个「AR vs Diffusion」的悬念在语言模态上画了句号：2025 年 LLaDA-8B 出现以后，<strong>语言开始追上图像</strong>——它证明 diffusion 在 8B 参数、双向 attention 的设定下能匹配同 size 的 AR LLaMA-3，不再只是 toy 规模的概念演示。</p>
+  </section>
+
+  <section class="concept-deepdive">
+    <h2>从图像扩散迁移：三件套</h2>
+    <p>Dr. Raj 反复强调 DLM 沿用图像扩散的「三件套」结构，只是把高斯噪声换成「mask 噪声」：</p>
+
+    <div class="dlm-source">「我们要整合扩散模型的三个主要特性。第一，noising process；第二，用某种模型去预测被加上的噪声；第三，denoising process。在图像里 noising 是按 schedule 给图加高斯噪声，在文本里它变成<strong>把 token 替换成 <code>[MASK]</code></strong>。」—— Vizuara《Diffusion LLM》L12 @0:03</div>
+
+    <h3>1. 前向（加噪）过程：absorbing-state 链</h3>
+    <p>最主流的 MDLM (Sahoo et al., Cornell 2024) 和 LLaDA (Nie et al. 2025) 走的是 <em>absorbing-state</em> 离散扩散：每个 token 以与 $t$ 相关的概率独立被替换为一个特殊的「吸收态」<code>[MASK]</code>。如果 noise schedule 是 $\alpha_t$（$t=0$ 时 $\alpha_0=1$ 意味着不加噪，$t=1$ 时 $\alpha_1=0$ 意味着全部被 mask 掉），则单个位置的前向条件分布是：</p>
+    $$q(x_t^i \mid x_0^i) = \alpha_t \cdot \mathbb{1}[x_t^i = x_0^i] + (1-\alpha_t) \cdot \mathbb{1}[x_t^i = \mathtt{[MASK]}].$$
+    <p>整段序列的前向是按位置独立做的——这一点很重要，它让前向过程不需要存储巨大的转移矩阵，每个位置只是一次伯努利采样。</p>
+    <p><strong>Why</strong>：吸收态有个非常好的性质——一旦一个位置变成 <code>[MASK]</code>，它就「锁死」了，不会再跳到别的 token，也不会跳回原 token。这让反向过程只需要决定<em>该不该把这个 mask 揭开、揭开成哪个 token</em>，不用考虑「token A → token B」这种状态间跳转。<strong>转移矩阵从 $V\times V$ 退化为 $V\times 1$</strong>——这是工程上能把 vocabulary 开到 32k+ 的关键，也是 D3PM 早期 uniform transition 方案做不大的根本原因。</p>
+
+    <h3>2. 噪声预测器：双向 Transformer</h3>
+    <p>给定带 mask 的中间状态 $\mathbf{x}_t$，模型只在被 mask 的位置上预测原始 token：</p>
+    $$p_\theta(x_0^i \mid \mathbf{x}_t), \quad i\in\{j: x_t^j = \mathtt{[MASK]}\}.$$
+    <p>没被 mask 的位置 loss 是 0——它们已经是 ground truth，无需再预测。这跟图像扩散里「每个像素都要预测 noise」很不一样：文本扩散的 loss 只在「被破坏」的那部分位置上算。</p>
+    <p><strong>Why</strong>：注意这里 attention 是<em>双向</em>的——模型能同时看到 mask 位置<strong>左边和右边</strong>的 context。这是 DLM 和 AR LM 最根本的差异，也是它「能做填空、能 bidirectional 推理」的物理基础。AR LM 的 causal mask 锁死了「每个位置只能看左边」，所以处理「Tom Cruise 的妈妈是谁」这类反向问题时会出现著名的 reversal curse——模型学了「Tom Cruise's mother is Mary Lee Pfeiffer」，却答不出「Mary Lee Pfeiffer's son is who」。DLM 双向看，训练时正反方向同等学习，这个 curse 在原理上就被消除了。</p>
+
+    <p>Vizuara L13 把这件事和图像的 noise prediction 类比得很直接：「就像图像扩散里你要预测每一步加了多少高斯噪声，这里你要预测每个被破坏的位置原本该是什么 token」。换句话说，DLM 的「噪声预测器」其实是个<em>token reconstructor</em>，本质上还是同一个扩散思想——给我中间态，告诉我起点。</p>
+
+    <h3>3. 反向（去噪）过程：并行解码</h3>
+    <p>推理从 $\mathbf{x}_T = (\mathtt{[MASK]}, \dots, \mathtt{[MASK]})$ 开始，按 schedule 把时间从 $t=1$ 推到 $t=0$。每一步做三件事：</p>
+    <ol>
+      <li>模型对所有还是 <code>[MASK]</code> 的位置同时预测 $\hat x_0^i$ 以及对应的置信度（通常用 softmax 概率的最大值或 entropy 倒数表征）；</li>
+      <li>按某个策略——top-k 置信、随机抽样、或 entropy-based 选择——<em>挑出一批位置揭开</em>，把它们从 <code>[MASK]</code> 替换成预测出的真实 token；</li>
+      <li>剩下的位置保持 <code>[MASK]</code>，进入下一个时间步重新算 attention。</li>
+    </ol>
+    <p>这套循环是 DLM 在推理阶段和 AR LM 区别最大的地方：AR 的每个 forward 只产出<em>序列末尾一个新 token</em>，而 DLM 的每个 forward 在整段序列上同时更新<em>一批</em>位置。揭开顺序通常并不固定，而是由模型对每个位置的置信度动态决定，这意味着「先确定 token」和「后确定 token」之间没有固定的语法依赖方向。Vizuara 的 L14 课程把这件事讲得很直白：</p>
+
+    <div class="dlm-source">「Denoising 的意思是从纯噪声出发，慢慢回到那个『真实概率分布』所在的地方。在文本里，纯噪声就是全 <code>[MASK]</code> 的序列，真实分布就是有意义的句子聚集的那个 manifold。」—— Vizuara《Diffusion LLM》L14 @0:03</div>
+
+    <div class="dlm-callout"><strong>选揭开多少 token</strong>：每步揭开的位置数由 schedule 决定。最常见的 cosine schedule 让前几步揭开少量「最确定的 token」，中段加速，最后几步剩下的低置信位置才被强行决议。这种渐进解码避免了「先随便填，后面再纠错」的不一致问题——一旦揭开就锁定，绝不回头。</div>
+
+    <svg class="dlm-svg" viewBox="0 0 600 280" role="img" aria-label="离散扩散 vs 自回归对比图">
+      <g font-family="ui-sans-serif" font-size="11" fill="var(--text)">
+        <text x="300" y="18" text-anchor="middle" font-weight="600" font-size="13">AR vs Diffusion Language Model</text>
+
+        <!-- AR row -->
+        <text x="10" y="60" font-weight="600" fill="var(--text-muted)">AR</text>
+        <g transform="translate(60,46)">
+          <rect width="56" height="26" rx="3" fill="var(--surface-soft)" stroke="var(--border)"/><text x="28" y="17" text-anchor="middle">The</text>
+          <rect x="64" width="56" height="26" rx="3" fill="var(--surface-soft)" stroke="var(--border)"/><text x="92" y="17" text-anchor="middle">cat</text>
+          <rect x="128" width="56" height="26" rx="3" fill="var(--surface-soft)" stroke="var(--border)"/><text x="156" y="17" text-anchor="middle">sat</text>
+          <rect x="192" width="56" height="26" rx="3" fill="var(--module-accent)" stroke="var(--module-accent)"/><text x="220" y="17" text-anchor="middle" fill="var(--surface)">on</text>
+          <rect x="256" width="56" height="26" rx="3" fill="none" stroke="var(--border)" stroke-dasharray="3 3"/><text x="284" y="17" text-anchor="middle" fill="var(--text-faint)">?</text>
+          <rect x="320" width="56" height="26" rx="3" fill="none" stroke="var(--border)" stroke-dasharray="3 3"/><text x="348" y="17" text-anchor="middle" fill="var(--text-faint)">?</text>
+        </g>
+        <text x="300" y="92" text-anchor="middle" font-size="10" fill="var(--text-muted)">单向 causal · 一次出 1 token · KV-cache 友好</text>
+
+        <!-- separator -->
+        <line x1="40" y1="110" x2="560" y2="110" stroke="var(--border)" stroke-dasharray="2 4"/>
+
+        <!-- DLM step T -->
+        <text x="10" y="140" font-weight="600" fill="var(--text-muted)">DLM</text>
+        <text x="10" y="155" font-size="9" fill="var(--text-faint)">t=1</text>
+        <g transform="translate(60,126)">
+          <rect width="56" height="26" rx="3" fill="var(--red-soft)" stroke="var(--red)"/><text x="28" y="17" text-anchor="middle" fill="var(--red)">[M]</text>
+          <rect x="64" width="56" height="26" rx="3" fill="var(--red-soft)" stroke="var(--red)"/><text x="92" y="17" text-anchor="middle" fill="var(--red)">[M]</text>
+          <rect x="128" width="56" height="26" rx="3" fill="var(--red-soft)" stroke="var(--red)"/><text x="156" y="17" text-anchor="middle" fill="var(--red)">[M]</text>
+          <rect x="192" width="56" height="26" rx="3" fill="var(--red-soft)" stroke="var(--red)"/><text x="220" y="17" text-anchor="middle" fill="var(--red)">[M]</text>
+          <rect x="256" width="56" height="26" rx="3" fill="var(--red-soft)" stroke="var(--red)"/><text x="284" y="17" text-anchor="middle" fill="var(--red)">[M]</text>
+          <rect x="320" width="56" height="26" rx="3" fill="var(--red-soft)" stroke="var(--red)"/><text x="348" y="17" text-anchor="middle" fill="var(--red)">[M]</text>
+        </g>
+
+        <!-- DLM step middle -->
+        <text x="10" y="190" font-size="9" fill="var(--text-faint)">t=0.5</text>
+        <g transform="translate(60,176)">
+          <rect width="56" height="26" rx="3" fill="var(--module-accent)" stroke="var(--module-accent)"/><text x="28" y="17" text-anchor="middle" fill="var(--surface)">The</text>
+          <rect x="64" width="56" height="26" rx="3" fill="var(--red-soft)" stroke="var(--red)"/><text x="92" y="17" text-anchor="middle" fill="var(--red)">[M]</text>
+          <rect x="128" width="56" height="26" rx="3" fill="var(--module-accent)" stroke="var(--module-accent)"/><text x="156" y="17" text-anchor="middle" fill="var(--surface)">sat</text>
+          <rect x="192" width="56" height="26" rx="3" fill="var(--red-soft)" stroke="var(--red)"/><text x="220" y="17" text-anchor="middle" fill="var(--red)">[M]</text>
+          <rect x="256" width="56" height="26" rx="3" fill="var(--module-accent)" stroke="var(--module-accent)"/><text x="284" y="17" text-anchor="middle" fill="var(--surface)">the</text>
+          <rect x="320" width="56" height="26" rx="3" fill="var(--red-soft)" stroke="var(--red)"/><text x="348" y="17" text-anchor="middle" fill="var(--red)">[M]</text>
+        </g>
+
+        <!-- DLM step 0 -->
+        <text x="10" y="240" font-size="9" fill="var(--text-faint)">t=0</text>
+        <g transform="translate(60,226)">
+          <rect width="56" height="26" rx="3" fill="var(--module-accent)" stroke="var(--module-accent)"/><text x="28" y="17" text-anchor="middle" fill="var(--surface)">The</text>
+          <rect x="64" width="56" height="26" rx="3" fill="var(--module-accent)" stroke="var(--module-accent)"/><text x="92" y="17" text-anchor="middle" fill="var(--surface)">cat</text>
+          <rect x="128" width="56" height="26" rx="3" fill="var(--module-accent)" stroke="var(--module-accent)"/><text x="156" y="17" text-anchor="middle" fill="var(--surface)">sat</text>
+          <rect x="192" width="56" height="26" rx="3" fill="var(--module-accent)" stroke="var(--module-accent)"/><text x="220" y="17" text-anchor="middle" fill="var(--surface)">on</text>
+          <rect x="256" width="56" height="26" rx="3" fill="var(--module-accent)" stroke="var(--module-accent)"/><text x="284" y="17" text-anchor="middle" fill="var(--surface)">the</text>
+          <rect x="320" width="56" height="26" rx="3" fill="var(--module-accent)" stroke="var(--module-accent)"/><text x="348" y="17" text-anchor="middle" fill="var(--surface)">mat</text>
+        </g>
+
+        <path d="M 440 138 L 440 240" stroke="var(--text-muted)" stroke-width="1.5" marker-end="url(#dlm-arr)"/>
+        <text x="500" y="190" text-anchor="middle" font-size="10" fill="var(--text-muted)">并行去噪</text>
+        <text x="500" y="205" text-anchor="middle" font-size="10" fill="var(--text-muted)">双向 attention</text>
+
+        <defs>
+          <marker id="dlm-arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--text-muted)"/>
+          </marker>
+        </defs>
+      </g>
+    </svg>
+
+    <h2>训练目标的细节</h2>
+    <p>把 ELBO 在 absorbing-state 链上一路推到底（中间需要利用「每位置独立 + 吸收态不再跳出」这两个性质做大量约简），可以得到 MDLM 给出的简化损失：</p>
+    $$\mathcal{L}_{\text{MDLM}} = \mathbb{E}_{t\sim\mathcal{U}(0,1)}\,\mathbb{E}_{\mathbf{x}_t\sim q(\cdot|\mathbf{x}_0)}\left[\frac{1}{t}\sum_{i}\mathbb{1}[x_t^i=\mathtt{[M]}]\cdot(-\log p_\theta(x_0^i\mid\mathbf{x}_t))\right].$$
+    <p>注意这个目标在形式上就是一个<em>加权 cross-entropy</em>——这也是为什么 DLM 实现起来出乎意料地简单：只需要在标准 LLM 训练代码里加一步「按 $t$ 采样 mask 比例并替换 token」、把 causal attention 改成双向、再给 loss 乘 $\frac{1}{t}$ 权重即可。Dr. Raj 在 L13 也强调过这种「概念复杂但实现简单」的反差：「初学时觉得很难，真正从零搭起来才发现和 AR 比并不复杂」。</p>
+    <p><strong>Why $\frac{1}{t}$</strong>：当 $t$ 很小（几乎没 mask，只有 5% 位置被破坏）时，模型几乎不用动脑就能凭已有上下文猜对——这种 easy sample 在 ELBO 里贡献的「信息量」本应该低；而 $t$ 很大（80% 都是 mask）时，每个位置都几乎无 context，预测难度极大、信息量也大。$\frac{1}{t}$ 等价于把损失重写成「平均每被 mask 一个 token 贡献的 NLL」，让难易样本的 gradient 量级在不同 $t$ 上几乎不变——这是 MDLM 在论文里强调让训练稳定的关键 trick，没有这个权重时 loss 会被 easy sample 主导，模型在难样本上欠拟合。</p>
+    <p>同期还有另一个流派 SEDD (Lou et al. 2024) 走 score-based 路线，预测 token 比率的对数差（concrete score），数学上更接近连续扩散的 score-matching，但实现复杂度更高、训练更慢，因此 LLaDA / DiffuLLaMA 这一代实用工作都走 MDLM 这条吸收态简化路线。</p>
+
+    <h2>两门姊妹课的取景差异</h2>
+    <p>本概念的两个源课在切入角度上差异明显，值得对照看：</p>
+    <div class="dlm-compare">
+      <div>
+        <h4>《Diffusion LLM》专项课</h4>
+        <p>从工程实现切入——L1 直接宣告「我要带你从零搭一个 diffusion language model」，路线是 motivation → noising → 训练 pipeline → inference pipeline → 编码实现 part 1/2。强调可动手、可 ablation。L17 结尾 Dr. Raj 说目标是「打开黑盒、让你能在上面做研究，甚至自己搞个开源 DLM 跟 Qwen 比一比」。</p>
+      </div>
+      <div>
+        <h4>《Principles of Diffusion Models》</h4>
+        <p>从原理切入——把图像扩散的数学基础（VAE → DDPM → score → flow matching）讲透后，把 DLM 当成「同一套原理在离散数据上的实例化」。所以这门课里 DLM 不是主菜，而是<em>证明扩散框架普适性</em>的收官章节。</p>
+      </div>
+    </div>
+    <p>建议初学者把后者当成「为什么这样做」的 prerequisite，把前者当成「如何动手做」的 capstone。两条路线合起来才完整覆盖 DLM 这个 2024–2025 年正在快速演化的方向。值得注意的是：两门课对同一件事的命名也有微妙差异——专项课更愿意叫「diffusion language model」，原理课偶尔混用「discrete diffusion」「language diffusion」「text diffusion」。研究文献里这几个词目前还在并行使用，没有彻底定型。</p>
+
+    <div class="my-addition">🟡 教材外补充：LLaDA (Nie et al. 2025) 把这个训练目标推到 8B 参数、2.3T token 规模，得到一个完全用 diffusion 训出来的 LLM，在 instruction following、math、code 三个 benchmark 上都能和同 size 的 LLaMA-3 8B 打平——这是 diffusion 第一次在 8B 规模上证明<strong>可用而不只是可行</strong>。DiffuLLaMA (Gong et al. 2025) 则换了条更省钱的路：直接拿预训练好的 LLaMA 续训成 diffusion，<strong>不用从头跑 trillion token</strong>，把 diffusion 当成 AR 之上的「fine-tuning 范式切换」。两条路线并行说明 DLM 已经不只是学术 toy 了——一条证明从零训得通，另一条证明能廉价改造现有大模型。</div>
+
+    <h2>为什么要这么麻烦：DLM 的三个收益</h2>
+    <ul>
+      <li><strong>消除 reversal curse</strong>：AR LM 学过「Tom Cruise's mother is Mary Lee Pfeiffer」并不能答出反向问题「Mary Lee Pfeiffer's son is who」——因为训练时 loss 只在「从左 token 预测右 token」上算，反向方向的条件概率从未被显式学过。DLM 用双向 attention + 任意 mask 位置预测，正反方向同等学习，原理上就消除了这个问题。这是 Karpathy 在那条推文里最看重的优势之一。</li>
+      <li><strong>原生 infilling 能力</strong>：「给开头和结尾，补中间」这件事对 AR LM 是个棘手的 prompt 工程问题（需要 fill-in-the-middle 特殊训练），但对 DLM 来说是<em>训练时就在做的事</em>——把中间一段 mask 掉再恢复，本身就是一个标准训练样本。DLM 的 infilling 不需要任何额外架构改动。</li>
+      <li><strong>并行解码带来吞吐量优势</strong>：理论上一步能出 $K$ 个 token，$T=20$ 步就能生成 256 个 token。但 Vizuara 在 L16 课程里也明说<em>实际工程</em>没理论那么乐观：</li>
+    </ul>
+
+    <div class="dlm-source">「Diffusion language model 训练起来<strong>比 AR 慢</strong>。所以你应该有 Colab Pro，最好是 A100 或者 H100。」—— Vizuara《Diffusion LLM》L16 @0:02</div>
+
+    <div class="my-addition">🟡 教材外补充：「并行解码」的真实速度并不像理论账面那么美。AR 的 KV-cache 在 batch=1、长 prefix 的场景下几乎只算<em>当前一个 token</em>的 attention，单 forward 极快，单流速度被压到几乎纯 memory-bound；DLM 每一步都要重算<em>整段</em>序列的 bidirectional attention，而 KV-cache 在去噪步之间几乎不能复用——因为每步揭开新位置后，未来步骤的 mask 模式都变了，需要重新算 key/value。结果就是 DLM 的速度优势主要体现在 <strong>large batch + 高 throughput 服务</strong> 场景，或者「必须并行 infilling」的任务上；单条 latency 反而经常比 AR 慢。这也解释了为什么 LLaDA paper 在和 LLaMA-3 比对时都强调 throughput-per-GPU，不直接比单流 latency。</div>
+  </section>
+
+  <section class="concept-interact">
+    <p>下面这个 schedule 演示 4 步并行解码。<strong>注意看一个不变量</strong>：已经被揭开的 token（<span class="dlm-tag dlm-tag-fix">fixed</span>）<em>不会</em>在后续步骤里再被改回 <code>[MASK]</code>——absorbing chain 保证这件事。</p>
+
+    <div class="dlm-controls">
+      <button data-step="0" class="active">① t = 1.0（全 mask）</button>
+      <button data-step="1">② t = 0.75</button>
+      <button data-step="2">③ t = 0.5</button>
+      <button data-step="3">④ t = 0.25</button>
+      <button data-step="4">⑤ t = 0（done）</button>
+    </div>
+    <div class="dlm-readout" id="dlm-readout">
+      <div data-line="0" class="dlm-line"><span class="dlm-tag dlm-tag-mask">[M]</span><span class="dlm-tag dlm-tag-mask">[M]</span><span class="dlm-tag dlm-tag-mask">[M]</span><span class="dlm-tag dlm-tag-mask">[M]</span><span class="dlm-tag dlm-tag-mask">[M]</span><span class="dlm-tag dlm-tag-mask">[M]</span><span class="dlm-tag dlm-tag-mask">[M]</span><span class="dlm-tag dlm-tag-mask">[M]</span><div style="margin-top:6px;font-size:0.85rem;color:var(--text-muted)">起点：长度 8 的纯噪声序列。所有位置都是吸收态。</div></div>
+      <div data-line="1" class="dlm-line" hidden><span class="dlm-tag dlm-tag-new">The</span><span class="dlm-tag dlm-tag-mask">[M]</span><span class="dlm-tag dlm-tag-mask">[M]</span><span class="dlm-tag dlm-tag-mask">[M]</span><span class="dlm-tag dlm-tag-new">on</span><span class="dlm-tag dlm-tag-mask">[M]</span><span class="dlm-tag dlm-tag-mask">[M]</span><span class="dlm-tag dlm-tag-new">.</span><div style="margin-top:6px;font-size:0.85rem;color:var(--text-muted)">第 1 步：模型对 8 个位置都预测了 $\hat x_0$，按置信度选出 3 个最确信的（top-k=3）揭开。剩余 5 个保持 mask。</div></div>
+      <div data-line="2" class="dlm-line" hidden><span class="dlm-tag dlm-tag-fix">The</span><span class="dlm-tag dlm-tag-new">cat</span><span class="dlm-tag dlm-tag-mask">[M]</span><span class="dlm-tag dlm-tag-mask">[M]</span><span class="dlm-tag dlm-tag-fix">on</span><span class="dlm-tag dlm-tag-new">the</span><span class="dlm-tag dlm-tag-mask">[M]</span><span class="dlm-tag dlm-tag-fix">.</span><div style="margin-top:6px;font-size:0.85rem;color:var(--text-muted)">第 2 步：又揭开 2 个。"The/on/." 因为是 fixed token，下一轮 attention 时它们提供 bidirectional context 来锁定中间词。</div></div>
+      <div data-line="3" class="dlm-line" hidden><span class="dlm-tag dlm-tag-fix">The</span><span class="dlm-tag dlm-tag-fix">cat</span><span class="dlm-tag dlm-tag-new">sat</span><span class="dlm-tag dlm-tag-mask">[M]</span><span class="dlm-tag dlm-tag-fix">on</span><span class="dlm-tag dlm-tag-fix">the</span><span class="dlm-tag dlm-tag-new">mat</span><span class="dlm-tag dlm-tag-fix">.</span><div style="margin-top:6px;font-size:0.85rem;color:var(--text-muted)">第 3 步：剩一个 mask。注意"sat"是在已经看到 The/cat/on/the 上下文后才被采的——不是 AR 的因果方向。</div></div>
+      <div data-line="4" class="dlm-line" hidden><span class="dlm-tag dlm-tag-fix">The</span><span class="dlm-tag dlm-tag-fix">cat</span><span class="dlm-tag dlm-tag-fix">sat</span><span class="dlm-tag dlm-tag-new">,</span><span class="dlm-tag dlm-tag-fix">on</span><span class="dlm-tag dlm-tag-fix">the</span><span class="dlm-tag dlm-tag-fix">mat</span><span class="dlm-tag dlm-tag-fix">.</span><div style="margin-top:6px;font-size:0.85rem;color:var(--text-muted)">完成：4 步 forward 出 8 个 token。AR 需要 8 步。理论加速 2×；实际取决于 batch 和 KV-cache 局势。</div></div>
+    </div>
+    <script>
+      (function(){
+        const btns=document.querySelectorAll('.dlm-controls button');
+        const lines=document.querySelectorAll('#dlm-readout .dlm-line');
+        function show(step){
+          btns.forEach(b=>b.classList.toggle('active',+b.dataset.step===step));
+          lines.forEach(l=>{l.hidden=(+l.dataset.line!==step);});
+        }
+        btns.forEach(b=>b.addEventListener('click',()=>show(+b.dataset.step)));
+        show(0);
+      })();
+    </script>
+  </section>
+
+  <section class="concept-example">
+    <h2>手算一个 mini DLM 训练步</h2>
+    <p>设 vocab $V=$ {The, cat, sat, [M]}，原始序列 $\mathbf{x}_0=$ [The, cat, sat]。第一步采样时间 $t = 0.6$；按 $1-\alpha_t = 0.6$ 概率独立 mask 每个位置——假设抛三次伯努利后结果是 $\mathbf{x}_t=$ [The, [M], sat]，只有中间位置被破坏。把 $\mathbf{x}_t$ 送进双向 Transformer，模型对位置 2 输出 softmax 概率 $p_\theta = [0.1, \mathbf{0.7}, 0.15, 0.05]$（对应 The/cat/sat/[M] 四个 vocab 项）。</p>
+    <p>该位置的 NLL 是：</p>
+    $$-\log p_\theta(\mathrm{cat}\mid \mathbf{x}_t) = -\log 0.7 \approx 0.357.$$
+    <p>注意位置 1 和 3 不参与 loss——它们没被 mask，模型不在那里预测。带 $\frac{1}{t}$ 权重的 per-sample 损失：</p>
+    $$\mathcal{L} = \frac{1}{t}\cdot 0.357 = \frac{0.357}{0.6} \approx 0.595.$$
+    <p>对比另一个 $t$ 取值：若 $t=0.2$（只 mask 约 1/5 位置）时同样以 0.7 的概率预测对 cat，损失会被放大到 $0.357/0.2 \approx 1.79$——这正是 MDLM 想要的效果：<em>低 mask 比例下的预测虽然容易，但被加权得更重</em>，让难易样本在 gradient 上贡献相当，loss landscape 更平。这一行权重看似不起眼，却是 MDLM 论文里反复 ablation 验证过的关键改进。</p>
+  </section>
+
+  <section class="concept-pitfalls">
+    <h2>常见误区</h2>
+    <ol>
+      <li><strong>「DLM 就是 BERT 改成多步迭代」</strong>。反例：BERT 在固定 15% mask ratio 上训练，从 $\mathbf{x}_T=$ 全 [M] 反向推回去时，第一步等价于要在 100% mask 的输入上做预测——这个分布 BERT 根本没见过，结果会全是高频通用词，无法产生连贯句子。DLM 必须在 $t\sim\mathcal{U}(0,1)$ 上联合训练所有 mask 比例，让 $t\to 1$ 极端噪声情况也是 in-distribution，反向链条才有意义。</li>
+      <li><strong>「并行解码一定比 AR 快」</strong>。反例：单条 256-token 生成场景下，LLaMA-3 8B 在 H100 上配 KV-cache 大约能跑 80 tok/s，<em>每步只算 1 个 token 的 attention</em>；LLaDA-8B 跑 20 步去噪要重算 20 次整段 bidirectional attention（每段 256 token），实测单流速度反而<em>慢 1.5–3 倍</em>。DLM 的速度收益要在 batch 大、prefill 长、或硬性需要并行 infilling 的场景下才真正显现。</li>
+      <li><strong>「转移矩阵可以随便选」</strong>。反例：原始 D3PM (Austin et al. 2021) 尝试过 uniform transition——任意 token 可以以小概率跳到任意其他 token——这种设定下转移矩阵尺寸是 $V\times V$。当 $V=32000$（LLaMA tokenizer 常见尺寸）时，单步存储约 $V\times V\approx 10^9$ float，内存直接爆炸。MDLM/LLaDA 切换到 absorbing-state（只允许跳到 [M]）后矩阵退化为 $V\times 1$，存储压力立刻消失，这才让 32k+ vocab 的 LLM 规模训练成为可能。Tokenizer 越大、这个 trick 收益越显著。</li>
+    </ol>
+  </section>
+
+  <section class="concept-seealso">
+    <h2>相关概念</h2>
+    <ul>
+      <li><a href="/video-to-notebook/concepts/masked-diffusion/">Masked Diffusion</a> —— DLM 的具体实现方式</li>
+      <li><a href="/video-to-notebook/concepts/parallel-decoding/">Parallel Decoding</a> —— DLM 推理的核心机制</li>
+      <li><a href="/video-to-notebook/concepts/autoregressive-vs-diffusion/">AR vs Diffusion</a> —— 范式对比</li>
+      <li><a href="/video-to-notebook/concepts/noise-schedule/">Noise Schedule</a> —— $\alpha_t$ 的选择</li>
+    </ul>
+  </section>
+
+  <section class="concept-sources">
+    <h2>来源</h2>
+    <ol>
+      <li><a href="https://www.youtube.com/watch?v=9Q9qS48PyLA&t=2s" target="_blank" rel="noopener">diffusion-lm-vizuara · L1 · Build a Diffusion Language Model from Scratch Workshop · (0:02)</a></li>
+      <li><a href="https://www.youtube.com/watch?v=Hyb7c4PCmwk&t=2s" target="_blank" rel="noopener">diffusion-lm-vizuara · L2 · How I began my Diffusion LLM Journey（Karpathy 推文转述）· (0:02)</a></li>
+      <li><a href="https://www.youtube.com/watch?v=3awVF05VUuM&t=2s" target="_blank" rel="noopener">diffusion-lm-vizuara · L5 · Motivation behind Language Diffusion Models · (0:02)</a></li>
+      <li><a href="https://www.youtube.com/watch?v=dov4OzCcjU0&t=3s" target="_blank" rel="noopener">diffusion-lm-vizuara · L12 · Diffusion LLM Noising Schedule · (0:03)</a></li>
+      <li><a href="https://www.youtube.com/watch?v=rUGQP6bcMiw&t=4s" target="_blank" rel="noopener">diffusion-lm-vizuara · L13 · Diffusion LLM Training Pipeline · (0:04)</a></li>
+      <li><a href="https://www.youtube.com/watch?v=3dzjtDLaUJM&t=3s" target="_blank" rel="noopener">diffusion-lm-vizuara · L14 · Diffusion LLM Inference Pipeline · (0:03)</a></li>
+      <li><a href="https://www.youtube.com/watch?v=8UiH1ttMdas&t=2s" target="_blank" rel="noopener">diffusion-lm-vizuara · L16 · Diffusion LLM Coded from Scratch Part 1 · (0:02)</a></li>
+      <li><a href="https://www.youtube.com/watch?v=_6CcOpIedbg&t=3s" target="_blank" rel="noopener">diffusion-principles-vizuara · L11 · The Principles of Diffusion Models New Course · (0:03)</a></li>
+    </ol>
+  </section>
+</article>

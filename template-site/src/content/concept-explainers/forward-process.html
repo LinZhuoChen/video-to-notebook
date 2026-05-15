@@ -1,0 +1,212 @@
+<style>
+/* prefix: fwd- */
+.fwd-quickref{background:var(--surface-soft);border-left:3px solid var(--module-accent);padding:0.8rem 1rem;border-radius:0 4px 4px 0;margin:1rem 0;font-size:0.92rem;}
+.fwd-quickref div{margin:0.3rem 0;}
+.fwd-svg{display:block;margin:1.2rem auto;max-width:100%;height:auto;}
+.fwd-pitfalls ol{padding-left:1.4rem;} .fwd-pitfalls li{margin:0.5rem 0;}
+.fwd-source{font-style:italic;color:var(--text-muted);border-left:2px solid var(--border);padding:0.2rem 0.8rem;margin:0.5rem 0;font-size:0.9rem;}
+.fwd-callout{background:var(--module-accent-soft);border-left:3px solid var(--module-accent);padding:0.6rem 0.9rem;margin:0.8rem 0;border-radius:0 4px 4px 0;font-size:0.93rem;}
+.my-addition{display:inline-block;background:var(--accent-soft);color:var(--text);padding:0.15rem 0.5rem;border-radius:3px;font-size:0.85rem;font-weight:600;margin-right:0.4rem;}
+.fwd-controls{display:flex;gap:0.4rem;flex-wrap:wrap;margin:0.8rem 0;}
+.fwd-controls button{background:var(--surface-soft);border:1px solid var(--border);color:var(--text);padding:0.3rem 0.7rem;border-radius:4px;cursor:pointer;font-size:0.88rem;}
+.fwd-controls button.active{background:var(--module-accent);color:var(--surface);border-color:var(--module-accent);}
+.fwd-readout{font-family:ui-monospace,monospace;color:var(--text-muted);font-size:0.88rem;margin:0.4rem 0;}
+.fwd-readout .fwd-line[hidden]{display:none;}
+@keyframes fwd-noise-fade{0%{opacity:1;}100%{opacity:0.15;}}
+.fwd-frame-anim{animation:fwd-noise-fade 6s ease-in-out infinite alternate;}
+@keyframes fwd-noise-jitter{0%,100%{transform:translate(0,0);}25%{transform:translate(1px,-1px);}50%{transform:translate(-1px,1px);}75%{transform:translate(1px,1px);}}
+.fwd-noise-dot{animation:fwd-noise-jitter 0.8s linear infinite;}
+</style>
+
+<article class="concept-entry">
+  <header class="concept-header">
+    <span class="concept-eyebrow">概念</span>
+    <h1>Forward Diffusion Process</h1>
+    <p class="concept-tagline">— 零参数的 Gaussian Markov 链，把任意数据漂洗成 $\mathcal{N}(0,I)$ 噪声。</p>
+  </header>
+
+  <aside class="fwd-quickref">
+    <div><strong>定义</strong> · 单步：$q(x_t \mid x_{t-1}) = \mathcal{N}(\sqrt{1-\beta_t}\,x_{t-1},\ \beta_t I)$，是一条 Gaussian 马尔可夫链。</div>
+    <div><strong>跳步公式</strong> · $x_t = \sqrt{\bar\alpha_t}\,x_0 + \sqrt{1-\bar\alpha_t}\,\epsilon,\ \epsilon \sim \mathcal{N}(0, I)$，其中 $\bar\alpha_t = \prod_{s=1}^{t}(1-\beta_s)$。</div>
+    <div><strong>易错</strong> · 前向<em>不需要训练</em>——它是纯解析过程；唯一可调的是 noise schedule $\{\beta_t\}$。</div>
+  </aside>
+
+  <section class="concept-intuition">
+    <p>很多人第一次接触扩散模型时，会把 forward process 想成"一个需要训练的 encoder"——毕竟在 VAE 里 encoder 是要训练的，它学的就是 $q(z \mid x)$ 的均值和方差。如果你刚从 VAE 章节走过来，这种"前向 = encoder"的类比几乎是本能。<strong>这是要立刻纠正的偏见</strong>：扩散里的 forward <em>不是一个网络</em>，它是<em>纯解析</em>的——一条事先写好系数的 Gaussian 加噪链，没有任何可学习参数、没有梯度回传、训练前训练后完全一模一样。换句话说，VAE 里 $q_\phi(z \mid x)$ 那个下标 $\phi$ 是网络参数；diffusion 里 $q(x_t \mid x_{t-1})$ 没有下标，因为没有参数可学。Vizuara 的 Dr. Raj 在 L3 用一个特别朴实的方式把它讲清楚：<strong>讲师本人就是那台"加噪机器"</strong>——他在白板上写下规则，你按这条规则把图像反复"漂洗"，不需要"教"它怎么加噪，加噪规则本身就是答案。</p>
+    <div class="fwd-source">「Diffusion models 干的事其实很简单：从一张噪声开始，每一步去掉一点点噪声，最后变出一张熊猫或者熊。」—— diffusion-lm-vizuara L4 @00:02（描述的是生成方向，反过来正是前向：从熊猫出发一步步加噪到纯噪声）</div>
+    <p>训练里前向只出现在一个地方：给定一个干净样本 $x_0$、随机采一个 timestep $t \in \{1, \dots, T\}$、再随机采一个 $\epsilon \sim \mathcal{N}(0, I)$，<em>用闭式跳步公式一次合成 $x_t$</em>。不需要真的逐步跑 1000 步——为什么不需要、为什么能跳，这是后面 deepdive 的核心。CMU 10799 的 lecturer 在 L2 引入 DDPM 时把第一句话留给整门课的主旋律：</p>
+    <div class="fwd-source">「We finally gonna talk about diffusion model now.」—— cmu-10799-diffusion-flow L2 @00:03（紧接着就把前向 + 反向作为整堂课的骨架，前向只用三张幻灯片就讲完——因为它本来就没什么可"训练"的）</div>
+    <p>把它定位到机器学习的上下文里：在训练里，forward 是<strong>批量生成训练数据 $x_t$ 的工具</strong>——它把"一堆无标注的图像 $\{x_0\}$"转成"成对 $(x_t, t, \epsilon)$"，让 reverse 那个真正的网络 $\epsilon_\theta$ 有 supervision 可学。前向相当于一个"自动数据合成器"，免费、解析、可并行、和模型权重完全解耦。这一点想清楚后，DDPM 的 algorithm 1 那五行伪代码——为什么前向只在第 4 行用一次乘加就完事——你就理解了它<em>能这样写</em>的真正原因。</p>
+  </section>
+
+  <section class="concept-deepdive">
+    <h2>单步加噪：定义看公式就够</h2>
+    <p>给定上一步的 $x_{t-1}$，下一步的分布是：</p>
+    <p>$$q(x_t \mid x_{t-1}) = \mathcal{N}\!\big(x_t;\ \sqrt{1-\beta_t}\,x_{t-1},\ \beta_t I\big)$$</p>
+    <p>这是一条 Markov 链——下一步 $x_t$ 只依赖当前 $x_{t-1}$，跟更早的 $x_{t-2}, x_{t-3}, \dots$ 无关。用 reparameterisation trick 把它从"分布"写成"可采样的等式"：$x_t = \sqrt{1-\beta_t}\,x_{t-1} + \sqrt{\beta_t}\,\epsilon_t,\ \epsilon_t \sim \mathcal{N}(0, I)$。两种写法等价——一个是概率密度形式，一个是采样形式。</p>
+    <p><strong>Why $\sqrt{1-\beta_t}$ 这个看上去奇怪的系数？</strong> 它的作用是把 $x_{t-1}$ <em>按比例缩小一点点</em>。如果省掉它（只写 $x_t = x_{t-1} + \sqrt{\beta_t}\,\epsilon$，纯粹"叠加噪声"），那么每一步方差都会单调累加，T 步后总方差是 $\sum_s \beta_s$——如果 schedule 累加超过 1，$x_T$ 的方差就会爆炸到 $\mathcal{N}(0, \infty)$，远远偏离我们想要的 $\mathcal{N}(0, I)$ 终点先验。两个系数 $\sqrt{1-\beta_t}$ 与 $\sqrt{\beta_t}$ 平方和恰为 1，是精心选的<em>variance-preserving</em> 形式（VP-SDE 命名就来自这里）：每一步同时"把信号按 $\sqrt{1-\beta_t}$ 比例衰减"+"按 $\sqrt{\beta_t}$ 比例注入新噪声"，把 $x_t$ 的总方差稳定在 1 附近——只要 $x_0$ 也归一化到方差 1（DDPM 论文里图像被映射到 $[-1, 1]$ 区间），整条链上每个 $x_t$ 的方差都接近 1。这条约束让深网络看到的输入尺度始终稳定，是<em>训练数值上能跑得起来</em>的关键前提。</p>
+
+    <h2>闭式跳步：把 t 步 unroll 成一次乘加</h2>
+    <p>朴素的做法是想生成 $x_{873}$ 就老老实实从 $x_0$ 跑 873 步采样——每步采一个新 $\epsilon_s$、做一次乘加。这显然太贵：训练里我们每个 batch 都要随机挑一个 $t$，最坏情况下平均要算 $T/2 \approx 500$ 步 forward，对 batch size 256、$T = 1000$ 的标准设定就是 12.8 万次乘加 / batch。如果非这么算，DDPM 训练在 2020 年根本跑不起来。</p>
+    <p>关键的代数事实把整件事拯救出来：<strong>两个独立 Gaussian 相加还是 Gaussian，均值相加、方差相加</strong>。把这一性质递归地应用到 forward 链上：</p>
+    <p>$$x_1 = \sqrt{1-\beta_1}\,x_0 + \sqrt{\beta_1}\,\epsilon_1$$</p>
+    <p>$$x_2 = \sqrt{1-\beta_2}\,x_1 + \sqrt{\beta_2}\,\epsilon_2 = \sqrt{(1-\beta_2)(1-\beta_1)}\,x_0 + \underbrace{\sqrt{(1-\beta_2)\beta_1}\,\epsilon_1 + \sqrt{\beta_2}\,\epsilon_2}_{\text{两个独立 Gaussian 的和}}$$</p>
+    <p>右边方括号那一坨——<em>两个独立 Gaussian 的线性组合</em>——的分布完全由它的均值和方差决定：均值为 0，方差是 $(1-\beta_2)\beta_1 + \beta_2$。化简一下：$(1-\beta_2)\beta_1 + \beta_2 = \beta_1 - \beta_1\beta_2 + \beta_2 = 1 - (1 - \beta_1 - \beta_2 + \beta_1\beta_2) = 1 - (1-\beta_2)(1-\beta_1)$。所以可以把那一坨噪声合并成<em>一个</em>新的 Gaussian $\sqrt{1-(1-\beta_1)(1-\beta_2)}\,\bar\epsilon$，其中 $\bar\epsilon \sim \mathcal{N}(0, I)$。把这个递归推到 $t$ 步，引入 $\alpha_s = 1 - \beta_s$ 和累积积 $\bar\alpha_t = \prod_{s=1}^{t}\alpha_s$，就得到 DDPM 的招牌公式：</p>
+    <p>$$\boxed{\,x_t = \sqrt{\bar\alpha_t}\,x_0 + \sqrt{1-\bar\alpha_t}\,\epsilon,\quad \epsilon \sim \mathcal{N}(0, I)\,}$$</p>
+    <p><strong>Why 这是 diffusion 训练能 tractable 的全部原因</strong>：训练 loop 里我们要随机采 $t \in \{1,\dots,T\}$，再生成对应的 $x_t$。如果没有闭式跳步，采到 $t = 873$ 就要先跑 873 步前向、各采各的 $\epsilon$，一个 batch 一次 forward 就是 $O(T)$ 复杂度；考虑到 DDPM 标准配置 $T = 1000$，根本不可能。有了上式，<em>无论 $t$ 多大，合成 $x_t$ 都只需要一次标量乘加</em>——计算复杂度从 $O(T)$ 降到 $O(1)$，与时间步无关。Ho et al. 2020 把这一公式写在 algorithm 1 的第 4 行（紧接着第 5 行的 loss 计算）：整个 DDPM 训练才得以在单张消费级 GPU 上跑得动。这个看似平淡的"高斯加高斯还是高斯"的代数事实，是 diffusion 能成为 scalable 生成模型族的<em>分水岭</em>——所有 SDE、flow-matching、rectified-flow、consistency model 后续工作都建立在"前向可解析跳步"这个前提上。</p>
+
+    <div class="fwd-callout"><strong>关键观察</strong>：上式里 $\bar\alpha_t$ 是<em>事先算好的常数</em>（给定 schedule 就定死，通常在 dataloader init 时算成 lookup table），$\epsilon$ 是<em>每个 batch 现采的标准 Gaussian</em>，$x_0$ 是<em>训练样本</em>。三个量都不依赖网络参数。所以 forward 真的"不学"——它是<em>数据增强</em>，不是模型；和 random crop、horizontal flip 一类操作处于同一层级。这一点同时意味着：换一个数据集，前向不用重训；换一个 schedule，前向也只是改 $\{\beta_t\}$ 这张常量表，<em>反向网络的权重可能可以直接复用</em>（这正是 DDIM 能在 DDPM 训好的 $\epsilon_\theta$ 上零样本工作的根本原因）。</p>
+
+    <h2>$T \to \infty$ 的端点：信息被洗净，所有起点合并</h2>
+    <p>当 $t$ 足够大、且 schedule 累积下去使 $\bar\alpha_t \to 0$：</p>
+    <p>$$x_t = \underbrace{\sqrt{\bar\alpha_t}}_{\to 0}\,x_0 + \underbrace{\sqrt{1-\bar\alpha_t}}_{\to 1}\,\epsilon \ \longrightarrow\ \mathcal{N}(0, I)$$</p>
+    <p>这个极限有两个等价但角度不同的解读，都值得停下来想一想。<strong>几何解读</strong>：$x_0$ 那一项的系数 $\sqrt{\bar\alpha_t}$ 单调下降到 0，意味着原始数据被"按比例压缩到原点"；同时 $\epsilon$ 那一项系数升到 1，把标准正态噪声完整覆盖进来。最后 $x_T$ 看不出任何 $x_0$ 的痕迹。<strong>信息论解读</strong>：互信息 $I(x_T; x_0) \to 0$——给你 $x_T$，你猜不出 $x_0$ 是什么。无论起点 $x_0$ 是 Batman 海报、还是一只熊猫、还是手写数字 5，<em>终点都是同一个 $\mathcal{N}(0, I)$</em>。Vizuara 在 L3 里把这一点说得很形象：</p>
+    <div class="fwd-source">「我们看 Batman 的海报，慢慢加噪声，最后看到一片噪声，no one 能猜出来这原本是 Batman——它可能来自互联网上任意一张图。」—— Vizuara L3（pixel 例子之后）</div>
+    <p>这个性质<em>不是 happy coincidence</em>——它正是 forward 被设计成 variance-preserving + 累积 $\bar\alpha_T \approx 0$ 的目的。<strong>推理时为什么能从 $\mathcal{N}(0, I)$ 直接起步？</strong> 因为前向已经"承诺"了所有数据点都被映射到这同一个先验。如果终点不是已知分布，推理时就根本不知道从哪儿采 $x_T$——这一约束是<em>整个 diffusion 范式能反向生成</em>的前提。也是 forward 这条看似"无用"的破坏过程为什么如此重要的原因：它不是为了破坏，是为了<em>建立一座从数据到先验的、可解析、可逆向的桥</em>。后面 reverse 网络要做的，就是学着<strong>沿这座桥反向走</strong>。</p>
+
+    <h2>图示：前向链与 SNR 曲线</h2>
+    <p>把上面的代数翻译成视觉：左侧是干净图，右侧是纯噪声，中间是不同 $t$ 的"半噪声"。同时画出信噪比 $\mathrm{SNR}(t) = \bar\alpha_t / (1-\bar\alpha_t)$——它把"信号"和"噪声"的比例直接量化出来，是<em>同一个</em>前向过程从两个互补角度（图像可视化 vs 数值曲线）的呈现。</p>
+    <svg class="fwd-svg" viewBox="0 0 600 280" role="img" aria-label="forward process: 图像从清晰到噪声的链，下方是 SNR 单调下降曲线">
+      <g font-family="ui-sans-serif" font-size="11" fill="var(--text)">
+        <!-- 标题 -->
+        <text x="300" y="18" text-anchor="middle" font-size="12" font-weight="600">x_0 → x_T 加噪链（颜色 = 剩余信号 √ᾱ_t）</text>
+
+        <!-- 帧 1 (x_0) -->
+        <rect x="20" y="35" width="70" height="55" rx="3" fill="var(--module-accent)"/>
+        <text x="55" y="68" text-anchor="middle" fill="var(--surface)">x₀</text>
+        <text x="55" y="105" text-anchor="middle" font-size="10" fill="var(--text-muted)">t=0</text>
+
+        <!-- 帧 2 -->
+        <rect x="115" y="35" width="70" height="55" rx="3" fill="var(--module-accent)" opacity="0.75"/>
+        <circle cx="135" cy="55" r="1.5" fill="var(--surface)" class="fwd-noise-dot"/>
+        <circle cx="160" cy="70" r="1.5" fill="var(--surface)" class="fwd-noise-dot"/>
+        <text x="150" y="68" text-anchor="middle" fill="var(--surface)" font-size="10">x_{T/4}</text>
+        <text x="150" y="105" text-anchor="middle" font-size="10" fill="var(--text-muted)">ᾱ≈0.7</text>
+
+        <!-- 帧 3 -->
+        <rect x="210" y="35" width="70" height="55" rx="3" fill="var(--module-accent)" opacity="0.5"/>
+        <circle cx="225" cy="50" r="1.5" fill="var(--surface)" class="fwd-noise-dot"/>
+        <circle cx="245" cy="75" r="1.5" fill="var(--surface)" class="fwd-noise-dot"/>
+        <circle cx="265" cy="60" r="1.5" fill="var(--surface)" class="fwd-noise-dot"/>
+        <text x="245" y="68" text-anchor="middle" font-size="10">x_{T/2}</text>
+        <text x="245" y="105" text-anchor="middle" font-size="10" fill="var(--text-muted)">ᾱ≈0.3</text>
+
+        <!-- 帧 4 -->
+        <rect x="305" y="35" width="70" height="55" rx="3" fill="var(--module-accent)" opacity="0.25"/>
+        <circle cx="315" cy="50" r="1.5" fill="var(--text)" class="fwd-noise-dot"/>
+        <circle cx="335" cy="65" r="1.5" fill="var(--text)" class="fwd-noise-dot"/>
+        <circle cx="355" cy="55" r="1.5" fill="var(--text)" class="fwd-noise-dot"/>
+        <circle cx="365" cy="78" r="1.5" fill="var(--text)" class="fwd-noise-dot"/>
+        <text x="340" y="68" text-anchor="middle" font-size="10">x_{3T/4}</text>
+        <text x="340" y="105" text-anchor="middle" font-size="10" fill="var(--text-muted)">ᾱ≈0.05</text>
+
+        <!-- 帧 5 (噪声) -->
+        <rect x="400" y="35" width="70" height="55" rx="3" fill="var(--surface-soft)" stroke="var(--border)"/>
+        <circle cx="410" cy="48" r="1.5" fill="var(--text)" class="fwd-noise-dot"/>
+        <circle cx="425" cy="58" r="1.5" fill="var(--text)" class="fwd-noise-dot"/>
+        <circle cx="440" cy="72" r="1.5" fill="var(--text)" class="fwd-noise-dot"/>
+        <circle cx="455" cy="50" r="1.5" fill="var(--text)" class="fwd-noise-dot"/>
+        <circle cx="463" cy="78" r="1.5" fill="var(--text)" class="fwd-noise-dot"/>
+        <text x="435" y="68" text-anchor="middle" font-size="10">x_T</text>
+        <text x="435" y="105" text-anchor="middle" font-size="10" fill="var(--text-muted)">ᾱ≈0</text>
+
+        <text x="495" y="68" font-size="11" fill="var(--text-muted)">≈ $\mathcal{N}(0,I)$</text>
+
+        <!-- 横向箭头 -->
+        <line x1="92" y1="62" x2="112" y2="62" stroke="var(--text-muted)" stroke-width="1.2"/>
+        <line x1="187" y1="62" x2="207" y2="62" stroke="var(--text-muted)" stroke-width="1.2"/>
+        <line x1="282" y1="62" x2="302" y2="62" stroke="var(--text-muted)" stroke-width="1.2"/>
+        <line x1="377" y1="62" x2="397" y2="62" stroke="var(--text-muted)" stroke-width="1.2"/>
+
+        <!-- SNR 曲线 -->
+        <text x="20" y="140" font-size="11" font-weight="600">SNR(t) = ᾱ_t / (1−ᾱ_t)（对数轴，单调下降）</text>
+        <line x1="40" y1="250" x2="560" y2="250" stroke="var(--border)"/>
+        <line x1="40" y1="160" x2="40" y2="250" stroke="var(--border)"/>
+        <text x="30" y="165" text-anchor="end" font-size="10" fill="var(--text-muted)">高</text>
+        <text x="30" y="248" text-anchor="end" font-size="10" fill="var(--text-muted)">低</text>
+        <text x="40" y="265" font-size="10" fill="var(--text-muted)">t=0</text>
+        <text x="560" y="265" text-anchor="end" font-size="10" fill="var(--text-muted)">t=T</text>
+        <path d="M 40 165 Q 150 175 250 210 T 460 245 L 560 248" fill="none" stroke="var(--module-accent)" stroke-width="2"/>
+        <circle cx="40" cy="165" r="3" fill="var(--module-accent)"/>
+        <circle cx="560" cy="248" r="3" fill="var(--module-accent)"/>
+        <text x="120" y="195" font-size="10" fill="var(--text-muted)">信号主导</text>
+        <text x="430" y="232" font-size="10" fill="var(--text-muted)">噪声主导</text>
+      </g>
+    </svg>
+    <p style="font-size:0.88rem;color:var(--text-muted);">上方：图像沿 forward 链颜色渐淡（剩余信号 $\sqrt{\bar\alpha_t}$ 比例下降，噪声点逐帧增多）；下方：信噪比单调下降，从 $+\infty$ 跌到 $\approx 0$。<a href="/video-to-notebook/concepts/noise-schedule/">noise schedule</a> 控制的就是这条 SNR 曲线的<em>形状</em>——线性 schedule 是凸的、cosine 是 S 形、sigmoid 是中段平台型，各有不同退化节奏。Cosine schedule (Improved DDPM, Nichol & Dhariwal 2021) 之所以效果好，是因为它让中间步停留得更久、给训练更多"中等噪声水平"的样本——这些 $t$ 才是 reverse 网络最有效的学习范围。</p>
+
+    <h2>逐像素视角：一张 28×28 图怎么被加噪</h2>
+    <p>Dr. Raj 在 L3 给了一个特别具体的例子：拿 MNIST 28×28 = 784 个像素的图，看第一个像素 $x_0^{(1)} = 0.5$。一步加噪相当于<em>对这 784 个像素分别做一次独立 Gaussian 采样</em>：</p>
+    <p>$$x_1^{(i)} \sim \mathcal{N}\!\big(\sqrt{1-\beta_1}\cdot x_0^{(i)},\ \beta_1\big),\quad i = 1, 2, \dots, 784$$</p>
+    <p>每个像素的均值是<em>它自己缩水的版本</em>，方差是 $\beta_1$。各像素的噪声 $\epsilon^{(i)}$ <em>独立同分布</em>——这就是为什么前向噪声叫"i.i.d. 各向同性"。如果用矩阵记号，写成 $x_1 = \sqrt{1-\beta_1}\,x_0 + \sqrt{\beta_1}\,\epsilon$，$\epsilon \in \mathbb{R}^{784}$ 是一个 784 维标准正态向量。整图被 forward 推一步——计算上就是<em>一次逐元素乘法 + 一次逐元素加</em>，向量化在 GPU 上是 $O(d)$，$d$ 是像素数。对 256×256 RGB 图（$d \approx 2 \times 10^5$），加噪比一次卷积便宜上百倍——前向<em>几乎不消耗算力</em>。这就是 dataloader 里直接在 CPU 用 numpy 跑前向都不卡的原因。</p>
+
+    <h2><span class="my-addition">🟡 教材外补充：</span>从离散链到连续 SDE，从 VP 到 VE 与 rectified-flow</h2>
+    <p>讲师课堂上讲的是离散 $T = 1000$ 的 DDPM 版本——这是 2020 年的写法。Song & Ermon 2021（"Score-Based Generative Modeling through Stochastic Differential Equations"）把 $T \to \infty$ 的极限写成连续 SDE：$\mathrm{d}x = -\tfrac{1}{2}\beta(t)\,x\,\mathrm{d}t + \sqrt{\beta(t)}\,\mathrm{d}w$，即 variance-preserving SDE（VP-SDE）。在这一连续视角下，"$\sqrt{1-\beta_t}$ 系数"等价于漂移项 $-\tfrac{1}{2}\beta(t)\,x$ 让信号按指数衰减，"$\sqrt{\beta_t}$ 注入的噪声"等价于扩散项 $\sqrt{\beta(t)}\,\mathrm{d}w$ 注入 Brownian motion 增量。课程里学到的"$\bar\alpha_t = \prod(1-\beta_s)$"这个累积积，在连续极限下就变成积分 $\bar\alpha(t) = \exp\!\big(-\int_0^t \beta(s)\,\mathrm{d}s\big)$——离散的乘积变成连续的指数衰减。两种视角等价，离散更适合写代码，连续更适合做数学分析（如证明可逆、推出 score-matching 等价、构造 probability-flow ODE）。</p>
+    <p>EDM (Karras 2022) 进一步指出：把这同一个 forward 用<em>variance-exploding</em> 形式重新参数化 $x_t = x_0 + \sigma_t\,\epsilon$（不缩信号、只单向加噪），数值上比 VP 更稳——避免了 $\sqrt{\bar\alpha_t}$ 在 $t$ 大时接近 0 带来的数值病态。SD3 / Flux 等 2024 模型默认走 rectified-flow / VE 路线，已经不再写成 $\beta_t$ 链。Rectified flow（Liu et al. 2022）更激进，直接用线性插值 $x_t = (1-t)\,x_0 + t\,\epsilon$ 作为前向——把 noise schedule 设计退化成一条直线。<strong>但所有这些 forward 的本质共同点没变：解析、零参数、有闭式跳步</strong>。这条主线贯穿过去五年所有 diffusion / flow 文章——理解了 DDPM 的前向，再看任何变体都只是"换不同的 schedule 系数 / 改写参数化"。</p>
+  </section>
+
+  <section class="concept-interact">
+    <p>点击按钮在四个时刻间切换；右侧数字直接由跳步公式算出。<strong>不变量</strong>：无论选哪个 $t$，$x_t$ 的均值与 $x_0$ 同方向、按 $\sqrt{\bar\alpha_t}$ 比例缩；剩余方差恰好 $1-\bar\alpha_t$——两者平方和为 1（variance preserving）。</p>
+    <div class="fwd-controls">
+      <button data-step="0" class="active">t = 0</button>
+      <button data-step="1">t = 250</button>
+      <button data-step="2">t = 500</button>
+      <button data-step="3">t = 1000</button>
+    </div>
+    <div id="fwd-info" class="fwd-readout">
+      <div class="fwd-line" data-line="0">ᾱ=1.00 · √ᾱ·x₀=1.00·x₀ · √(1−ᾱ)·ε=0.00·ε · SNR=∞ · 完整数据</div>
+      <div class="fwd-line" data-line="1" hidden>ᾱ≈0.70 · √ᾱ·x₀=0.84·x₀ · √(1−ᾱ)·ε=0.55·ε · SNR≈2.3 · 仍可辨认</div>
+      <div class="fwd-line" data-line="2" hidden>ᾱ≈0.30 · √ᾱ·x₀=0.55·x₀ · √(1−ᾱ)·ε=0.84·ε · SNR≈0.43 · 噪声主导</div>
+      <div class="fwd-line" data-line="3" hidden>ᾱ≈0.00 · √ᾱ·x₀≈0 · √(1−ᾱ)·ε≈1·ε · SNR≈0 · ≈ 𝒩(0,I)，忘掉 x₀</div>
+    </div>
+    <script>
+      (function () {
+        const btns = document.querySelectorAll('.fwd-controls button');
+        const lines = document.querySelectorAll('#fwd-info .fwd-line');
+        function show(step) {
+          btns.forEach(b => b.classList.toggle('active', +b.dataset.step === step));
+          lines.forEach(l => { l.hidden = +l.dataset.line !== step; });
+        }
+        btns.forEach(b => b.addEventListener('click', () => show(+b.dataset.step)));
+        show(0);
+      })();
+    </script>
+  </section>
+
+  <section class="concept-example">
+    <h2>手算跳步：从 $x_0$ 到 $x_3$，并验证与逐步链同分布</h2>
+    <p>用一个极小的 schedule 做手算：$T = 3$，$\beta_1 = 0.1,\ \beta_2 = 0.2,\ \beta_3 = 0.3$（实际 DDPM 的 $\beta$ 都很小，这里用大数字方便用笔算清楚）。先把 $\alpha_s = 1-\beta_s$ 算出来：$\alpha_1 = 0.9,\ \alpha_2 = 0.8,\ \alpha_3 = 0.7$。</p>
+    <p>累积积（这是 schedule 阶段一次性算完的查表项）：$\bar\alpha_1 = 0.9,\ \bar\alpha_2 = 0.9 \cdot 0.8 = 0.72,\ \bar\alpha_3 = 0.72 \cdot 0.7 = 0.504$。</p>
+    <p>取一个简单的训练样本 $x_0 = 4$，假设标准 Gaussian 采到 $\epsilon = 1$。一次乘加跳到 $t = 3$：</p>
+    <p>$$x_3 = \sqrt{\bar\alpha_3}\,x_0 + \sqrt{1-\bar\alpha_3}\,\epsilon = \sqrt{0.504}\cdot 4 + \sqrt{0.496}\cdot 1 = 0.710 \cdot 4 + 0.704 \cdot 1 = 2.840 + 0.704 = 3.544$$</p>
+    <p><strong>验算 Markov 链</strong>：从 $x_0 = 4$ 一步步采（这次假设三次都恰好采到 $\epsilon = 1$，是为了让你看清整条链的结构；现实中三个 $\epsilon$ 独立随机）：</p>
+    <p>$x_1 = \sqrt{0.9}\cdot 4 + \sqrt{0.1} \cdot 1 = 3.795 + 0.316 = 4.111$；$x_2 = \sqrt{0.8} \cdot 4.111 + \sqrt{0.2} \cdot 1 = 3.677 + 0.447 = 4.124$；$x_3 = \sqrt{0.7}\cdot 4.124 + \sqrt{0.3}\cdot 1 = 3.451 + 0.548 = 3.999$。</p>
+    <p>逐步链得到 $x_3 \approx 4.00$，跳步公式得到 $x_3 \approx 3.54$。<strong>具体数值不一样是正常的、也是必须的</strong>——因为两条路径采到的 $\epsilon$ 序列不同，单条 sample path 当然不一样。但<em>两种采法的 $x_3$ 边缘分布完全相同</em>：均值都是 $\sqrt{0.504}\cdot 4 \approx 2.840$、方差都是 $1 - 0.504 = 0.496$。这正是闭式跳步的全部魔力——<em>跳过中间所有采样、直接采终点的边缘分布</em>，跳过的是 path 不是 marginal。训练 loss 只关心 marginal（loss 里只看 $x_t$ 不看 $x_{t-1}$），所以跳过 path 完全不影响梯度，这也是为什么 DDIM 后来能用同一个权重换 path 的根源。</p>
+  </section>
+
+  <section class="concept-pitfalls">
+    <h2>常见误区</h2>
+    <ol>
+      <li><strong>"$\beta_t$ 是 $x_t$ 时刻的总噪声方差"。</strong>反例：$\beta_t$ 是<em>这一步新增</em>的方差，<em>不是</em>累积。累积方差是 $1-\bar\alpha_t = 1 - \prod_{s=1}^{t}(1-\beta_s)$。常见 DDPM 取 $\beta_t \in [10^{-4}, 0.02]$ 线性插值，单步看每个 $\beta_t$ 都很小（最大 0.02 = 2%）；但 $T = 1000$ 时累积下来 $\bar\alpha_T \approx e^{-\sum \beta_t} \approx e^{-10} \approx 5 \times 10^{-5}$，所以 $1 - \bar\alpha_T \approx 1$——<em>每步加一点点，累积加完整</em>。理解这一点对调 schedule 至关重要：如果只看 $\beta_t$ 数值小就以为噪声"加得不多"，会完全错估终点的退化程度。</li>
+      <li><strong>"扩散步数 $T$ 越大效果越好，越接近真实 SDE"。</strong>反例：EDM (Karras 2022) 用 $T = 18$ + 二阶 Heun solver，FID 比 DDPM 标准 $T = 1000$ 的设置<em>还低</em>。原因是：$T$ 大本质上是"用更细的步长摊薄一阶 Euler 离散化误差"的笨办法；用二阶/三阶 ODE solver 可以在更少步内得到同等甚至更高精度，因为高阶 solver 每步的局部误差是 $O(\Delta t^k)$（$k$ 是阶数），比一阶的 $O(\Delta t)$ 衰减快得多。更好的 solver + 更聪明的 schedule（如 EDM 的 $\sigma$-spaced schedule）直接打破"$T$ 越大越好"这条朴素经验法则。这一误区在 2022 年后的工业部署里影响很大——Stable Diffusion 切到 DPM-Solver++ 后步数从 50 降到 20，速度翻倍而质量不掉。</li>
+      <li><strong>"前向加噪 = 把图模糊"。</strong>反例：前向是逐像素 i.i.d.<em>加 Gaussian 白噪声</em>，频谱是平坦的——所有空间频率被同等抬高；模糊（低通滤波 / Gaussian blur）只会保留低频、抹掉高频。如果你对 forward 链的中间帧 $x_{500}$ 画 power spectrum，会看到一条<em>平坦</em>的曲线叠加在 $x_0$ 的原始频谱上方；如果是模糊操作，会看到高频段被压扁、变成<em>低通</em>形状。两者数学上完全不同：噪声引入的是<em>新的、独立的、各向同性的</em>方差；模糊只是把已有信号<em>在频域重排</em>，没有引入任何新的随机性。这正是 cold diffusion (Bansal et al. 2022) 研究的动机——他们把 Gaussian 加噪替换成 blur、masking、down-sampling 等确定性退化，发现训练目标、loss 推导、reverse 写法全都要重做，不再是 DDPM 那套理论——足以说明 forward 用 Gaussian 不是"随便选了一种破坏方式"。</li>
+    </ol>
+  </section>
+
+  <section class="concept-seealso">
+    <h2>相关概念</h2>
+    <ul>
+      <li><a href="/video-to-notebook/concepts/ddpm/">DDPM</a>（前向是 DDPM 训练 pipeline 的"数据合成器"——闭式跳步公式直接出现在 Ho 2020 algorithm 1 的第 4 行，整个训练循环就建立在这一行能 $O(1)$ 完成的前提上）</li>
+      <li><a href="/video-to-notebook/concepts/reverse-process/">Reverse Diffusion Process</a>（前向负责"破坏"，reverse 负责"还原"——前向的解析性恰恰是反向<em>必须</em>用神经网络估算的根源：每步采的 $\epsilon$ 在前向被丢弃了，反向只能用模型估其期望）</li>
+    </ul>
+  </section>
+
+  <section class="concept-sources">
+    <h2>来源</h2>
+    <ol>
+      <li><a href="https://www.youtube.com/watch?v=Dx-1agEjlJs&t=5s" target="_blank" rel="noopener">diffusion-principles-vizuara · L3 · DDPM 引入，从 VAE 过渡到前向加噪 · (00:05)</a></li>
+      <li><a href="https://www.youtube.com/watch?v=H-RbhdiWzto&t=3s" target="_blank" rel="noopener">cmu-10799-diffusion-flow · L2 · "We finally gonna talk about diffusion model" · (00:03)</a></li>
+      <li><a href="https://www.youtube.com/watch?v=rngYBa46AXY&t=2s" target="_blank" rel="noopener">diffusion-lm-vizuara · L4 · 熊猫/熊的去噪→生成视角（反向就是前向的镜像）· (00:02)</a></li>
+    </ol>
+  </section>
+</article>

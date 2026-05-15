@@ -1,0 +1,632 @@
+<style>
+  .disc-ch { line-height: 1.75; }
+  .disc-ch svg { display: block; margin: 1.2rem auto; max-width: 100%; height: auto; }
+  .disc-ch .clip-frame { max-width: 720px; margin: 1.4rem auto; }
+  .disc-ch .clip-frame iframe { width: 100%; aspect-ratio: 16/9; border: 0; border-radius: 6px; }
+  .disc-ch .clip-frame figcaption { color: var(--text-muted); font-size: 0.85rem; margin-top: 0.4rem; text-align: center; }
+  .disc-ch .tldr { background: var(--surface-soft); border-left: 4px solid var(--module-accent); padding: 1rem 1.2rem; border-radius: 0 6px 6px 0; margin: 1.4rem 0; }
+  .disc-ch .tldr h2 { margin-top: 0; font-size: 1.05rem; border-bottom: 0; }
+  .disc-ch .callout { padding: 0.7rem 1rem; margin: 1rem 0; border-radius: 0 6px 6px 0; }
+  .disc-ch .callout-info { background: #eef6fc; border-left: 4px solid #2b80c4; }
+  .disc-ch .callout-note { background: #f3f0fa; border-left: 4px solid #6f4dd0; }
+  .disc-ch .callout-warning { background: #fff6e0; border-left: 4px solid #d4a017; }
+  .disc-ch .callout-tip { background: #e8f5e9; border-left: 4px solid #0b5; }
+  .disc-ch .callout-quote { background: var(--surface-soft); border-left: 3px solid var(--border-strong); padding: 0.5rem 1rem; margin: 0.8rem 0; font-style: italic; color: var(--text-muted); }
+  .disc-ch .my-addition { background: #fff7d6; border-left: 4px solid #b8860b; padding: 0.7rem 1rem; margin: 1rem 0; border-radius: 0 6px 6px 0; }
+  .disc-ch pre { background: #1f1f1f; color: #f6f4ee; padding: 1rem; border-radius: 6px; font-size: 0.86rem; line-height: 1.55; overflow-x: auto; }
+  .disc-ch code:not(pre code) { background: var(--surface-soft); padding: 0.1rem 0.35rem; border-radius: 3px; font-size: 0.9em; }
+  .disc-ch h2 { border-bottom: 1px solid var(--border); padding-bottom: 0.3rem; margin-top: 2.4rem; }
+  .disc-ch h3 { color: var(--module-accent); margin-top: 1.6rem; }
+  .disc-ch .deriv-step { margin: 0.8rem 0; padding: 0.6rem 0.8rem; background: var(--surface-soft); border-radius: 4px; }
+  .disc-ch .deriv-step strong { color: var(--module-accent); }
+  @keyframes disc-jump { 0%, 100% { opacity: 0.3; } 50% { opacity: 1; } }
+  .disc-ch .jump-token { animation: disc-jump 2.4s ease-in-out infinite; }
+</style>
+
+<article class="disc-ch">
+
+<h1>19. 离散扩散：在 token 上加「噪」</h1>
+
+<p style="font-size:0.95rem; color:var(--text-muted);">主源：CMU 10799 S26 Lecture 12（Discrete Diffusion &amp; Masked Diffusion）+ Lecture 13（Discrete Flow Matching &amp; Edit Flow，回顾段）。chunks #1550, #1623–1641，共 20 段。</p>
+
+<div class="tldr">
+  <h2>📌 TL;DR</h2>
+  <p>到目前为止我们做的全部 diffusion 都建立在<strong>一个非常隐蔽的假设</strong>之上：数据是连续向量、噪声是高斯。但文字、蛋白质序列、分子图——这些都是<strong>离散 token</strong>。给「the cat sat on the mat」加 $\mathcal{N}(0, \sigma^2)$ 是没意义的：「the」加上 0.3 之后是什么？</p>
+  <p>离散扩散给出的答案：把"加噪"重新定义为<strong>在 K 类 vocabulary 上的马尔可夫链</strong>。前向过程不再是连续 SDE，而是一个 $K \times K$ 的转移矩阵 $Q_t$：</p>
+  $$q(x_t \mid x_{t-1}) = \mathrm{Cat}\!\big(x_t \mid Q_t \, x_{t-1}\big)$$
+  <p>把 token 写成 one-hot 向量 $x \in \{0,1\}^K$，$Q_t \, x_{t-1}$ 就是"从当前 token 跳到任意 token"的概率向量。多步累乘有闭式：$\bar Q_t = Q_t \cdots Q_1$，于是 $q(x_t \mid x_0) = \mathrm{Cat}(x_t \mid \bar Q_t x_0)$——和 DDPM 的 $q(x_t \mid x_0) = \mathcal{N}(\sqrt{\bar\alpha_t} x_0, (1-\bar\alpha_t) I)$ 长得一模一样，只是把高斯换成 categorical。</p>
+  <p><strong>$Q_t$ 怎么选，就决定了"噪声"是什么</strong>：</p>
+  <ul>
+    <li><strong>Uniform</strong>：每步以小概率 $\beta_t$ 把 token 替换成均匀随机 token。终点是均匀分布。</li>
+    <li><strong>Absorbing / MASK</strong>：每步以 $\beta_t$ 把 token 替换为特殊的 <code>[MASK]</code>。终点是「全 MASK」序列。这是最简单、也是和 BERT 衔接最自然的设计——CMU 讲师称它为"the easiest way to do discrete diffusion"。</li>
+    <li><strong>Argmax / Gaussian-like</strong>：把 categorical 嵌入到连续空间、做连续扩散、再 argmax 回来。</li>
+  </ul>
+  <p>反向网络 $p_\theta(x_{t-1} \mid x_t)$ 是 categorical，训练损失依然是 ELBO——但通过<strong>重参数化（reparameterization）</strong>，最后落到一个跨所有 token 的 <strong>cross-entropy</strong>。讲师反复强调一句话：「在所有 discrete diffusion 论文里，核心套路都是把要学的东西重参数化成可以直接从前向过程和 clean-data 估计出来的形式」。</p>
+  <p><strong>承上启下</strong>：本章是 D3PM（Austin et al. 2021）的核心。下一章 <a href="/video-to-notebook/textbook/20/">第 20 章</a>会专门讲 Masked Diffusion 与 SEDD（score-entropy 损失）；<a href="/video-to-notebook/textbook/21/">第 21 章</a>把这套机器接到大语言模型（Diffusion-LM、LLaDA、MDLM、DiffuLLaMA）。</p>
+</div>
+
+<h2>一、为什么 Gaussian 噪声救不了 token</h2>
+
+<p>前面整本书的 diffusion 都跑在<strong>连续</strong>数据上：图像像素是 0–255 的实数，加 $\epsilon \sim \mathcal{N}(0, I)$ 自然合理，去噪也只是回归一个连续向量。CMU L12 一开场就把这个问题摆出来：</p>
+
+<div class="callout-quote">
+"so far we have learned about pretty much everything about diffusion models … for image generation specifically." —— 讲师在 L12 第一页就提醒：到目前为止的全部技术，都是为<strong>图像</strong>这样的连续模态打造的（chunk #1550）。
+</div>
+
+<p>而 token 是 <strong>categorical</strong>（类别型）的：</p>
+
+<ul>
+  <li>「the」是 vocabulary 第 1729 号 token，「cat」是第 4631 号；这些数字是<em>标签</em>，不是数值。</li>
+  <li>「the + 0.3 噪声」是什么？1729.3 号 token？没这个东西——这个 id 根本不在词表里。</li>
+  <li>token 之间没有"距离"的概念——「cat」和「dog」在 embedding 空间里靠不靠近，是<em>语义</em>层面的事，不是 token id 上加减能定义的。token id 的排列顺序通常完全是约定俗成的（BPE 频次排序、字母序…），1730 号 token 完全可能是「pneumonia」而不是「they」。</li>
+  <li>更要命的：图像里"灰度从 0 到 255"是连续渐变，一张图加一点高斯噪声看起来"像是同一张图、有一点雪花"——肉眼分得出。但「the cat sat on the mat」往「the cat sit on the mat」一字之差，已经从"语法正确"跳到"语法错误"，<em>状态空间根本没有"轻微抖动"这个区域</em>。</li>
+</ul>
+
+<p>同样的麻烦也出现在<strong>蛋白质序列</strong>（20 种氨基酸的 categorical 串）和<strong>分子图</strong>（节点是离散原子类型、边是离散键类型）。这些都不是孤立的小众场景——它们是当今 AI4Science 最热门的几个生成任务。</p>
+
+<p>所以第一步问题就是：<strong>在一个有限的、无序的状态空间上，"加噪"到底是什么？</strong> 整个第六模块就是在回答这个问题。本章先讲最基础的 D3PM 框架（Austin et al. 2021），它是后面 SEDD、MDLM、LLaDA 的共同祖先。</p>
+
+<div class="callout callout-warning">
+⚠️ <strong>不要试图"嵌入了再加高斯"草草了事</strong>：你确实可以把每个 token 用一个连续向量表示（embedding），然后在向量上跑 DDPM，最后 argmax 回 token。这条路有人走（叫 argmax flow / continuous embedding diffusion），但它把"在 token 上加噪"的问题<em>外包</em>给了 embedding 学习——embedding 学得好就行，学得不好你就毁了语义。本章讲的是<strong>直接在离散状态上定义扩散</strong>，不绕道。
+</div>
+
+<h2>二、第一性原理：把 token 写成 one-hot，把"加噪"写成矩阵乘法</h2>
+
+<p>CMU 讲师在 L12 一开始做的第一件事，是<strong>把 categorical 数据变成线性代数</strong>。原话：「we talked about how to add noise to text and how to represent it in like a vector slash matrix form, and how we can build a diffusion-esque forward process with this vector and matrix representation of the text」（chunk #1624）。</p>
+
+<h3>2.1 token 的向量化</h3>
+
+<p>vocabulary 大小为 $K$。把每个 token 写成 $K$ 维的 one-hot 向量：</p>
+
+<p>$x = \texttt{the}$（id 1729）$\Rightarrow x \in \{0,1\}^K$，第 1729 位为 1、其余为 0。</p>
+
+<p>这一步看似平凡，但它把"token"从离散符号变成了 <strong>$K$ 维 simplex 上的一个顶点</strong>（simplex = 所有概率向量构成的凸集，即所有非负且加起来等于 1 的向量）。一旦进了 simplex，就可以谈"概率分布"、"线性变换"、"期望"——所有连续 diffusion 的工具就能借过来用。可以这么记忆：</p>
+
+<ul>
+  <li>「token = simplex 顶点」（确定性、纯净）；</li>
+  <li>「token 上的分布 = simplex 内部一点」（不确定性、混合）。</li>
+</ul>
+
+<p>加噪的过程，就是把状态从顶点 → 内部点 → 慢慢挪到另一个特殊位置（uniform 中心或 MASK 顶点）的过程。</p>
+
+<h3>2.2 "加噪"= 在 simplex 上的随机游走</h3>
+
+<p>所谓"加噪"，就是把 $x$ 从一个 simplex 的顶点<strong>挪到 simplex 内部的某个点</strong>，再从这个分布里采样得到下一个 token。注意这里"两步"：先把状态<em>分布</em>挪到 simplex 内部（线性变换得到一个概率向量），再从这个分布里采样得到下一个 token（重新落到 simplex 顶点）。讲师在 chunk #1629–1630 多次强调："this transition matrix is a jump"——它代表的是单次"跳"的随机机制，不是某种连续平移。</p>
+
+<p>一步前向定义为：</p>
+
+$$q(x_t \mid x_{t-1}) = \mathrm{Cat}\!\big(x_t \mid Q_t \, x_{t-1}\big)$$
+
+<p>其中 $Q_t \in \mathbb{R}^{K \times K}$ 是 <strong>转移矩阵</strong>：</p>
+
+<ul>
+  <li>$(Q_t)_{ji}$ = "在 $t$ 时刻，从 token $i$ 跳到 token $j$ 的概率"；</li>
+  <li>每一<strong>列</strong>之和为 1（合法的条件概率分布）；</li>
+  <li>$Q_t x_{t-1}$ 是 $K$ 维概率向量，第 $j$ 位代表"$x_t$ 是 token $j$ 的概率"；</li>
+  <li>$\mathrm{Cat}(p)$ = 以 $p$ 为概率向量的 categorical 分布，采样得到一个 token id。</li>
+</ul>
+
+<p>这里和 DDPM 的一个深层对应：DDPM 用 $\sqrt{\alpha_t} x_{t-1} + \sqrt{\beta_t} \epsilon$ 描述一步前向，本质是<strong>"在像素值上做加权混合"</strong>；D3PM 用 $Q_t x_{t-1}$ 描述一步前向，本质是<strong>"在 token 分布上做线性混合"</strong>。两者数学上都是"线性变换 + 噪声"——只是噪声从高斯换成了 categorical 采样。</p>
+
+<div class="callout callout-note">
+📝 <strong>记号约定</strong>：不同论文里 $Q_t$ 有的是"行随机"（行和 1）有的是"列随机"（列和 1）。讲师本人也提到「all the columns or all the rows depending on which convention that you choose to use」（chunk #1628）。本章统一用<strong>列随机</strong>—$Q_t \, x_{t-1}$ 写成矩阵乘列向量。看其它论文时认准这个约定。
+</div>
+
+<h3>2.3 多步累乘：$\bar Q_t$ 闭式</h3>
+
+<p>和 DDPM 一样，多步前向也有闭式：</p>
+
+$$q(x_t \mid x_0) = \mathrm{Cat}\!\big(x_t \mid \bar Q_t \, x_0\big), \quad \bar Q_t = Q_t \, Q_{t-1} \cdots Q_1$$
+
+<p>因为马尔可夫链每步的条件概率叠加，等价于转移矩阵相乘。这点直接对应 DDPM 里 $\bar\alpha_t = \prod_{s=1}^t \alpha_s$ —— 一个是连续乘积、一个是矩阵连乘。</p>
+
+<div class="callout callout-tip">
+💡 <strong>结构同源</strong>：把 DDPM 的"$\sqrt{\bar\alpha_t} x_0$（保留多少原信号）+ $(1-\bar\alpha_t)$ 噪声"换成"$\bar Q_t x_0$（把 one-hot 经过 $t$ 步矩阵打散后的概率向量）"——同一个故事，换了一个数学对象。本章后面所有推导都是这个替换的具体执行。
+</div>
+
+<h2>三、$Q_t$ 怎么选？「噪声类型」的全部秘密</h2>
+
+<p>DDPM 里只有一种"噪声"——高斯——所以前向过程几乎没有设计空间。但 discrete diffusion 里，<strong>$Q_t$ 的形状本身就是一个设计空间</strong>。不同的 $Q_t$ 给出完全不同的"噪声物理"。讲师在 L13 回顾时点出 (chunk #1637)：「You can choose uniform, you can choose all mask, you can choose anything」。下面把三种主流选择讲清楚。</p>
+
+<h3>3.1 Uniform 噪声：终点是均匀分布</h3>
+
+<p>最朴素的选择：</p>
+
+$$Q_t = (1 - \beta_t) I + \frac{\beta_t}{K} \mathbf{1} \mathbf{1}^\top$$
+
+<p>含义：每步有 $1-\beta_t$ 概率不动，有 $\beta_t$ 概率<strong>等概率换成任意一个 token</strong>。直觉上就像一台不挑食的"打乱机"——每个时间片随机抽签，抽中就把当前 token 替换成词表里任意一个。$\beta_t$ 是抽签的次数密度（越接近终点抽得越频繁）。</p>
+
+<p>多步极限 $\bar Q_\infty$ = 行列都是 $1/K$ 的矩阵 → $x_T$ 服从 $K$ 类均匀分布。换句话说，"完全加噪后的状态" = 从词表中均匀采一个 token。把这个状态喂给反向网络，<em>它从模型角度看不到任何信息</em>——所有可能 token 等概率。</p>
+
+<p><strong>优点</strong>：对称、各 token 平等，理论分析最干净。<br>
+<strong>缺点</strong>：模型最后只能从均匀先验起步生成，提供的信息几乎为零，所以反向第一步几乎全靠"运气"；同时，从形式上 $Q_t$ 是稠密的——每一行每一列都有非零元——词表 50K 的话，朴素地存 $Q_t$ 是 $50000 \times 50000$ 即 25 亿浮点数，10 GB 内存。这是讲师在 chunk #1631 里被同学问到的痛点：「it already seems like a very big matrix」，讲师回答「It is」。第 8 节会专门讲怎么避免显式存它。</p>
+
+<h3>3.2 Absorbing / MASK：终点是「全 MASK」序列</h3>
+
+<p>引入一个特殊 token <code>[MASK]</code>（吸收态，absorbing state）。$Q_t$ 设计为：</p>
+
+<ul>
+  <li>每步有 $1 - \beta_t$ 概率不动；</li>
+  <li>每步有 $\beta_t$ 概率<strong>跳到 MASK</strong>；</li>
+  <li>一旦跳到 MASK 就<strong>永不离开</strong>（吸收态：$Q_t \, e_{\text{MASK}} = e_{\text{MASK}}$，也就是 MASK 这一列只有自己那个位置是 1）。</li>
+</ul>
+
+<p>对应的 $Q_t$ 几乎是单位矩阵，只在 MASK 行/列有几个非零元——<strong>结构极其稀疏</strong>，不需要存 $K \times K$ 矩阵：只要记住 $\beta_t$ 和 MASK 的位置就够了。这就是为什么 absorbing 是<em>实际能跑</em>的方案，它从根上规避了 50K vocabulary 的矩阵爆炸。</p>
+
+<p>多步极限：所有 token 最终都被吸收成 MASK，$x_T$ = 「[MASK] [MASK] [MASK] ... [MASK]」。可以把它想象成一张白纸：信息全部被擦掉了，但<em>结构（句子长度）保留</em>。反向网络从这张白纸出发，一格一格往里填字。</p>
+
+<div class="callout callout-quote">
+"lastly we talked about like the easiest way to do discrete diffusion which is mask diffusion language modeling. Basically you always you try to interpolate between your clean data and the full mask, and then you just try to construct a discrete diffusion model like that." —— CMU L13 开场回顾（chunk #1625）
+</div>
+
+<p>讲师反复用 "the easiest way" 形容它。原因：</p>
+
+<ol>
+  <li><strong>转移矩阵稀疏</strong>，免去 $K \times K$ 的内存灾难；</li>
+  <li><strong>语义直观</strong>：从「完全 mask 的句子」一步步填回 clean text，本质上就是 <strong>BERT 的 masked language modeling 极限版</strong>——BERT 一次性 mask 15%，masked diffusion 在 $t=T$ 时 mask 100%，并把这个过程<em>连续化</em>成 $T$ 步；</li>
+  <li><strong>反向网络好学</strong>：只需要预测「现在是 MASK 的位置，clean token 是什么」，本质就是一个填空任务。"未被 mask 的位置"提供上下文，模型只对 mask 位置做分类——这正是 BERT 已经被验证非常擅长的目标。</li>
+  <li><strong>采样物理直观</strong>：反向过程像在写一封"先打草稿、再逐步补字"的信。每一步只需要决定"这一格我现在要不要把 MASK 替换成具体 token"——决策是局部、稀疏的，不需要"改写已经写好的字"。</li>
+</ol>
+
+<h3>3.3 Embedding + 高斯 + Argmax</h3>
+
+<p>第三条路：把每个 token 嵌入到 $d$ 维连续空间，在 embedding 上跑标准 DDPM（高斯噪声），生成时再 argmax 回最近的 token。讲师没有把它当作主流，因为这本质上是"绕开了"discrete diffusion 的真正问题——它没有在 token 层面定义噪声，而是把 token 替换成了 token 的连续替身。当 embedding 学得不好时，argmax 步骤会丢掉大量信息：高斯噪声把 embedding 推到 "cat" 和 "cot" 中间的位置，argmax 落到哪个完全是巧合，而连续空间里那种"靠近但不等于"的渐变全部丢掉。</p>
+
+<p>本章剩下的部分聚焦在<strong>第一、二条路</strong>——它们才是 D3PM 框架的本体。</p>
+
+<svg viewBox="0 0 720 280" role="img" aria-label="uniform 与 absorbing 两种前向轨迹对比">
+  <g font-family="ui-sans-serif" font-size="11" fill="var(--text)">
+    <text x="180" y="20" text-anchor="middle" font-weight="600">Uniform 噪声：终点 = 均匀分布</text>
+    <text x="540" y="20" text-anchor="middle" font-weight="600">Absorbing / MASK：终点 = 全 MASK</text>
+
+    <!-- Uniform side -->
+    <g transform="translate(20, 40)">
+      <text x="0" y="20" font-size="10" fill="var(--text-muted)">t=0</text>
+      <text x="0" y="60" font-size="10" fill="var(--text-muted)">t=T/2</text>
+      <text x="0" y="100" font-size="10" fill="var(--text-muted)">t=T</text>
+
+      <!-- t=0 row -->
+      <g transform="translate(40, 6)">
+        <rect x="0"   y="0" width="36" height="20" fill="#9bc5ec" stroke="#2b80c4"/><text x="18" y="14" text-anchor="middle">the</text>
+        <rect x="40"  y="0" width="36" height="20" fill="#9bc5ec" stroke="#2b80c4"/><text x="58" y="14" text-anchor="middle">cat</text>
+        <rect x="80"  y="0" width="36" height="20" fill="#9bc5ec" stroke="#2b80c4"/><text x="98" y="14" text-anchor="middle">sat</text>
+        <rect x="120" y="0" width="36" height="20" fill="#9bc5ec" stroke="#2b80c4"/><text x="138" y="14" text-anchor="middle">on</text>
+        <rect x="160" y="0" width="36" height="20" fill="#9bc5ec" stroke="#2b80c4"/><text x="178" y="14" text-anchor="middle">mat</text>
+      </g>
+      <!-- t=T/2 row -->
+      <g transform="translate(40, 46)">
+        <rect x="0"   y="0" width="36" height="20" fill="#9bc5ec" stroke="#2b80c4"/><text x="18" y="14" text-anchor="middle">the</text>
+        <rect x="40"  y="0" width="36" height="20" fill="#f6cfa3" stroke="#d4a017"/><text x="58" y="14" text-anchor="middle">xq</text>
+        <rect x="80"  y="0" width="36" height="20" fill="#9bc5ec" stroke="#2b80c4"/><text x="98" y="14" text-anchor="middle">sat</text>
+        <rect x="120" y="0" width="36" height="20" fill="#f6cfa3" stroke="#d4a017"/><text x="138" y="14" text-anchor="middle">py</text>
+        <rect x="160" y="0" width="36" height="20" fill="#f6cfa3" stroke="#d4a017"/><text x="178" y="14" text-anchor="middle">zk</text>
+      </g>
+      <!-- t=T row -->
+      <g transform="translate(40, 86)">
+        <rect x="0"   y="0" width="36" height="20" fill="#f6cfa3" stroke="#d4a017"/><text x="18" y="14" text-anchor="middle">qr</text>
+        <rect x="40"  y="0" width="36" height="20" fill="#f6cfa3" stroke="#d4a017"/><text x="58" y="14" text-anchor="middle">wb</text>
+        <rect x="80"  y="0" width="36" height="20" fill="#f6cfa3" stroke="#d4a017"/><text x="98" y="14" text-anchor="middle">jx</text>
+        <rect x="120" y="0" width="36" height="20" fill="#f6cfa3" stroke="#d4a017"/><text x="138" y="14" text-anchor="middle">vt</text>
+        <rect x="160" y="0" width="36" height="20" fill="#f6cfa3" stroke="#d4a017"/><text x="178" y="14" text-anchor="middle">uy</text>
+      </g>
+
+      <text x="120" y="160" text-anchor="middle" font-size="10" fill="var(--text-muted)">每步 β 概率换成<br/>词表里任意 token</text>
+      <text x="120" y="180" text-anchor="middle" font-size="10" fill="var(--text-muted)">终态：均匀随机字符串</text>
+    </g>
+
+    <!-- Absorbing side -->
+    <g transform="translate(380, 40)">
+      <text x="0" y="20" font-size="10" fill="var(--text-muted)">t=0</text>
+      <text x="0" y="60" font-size="10" fill="var(--text-muted)">t=T/2</text>
+      <text x="0" y="100" font-size="10" fill="var(--text-muted)">t=T</text>
+
+      <g transform="translate(40, 6)">
+        <rect x="0"   y="0" width="36" height="20" fill="#9bc5ec" stroke="#2b80c4"/><text x="18" y="14" text-anchor="middle">the</text>
+        <rect x="40"  y="0" width="36" height="20" fill="#9bc5ec" stroke="#2b80c4"/><text x="58" y="14" text-anchor="middle">cat</text>
+        <rect x="80"  y="0" width="36" height="20" fill="#9bc5ec" stroke="#2b80c4"/><text x="98" y="14" text-anchor="middle">sat</text>
+        <rect x="120" y="0" width="36" height="20" fill="#9bc5ec" stroke="#2b80c4"/><text x="138" y="14" text-anchor="middle">on</text>
+        <rect x="160" y="0" width="36" height="20" fill="#9bc5ec" stroke="#2b80c4"/><text x="178" y="14" text-anchor="middle">mat</text>
+      </g>
+      <g transform="translate(40, 46)">
+        <rect x="0"   y="0" width="36" height="20" fill="#9bc5ec" stroke="#2b80c4"/><text x="18" y="14" text-anchor="middle">the</text>
+        <rect x="40"  y="0" width="36" height="20" fill="#dddddd" stroke="#666"/><text x="58" y="14" text-anchor="middle" class="jump-token">[M]</text>
+        <rect x="80"  y="0" width="36" height="20" fill="#9bc5ec" stroke="#2b80c4"/><text x="98" y="14" text-anchor="middle">sat</text>
+        <rect x="120" y="0" width="36" height="20" fill="#dddddd" stroke="#666"/><text x="138" y="14" text-anchor="middle" class="jump-token">[M]</text>
+        <rect x="160" y="0" width="36" height="20" fill="#9bc5ec" stroke="#2b80c4"/><text x="178" y="14" text-anchor="middle">mat</text>
+      </g>
+      <g transform="translate(40, 86)">
+        <rect x="0"   y="0" width="36" height="20" fill="#dddddd" stroke="#666"/><text x="18" y="14" text-anchor="middle">[M]</text>
+        <rect x="40"  y="0" width="36" height="20" fill="#dddddd" stroke="#666"/><text x="58" y="14" text-anchor="middle">[M]</text>
+        <rect x="80"  y="0" width="36" height="20" fill="#dddddd" stroke="#666"/><text x="98" y="14" text-anchor="middle">[M]</text>
+        <rect x="120" y="0" width="36" height="20" fill="#dddddd" stroke="#666"/><text x="138" y="14" text-anchor="middle">[M]</text>
+        <rect x="160" y="0" width="36" height="20" fill="#dddddd" stroke="#666"/><text x="178" y="14" text-anchor="middle">[M]</text>
+      </g>
+
+      <text x="120" y="160" text-anchor="middle" font-size="10" fill="var(--text-muted)">每步 β 概率被吸收成 [MASK]</text>
+      <text x="120" y="180" text-anchor="middle" font-size="10" fill="var(--text-muted)">终态：全 [MASK] 序列</text>
+    </g>
+  </g>
+</svg>
+
+<h2>四、连续时间版：转移矩阵 → rate matrix</h2>
+
+<p>到目前为止 $t$ 是离散的（$t = 0, 1, 2, \ldots, T$）。CMU 在 L13 进一步把它推到连续时间，得到 <strong>CTMC（Continuous-Time Markov Chain，连续时间马尔可夫链）</strong>。讲师原话（chunk #1627）：「the continuous time formulation that correspond to this transformation is what we call the continuous time Markov chain or CTMC」。</p>
+
+<h3>4.1 从转移矩阵到 rate matrix</h3>
+
+<p>在连续时间下，"一步跳 vs 不跳"的概率融成<strong>每单位时间的跳变率</strong> $q_t(y \mid x)$（rate matrix，$K \times K$）。两个约束：</p>
+
+<ul>
+  <li><strong>非对角元 $q_t(y \mid x) \geq 0$</strong>（$y \neq x$）：从 $x$ 跳到 $y$ 的速率不能为负；</li>
+  <li><strong>列和为 0</strong>：$\sum_y q_t(y \mid x) = 0$，即对角元 $q_t(x \mid x) = -\sum_{y \neq x} q_t(y \mid x)$。</li>
+</ul>
+
+<p>讲师（chunk #1628–1629）：「all the columns or all the rows … all the transitions should add up to zero. And this is literally just a conservation of mass.」—— "流出去的"和"流进来的"相抵销，整个 simplex 上概率守恒。</p>
+
+<div class="callout callout-info">
+ℹ️ <strong>类比：rate matrix 就是 "velocity"</strong>。讲师在 chunk #1630 直接说出来了：「this QT thing is like a transition mixtures that represent a jump essentially. … this QT is is the flow. It's a velocity, right?」——把 CTMC 跟 flow matching 对应起来：连续 flow 的 velocity 在离散 CTMC 里就是 rate matrix。这个对应在<a href="/video-to-notebook/textbook/16/">第 16 章 flow matching</a>之后看格外亲切。
+</div>
+
+<h3>4.2 Kolmogorov 方程：离散版「连续性方程」</h3>
+
+<p>概率分布 $p_t$ 怎么随时间演化？讲师（chunk #1632）：</p>
+
+<div class="callout-quote">
+"the infinitesimal change in probability is equal to literally the amount of probability that comes into this particular state, minus the probability that go out of this state."
+</div>
+
+<p>写成数学：</p>
+
+<div class="deriv-step">
+<strong>步骤 1：朴素流入流出</strong>
+$$\frac{d p_t(x)}{dt} = \sum_{y \neq x} q_t(x \mid y) \, p_t(y) \;-\; \sum_{y \neq x} q_t(y \mid x) \, p_t(x)$$
+<em>Why</em>：第一项 = 从所有别的 state $y$ 流入 $x$ 的总速率；第二项 = 从 $x$ 流出到所有别的 state 的总速率。直觉上就是"水槽进水量减出水量"。
+</div>
+
+<div class="deriv-step">
+<strong>步骤 2：用守恒律合并</strong>
+利用 $q_t(x \mid x) = -\sum_{y \neq x} q_t(y \mid x)$，第二项可写成 $-q_t(x \mid x) \, p_t(x)$，即可把 $y = x$ 也纳入第一项的求和：
+$$\frac{d p_t(x)}{dt} = \sum_y q_t(x \mid y) \, p_t(y)$$
+<em>Why</em>：讲师在 chunk #1633 现场让学生回答的就是这个化简——「this negative sum thing is just qxx … so just sum of all the z's and then qzx ptz」。
+</div>
+
+<div class="deriv-step">
+<strong>步骤 3：写成矩阵形式</strong>
+$$\boxed{\frac{d p_t}{dt} = Q_t \, p_t}$$
+<em>Why</em>：把 $p_t$ 看作 $K$ 维概率列向量，rate matrix $Q_t$ 把它做线性变换。讲师（chunk #1634）：「this is a ODE again, right? Amazing. Just like flow matching, we get a simple ODE again.」—— 漂亮：离散扩散在连续时间下就是<strong>一个线性 ODE</strong>，和 flow matching 在结构上完全对偶。
+</div>
+
+<h2>五、反向网络：$p_\theta(x_{t-1} \mid x_t)$ 是 categorical</h2>
+
+<p>有了前向，反向也类似 DDPM：用神经网络参数化每步去噪条件分布。</p>
+
+$$p_\theta(x_{t-1} \mid x_t) = \mathrm{Cat}\!\big(x_{t-1} \mid f_\theta(x_t, t)\big)$$
+
+<p>$f_\theta(x_t, t) \in \mathbb{R}^K$ 是神经网络输出的 logits，softmax 之后得到 categorical 分布。</p>
+
+<p>对一个长度 $L$ 的句子，<strong>每个位置独立预测一个 categorical</strong>：</p>
+
+$$p_\theta(x_{t-1} \mid x_t) = \prod_{i=1}^L p_\theta(x_{t-1}^{(i)} \mid x_t)$$
+
+<p>这就是为什么 discrete diffusion 天然是<strong>非自回归（non-autoregressive）</strong>的——每一步所有 token 的去噪可以并行进行，不需要逐字解码。和 GPT 那种"左到右一字一字憋"完全不同，discrete diffusion 是"全句一起 refine、refine 完一轮再 refine 下一轮"。</p>
+
+<p>这里需要小心一个独立性假设：网络在预测每个位置的 token 时<em>给定的是全句的 $x_t$</em>，所以位置之间是"条件独立"——它们各自看到了相同的 noisy context，但各自的预测彼此之间不直接约束。这是 discrete diffusion 在质量上比自回归弱的根源（autoregressive 每步看到全部已生成的 token），但也是它能并行的根本原因。后面 SEDD / MDLM 章会讲怎么用 $T$ 步迭代来弥补这个独立性假设带来的损失。</p>
+
+<div class="callout callout-tip">
+💡 <strong>非自回归的代价与收益</strong>：自回归 LM（GPT 那种）逐 token 生成，质量稳但慢；discrete diffusion 一步并行所有 token，快但每步信息少。讲师在第 21 章（forward pointer）里会展开：用 $T$ 步换并行度，是 LM 设计里一个全新的"质量–速度"权衡轴。
+</div>
+
+<h2>六、训练目标：ELBO → 简化损失 → cross-entropy</h2>
+
+<p>训练目标和 DDPM 同源：最大化数据 log-likelihood 的 ELBO（下界）。讲师在 chunk #1624 一句话总结：「we can train it using the same ELBO loss from DDPM essentially」。下面把它落到具体形式。</p>
+
+<h3>6.1 离散 ELBO</h3>
+
+<p>对一个数据点 $x_0$，扩展 $T$ 步：</p>
+
+$$\log p_\theta(x_0) \;\geq\; \mathbb{E}_q\!\left[\log p_\theta(x_0 \mid x_1) - \sum_{t=2}^T D_{\mathrm{KL}}\!\big(q(x_{t-1} \mid x_t, x_0) \,\|\, p_\theta(x_{t-1} \mid x_t)\big) - D_{\mathrm{KL}}\!\big(q(x_T \mid x_0) \,\|\, p(x_T)\big)\right]$$
+
+<p>结构跟 DDPM 完全一致（参见<a href="/video-to-notebook/textbook/7/">第 7 章</a>），只是这里所有的 $q$ 和 $p$ 都是 categorical 而非 Gaussian。第一项重构、中间一堆 KL 让网络匹配真后验、最后一项是先验匹配。</p>
+
+<h3>6.2 真后验 $q(x_{t-1} \mid x_t, x_0)$ 也有闭式</h3>
+
+<p>用 Bayes：</p>
+
+$$q(x_{t-1} \mid x_t, x_0) = \frac{q(x_t \mid x_{t-1}) \, q(x_{t-1} \mid x_0)}{q(x_t \mid x_0)}$$
+
+<p>三个分量都是已知 categorical：</p>
+
+<ul>
+  <li>$q(x_t \mid x_{t-1}) = \mathrm{Cat}(Q_t \, x_{t-1})$；</li>
+  <li>$q(x_{t-1} \mid x_0) = \mathrm{Cat}(\bar Q_{t-1} \, x_0)$；</li>
+  <li>$q(x_t \mid x_0) = \mathrm{Cat}(\bar Q_t \, x_0)$。</li>
+</ul>
+
+<p>逐元素一乘一除，归一化后就得到 $q(x_{t-1} \mid x_t, x_0)$ 的概率向量。每一项的 KL 散度就能解析算出。</p>
+
+<h3>6.3 关键操作：重参数化成 $x_0$ 预测</h3>
+
+<p>这是讲师在 L13 反复强调的一句话（chunk #1636）：</p>
+
+<div class="callout-quote">
+"the core of the story in all the discrete diffusion papers is that no matter what you do try to <strong>reparameterize your thing into something that you can directly get from the forward process and the clean data estimation</strong>. It's actually not only the discrete diffusion paper. It's actually all diffusion paper."
+</div>
+
+<p>对应到 DDPM 是 $\epsilon$-prediction 或 $v$-prediction；对应到 discrete 是 <strong>$x_0$-prediction</strong>。</p>
+
+<p>具体做法：让神经网络不直接输出 $p_\theta(x_{t-1} \mid x_t)$，而是输出 <strong>$\hat x_0 = f_\theta(x_t, t)$ 的预测分布</strong>（"clean token 是什么"），然后用闭式公式拼出 $p_\theta(x_{t-1} \mid x_t)$：</p>
+
+$$p_\theta(x_{t-1} \mid x_t) = \sum_{\tilde x_0} q(x_{t-1} \mid x_t, \tilde x_0) \, f_\theta(\tilde x_0 \mid x_t, t)$$
+
+<p>讲师在 chunk #1636 给出两点理由：</p>
+
+<ol>
+  <li><strong>"It saves dimensionality"</strong>：直接预测 rate matrix 是 $K \times K$ 量级；预测 $\hat x_0$ 只需要 $K$ 维 logits。</li>
+  <li><strong>"We can literally just use cross entropy to learn this, because we have the ground truth clean data"</strong>（chunk #1637）。</li>
+</ol>
+
+<h3>6.4 落地的简化损失：cross-entropy</h3>
+
+<p>训练时给定真实 $x_0$，从前向闭式采 $x_t \sim q(x_t \mid x_0)$，让网络预测 $\hat x_0$：</p>
+
+$$L_{\text{simple}} = \mathbb{E}_{t, x_0, x_t}\!\left[ -\log f_\theta(x_0 \mid x_t, t) \right]$$
+
+<p>就是一个对每个 token 的<strong>交叉熵</strong>。讲师（chunk #1637）：「we just need to use cross entropy on every single token」。这就是为什么 discrete diffusion 训练 loop 看起来出奇地像 BERT 训练——因为它<em>就是</em>。和 BERT 的区别只有两个：</p>
+
+<ol>
+  <li>每个 batch 采到的 $t$ 是随机的，所以 mask 的比例是连续变化的（BERT 是固定 15%）；</li>
+  <li>损失会按 $t$ 的某个权重项加权（来自 ELBO 中 $D_{\mathrm{KL}}(q \| p_\theta)$ 的系数），但讲师指出实践中这个权重经常被丢掉直接用 uniform，DDPM 同样的"$L_\text{simple}$ vs $L_\text{vlb}$"的故事在这里复现一遍。</li>
+</ol>
+
+<p>整体的对照：DDPM 把"MSE on $\epsilon$" 当作简化损失，discrete diffusion 把"cross-entropy on $x_0$"当作简化损失。两者都是从复杂 ELBO 里抽出一个"漂亮且能跑"的代理目标。</p>
+
+<div class="callout callout-warning">
+⚠️ <strong>同学的真实问题（chunk #1639）</strong>：「You will still be quadratic the number of the vocabulary size, right? Does that make it difficult to predict such a large?」<br>
+讲师回答：「No, because you are not predicting Q, right? You're predicting P. You're predicting Sx. And then you multiply by something that you can do in closed form.」<br>
+翻译：网络只需要输出 $K$ 维的 $\hat x_0$ logits（vocabulary 大小，跟 GPT 的输出头同量级），$K \times K$ 那一坨闭式计算就好——这是<strong>讲师反复强调的工程救命招</strong>。
+</div>
+
+<h2>七、D3PM 训练伪代码</h2>
+
+<p>把上面所有概念落到代码里，长这样：</p>
+
+<pre><code>import torch
+import torch.nn.functional as F
+
+def discrete_diffusion_loss(model, x0, Q_cum, T, vocab_size):
+    """
+    D3PM-style training step.
+    x0:        (batch, seq_len) ground-truth token ids
+    Q_cum[t]:  (K, K) cumulative transition matrix  bar Q_t = Q_t ... Q_1
+    model:     predicts logits of x0 given x_t, t
+    """
+    B, L = x0.shape
+    # ----- 1. 随机采时间步 -----
+    t = torch.randint(1, T + 1, (B,), device=x0.device)
+
+    # ----- 2. 前向采 x_t ~ q(x_t | x_0) = Cat(bar Q_t @ x_0_onehot) -----
+    x0_oh = F.one_hot(x0, vocab_size).float()           # (B, L, K)
+    # gather 当前 batch 各自的 bar Q_t
+    probs = torch.einsum('kj,blj->blk', Q_cum[t.mean().long()], x0_oh)
+    xt = torch.distributions.Categorical(probs=probs).sample()  # (B, L)
+
+    # ----- 3. 模型预测 hat_x0 logits -----
+    logits = model(xt, t)                                # (B, L, K)
+
+    # ----- 4. 交叉熵损失 -----
+    # 关键：损失不是去对 (B, L, K, K) 的 rate matrix，
+    # 而是对 (B, L, K) 的 vocab-size logits 做 cross-entropy。
+    loss = F.cross_entropy(
+        logits.reshape(-1, vocab_size),
+        x0.reshape(-1)
+    )
+    return loss
+</code></pre>
+
+<p>训完之后采样：从 $x_T$（uniform 或全 MASK）开始，每一步用 $\hat x_0$ 重参数化拼出 $p_\theta(x_{t-1} \mid x_t)$，采一个 categorical，迭代到 $t=0$。</p>
+
+<h2>八、$K \times K$ 矩阵的工程现实</h2>
+
+<p>第 7 节代码看上去丝滑，但实际写过的人都被一件事卡过：<strong>$K$ 是 50 000 起的 vocabulary 大小</strong>。$K \times K$ 矩阵单看是 25 亿浮点数，10 GB 内存——这是讲师在 chunk #1631 被同学问到的"big matrix problem"。三种解决思路：</p>
+
+<h3>8.1 结构化 $Q_t$</h3>
+
+<p>不存全矩阵，只存它的"参数"：</p>
+
+<ul>
+  <li><strong>Uniform</strong>：$Q_t = (1-\beta_t)I + \beta_t/K \cdot \mathbf{1}\mathbf{1}^\top$，只需存 $\beta_t$。$Q_t \, v$ 的矩阵向量积可以 $O(K)$ 算（$v$ 投到 1 上是平均、加回去就行）。</li>
+  <li><strong>Absorbing</strong>：$Q_t$ 几乎是单位矩阵 + 一条 MASK 行，参数也是 $\beta_t$。$Q_t v$ 只需 $O(K)$。</li>
+</ul>
+
+<p>结论：<strong>除非你刻意要让任意两个 token 间转移概率都不同，否则永远不要显式存 $K \times K$ 矩阵</strong>。这是 discrete diffusion 能在 50K vocabulary 上跑起来的根本原因。</p>
+
+<h3>8.2 SEDD 的 score-entropy 视角</h3>
+
+<p>讲师（chunk #1624）：「we also talked about how we can define the discrete score which is the concrete score and how we can learn it using a better or more stable loss function which is called the score entropy loss」。</p>
+
+<p>SEDD（Score Entropy Discrete Diffusion）把对 $K \times K$ 矩阵的预测进一步压缩成对<strong>"score ratio" $p(y)/p(x)$</strong> 的预测，并用一个稳定的 score-entropy 损失替代 cross-entropy。下一章 <a href="/video-to-notebook/textbook/20/">第 20 章</a>详细展开。</p>
+
+<h3>8.3 reparameterization 的本质</h3>
+
+<p>讲师在 chunk #1632 把这件事点透：「this is also why we're trying to do reparameterization trick」。所有这些工程花招——$x_0$-prediction、score ratio、结构化 $Q_t$——本质上都是<strong>不要让网络去预测 $K^2$ 维东西</strong>。永远把要学的对象重写成"$K$ 维 logits + 闭式后处理"的形式。这和 DDPM 里的 $\epsilon$-prediction 同根同源：让网络去回归 $\epsilon \in \mathbb{R}^d$（数据空间维度），而不是去回归 $\mu_\theta \in \mathbb{R}^d$（也是 $d$ 维但带数值漂移）—— 重参数化是一种"把困难任务变成简单任务"的纯代数操作，并不改变损失的极值点。</p>
+
+<p>讲师把这件事看作 diffusion 大家族的一个共同基因，原话（chunk #1636）：「It's actually not only the discrete diffusion paper. It's actually all diffusion paper. Right? Basically, you just apply reparameterization trick and then you'll get something that is like nicer to learn. For example, like the epsilon prediction and the v prediction, right? And in this case, this is literally just the x0 prediction or the clean data prediction.」 一旦你脑子里建立这个映射，所有 diffusion 论文的"我们参数化为 X-prediction"这一段就再也不会让你卡住——它们做的是同一件事的不同变种。</p>
+
+<h2>九、采样：从噪声/MASK 到 clean text</h2>
+
+<p>采样流程（以 absorbing 为例）：</p>
+
+<ol>
+  <li><strong>初始化</strong>：$x_T = $ 长度为 $L$ 的全 [MASK] 序列；</li>
+  <li><strong>对 $t = T, T-1, \ldots, 1$</strong>：
+    <ol>
+      <li>前向网络输出 $\hat x_0$ logits = $f_\theta(x_t, t)$；</li>
+      <li>用闭式公式拼出 $p_\theta(x_{t-1} \mid x_t)$；</li>
+      <li>对每个位置独立采一个 $x_{t-1}^{(i)} \sim \mathrm{Cat}(\cdot)$；</li>
+    </ol>
+  </li>
+  <li>最终输出 $x_0$ 就是生成的文本。</li>
+</ol>
+
+<p>讲师（chunk #1638）描述这个流程像 Euler 积分：「you literally just sample from the categorical distribution that is defined by the CTMC … and then you just increment the time and then you do it over and over again until you reach the end point」。这是和连续 DDPM 的 Euler-Maruyama 步对应的离散版本——前者是数值积分 SDE，后者是数值积分 CTMC。</p>
+
+<p>采样的几个工程细节：</p>
+
+<ul>
+  <li><strong>采样温度</strong>：$\mathrm{Cat}$ 采样前可以对 logits 除以温度 $\tau$，$\tau < 1$ 时趋于 argmax（更确定）、$\tau > 1$ 时更发散。和自回归 LM 的 temperature 技巧完全一致。</li>
+  <li><strong>步数</strong>：$T$ 不必和训练时的 $T$ 相同。可以用更少的 $T$ 步（如 16、32）来加速，代价是质量略降——和 DDIM 的"训练 1000 步、采样 50 步"是一个道理。</li>
+  <li><strong>位置策略</strong>：absorbing 的反向步里，可以选择"只在 MASK 位置采样"或"所有位置都重采"。前者更稳定、更接近 BERT 的 fill-in；后者更接近原始 D3PM 的形式定义。MDLM 等后续工作专门研究这个选择。</li>
+</ul>
+
+<div class="callout callout-tip">
+💡 <strong>非自回归 vs 自回归</strong>：上述流程的迭代次数 $T$ 通常远小于 $L$（句子长度）。当 $T = 10$、$L = 1024$ 时，自回归 LM 需要 1024 次串行 forward，discrete diffusion 只需要 10 次。<strong>这就是它"用 $T$ 步换并行度"的本质</strong>。
+</div>
+
+<h2>十、和已学概念的全景对照</h2>
+
+<p>到这里把这一整套机器与前面的工具一一对照：</p>
+
+<table style="width:100%; border-collapse: collapse; margin: 1rem 0;">
+  <thead>
+    <tr style="background: var(--surface-soft);">
+      <th style="padding: 0.5rem; text-align:left; border: 1px solid var(--border);">概念</th>
+      <th style="padding: 0.5rem; text-align:left; border: 1px solid var(--border);">连续 DDPM</th>
+      <th style="padding: 0.5rem; text-align:left; border: 1px solid var(--border);">离散 D3PM</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td style="padding: 0.5rem; border: 1px solid var(--border);">数据空间</td>
+      <td style="padding: 0.5rem; border: 1px solid var(--border);">$\mathbb{R}^d$</td>
+      <td style="padding: 0.5rem; border: 1px solid var(--border);">$\{1, \ldots, K\}^L$（one-hot 后是 $K$-simplex 顶点）</td>
+    </tr>
+    <tr>
+      <td style="padding: 0.5rem; border: 1px solid var(--border);">前向条件分布</td>
+      <td style="padding: 0.5rem; border: 1px solid var(--border);">$\mathcal{N}(\sqrt{\alpha_t} x_{t-1}, \beta_t I)$</td>
+      <td style="padding: 0.5rem; border: 1px solid var(--border);">$\mathrm{Cat}(Q_t \, x_{t-1})$</td>
+    </tr>
+    <tr>
+      <td style="padding: 0.5rem; border: 1px solid var(--border);">多步闭式</td>
+      <td style="padding: 0.5rem; border: 1px solid var(--border);">$\mathcal{N}(\sqrt{\bar\alpha_t} x_0, (1-\bar\alpha_t)I)$</td>
+      <td style="padding: 0.5rem; border: 1px solid var(--border);">$\mathrm{Cat}(\bar Q_t \, x_0)$，$\bar Q_t = Q_t \cdots Q_1$</td>
+    </tr>
+    <tr>
+      <td style="padding: 0.5rem; border: 1px solid var(--border);">先验 $p(x_T)$</td>
+      <td style="padding: 0.5rem; border: 1px solid var(--border);">$\mathcal{N}(0, I)$</td>
+      <td style="padding: 0.5rem; border: 1px solid var(--border);">均匀 / 全 MASK</td>
+    </tr>
+    <tr>
+      <td style="padding: 0.5rem; border: 1px solid var(--border);">连续时间</td>
+      <td style="padding: 0.5rem; border: 1px solid var(--border);">SDE</td>
+      <td style="padding: 0.5rem; border: 1px solid var(--border);">CTMC（rate matrix $Q_t$，列和为 0）</td>
+    </tr>
+    <tr>
+      <td style="padding: 0.5rem; border: 1px solid var(--border);">参数化</td>
+      <td style="padding: 0.5rem; border: 1px solid var(--border);">$\epsilon$-prediction / $v$-prediction</td>
+      <td style="padding: 0.5rem; border: 1px solid var(--border);">$x_0$-prediction</td>
+    </tr>
+    <tr>
+      <td style="padding: 0.5rem; border: 1px solid var(--border);">最终损失</td>
+      <td style="padding: 0.5rem; border: 1px solid var(--border);">MSE on $\epsilon$</td>
+      <td style="padding: 0.5rem; border: 1px solid var(--border);">Cross-entropy on $x_0$</td>
+    </tr>
+    <tr>
+      <td style="padding: 0.5rem; border: 1px solid var(--border);">采样</td>
+      <td style="padding: 0.5rem; border: 1px solid var(--border);">$T$ 步迭代 Gaussian</td>
+      <td style="padding: 0.5rem; border: 1px solid var(--border);">$T$ 步迭代 Categorical</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>讲师在 L13 末尾用一句话总结这个"撞墙巧合"（chunk #1639）：「this is the theme of gen modeling. the community just like seems to kind of you know converge on things that we developed somehow」——生成式建模的整体框架，似乎正在收敛到同一套语言。</p>
+
+<h2>十一、和语言模型的关系</h2>
+
+<p>把 absorbing discrete diffusion 摆到自然语言处理的脉络里：</p>
+
+<ul>
+  <li><strong>BERT (2018)</strong>：单步 mask 一定比例的 token（如 15%）、预测被 mask 的 token。本质是 <em>discrete diffusion with $T=1$ and fixed mask ratio</em>，但它是用 pretraining 思路来用、不是生成思路。</li>
+  <li><strong>Discrete Diffusion / D3PM (2021)</strong>：把 BERT 的"单步"扩成"$T$ 步"，每步 mask 比例随 $t$ 平滑增长，最终全 mask。这是把 BERT 转成<strong>生成模型</strong>的关键一步——只要训练时见过"100% mask"这种极端情况，采样就可以从全 MASK 启动。</li>
+  <li><strong>SEDD (2024) / MDLM (2024)</strong>：用 score-entropy 让损失更稳定，开始在小规模 LM 上接近 autoregressive 质量。SEDD 由 Stanford 的 Aaron Lou 等人推出，是 Stanford NLP 第一次把 diffusion LM 推到接近 GPT-2 small 的水平。</li>
+  <li><strong>LLaDA / DiffuLLaMA (2025)</strong>：把 discrete diffusion 推到 7B+ 规模，开始在某些任务上（特别是双向推理、in-filling）展示出比同规模自回归模型更好的表现。这是 discrete diffusion 第一次进入"大模型主流话题"。</li>
+</ul>
+
+<p>从研究演化的角度看，这条线索其实是<strong>BERT 的复仇</strong>：BERT 在 2018 年提出后被 GPT 系（autoregressive）的成功盖了风头，但 BERT 一直保留着"双向上下文"和"并行预测"这两个本质优点。discrete diffusion 给了 BERT 一个理论上自洽的"采样接口"——只要把训练目标扩展到全谱 mask ratio，BERT 立刻能变成生成模型。这条路在 2024–2025 年开始真正起飞。</p>
+
+<div class="my-addition">
+🟡 <strong>教材外补充（讲师本讲未展开）：</strong>
+<ul>
+  <li><strong>D3PM 论文细节</strong>：Austin et al. 2021《Structured Denoising Diffusion Models in Discrete State-Spaces》。除了 uniform 和 absorbing，他们还给出"基于 token 距离的"$Q_t$（图像 token 上邻近 token 间转移概率更高）。这一族叫 <em>structured corruption</em>。</li>
+  <li><strong>非自回归并非新概念</strong>：早在 2017 年的 NAT (Non-Autoregressive Transformer) 就在尝试一步并行预测整句话，但质量长期落后于 AR。Discrete diffusion 给了 NAT 一个理论基础：每一步的"refine"对应一次扩散反向步，质量随 $T$ 收敛。</li>
+  <li><strong>与 BERT 的差别</strong>：BERT 的 mask ratio 是固定的，模型只见过"15% 被 mask"的输入；discrete diffusion 在训练里见过"$0\% \to 100\%$ 全谱"的 mask ratio——这让它在采样时能从全 mask 安全启动，而 BERT 不能。</li>
+</ul>
+</div>
+
+<h2>十二、本章的承上启下</h2>
+
+<ul>
+  <li><strong>承上</strong>：DDPM 的 ELBO 推导（<a href="/video-to-notebook/textbook/7/">第 7 章</a>）、$\epsilon/v$-prediction（<a href="/video-to-notebook/textbook/8/">第 8 章</a>）、flow matching velocity（<a href="/video-to-notebook/textbook/16/">第 16 章</a>）—— discrete diffusion 把它们整体平移到 categorical 状态空间。</li>
+  <li><strong>启下</strong>：
+    <ul>
+      <li><a href="/video-to-notebook/textbook/20/">第 20 章</a>：Masked Diffusion + SEDD，把 absorbing 这条路深挖到 score-entropy 损失；</li>
+      <li><a href="/video-to-notebook/textbook/21/">第 21 章</a>：Diffusion-LM、LLaDA、MDLM、DiffuLLaMA—— discrete diffusion 在大语言模型层面的真实战场。</li>
+      <li>讲师在 L13 后半段还会推出 <em>Discrete Flow Matching</em>：把 CTMC + rate matrix 改造成 flow matching 视角，进一步把 ELBO 替换成 conditional flow matching loss。</li>
+    </ul>
+  </li>
+</ul>
+
+<svg viewBox="0 0 720 240" role="img" aria-label="K 类 vocabulary simplex 上的马尔可夫链">
+  <g font-family="ui-sans-serif" font-size="11" fill="var(--text)">
+    <text x="360" y="20" text-anchor="middle" font-weight="600">K-类 categorical simplex 上的随机游走（K=4 示意）</text>
+
+    <!-- simplex tetrahedron projected to 2D -->
+    <polygon points="360,50 200,200 520,200 360,130" fill="none" stroke="var(--border-strong)"/>
+    <circle cx="360" cy="50"  r="10" fill="#9bc5ec" stroke="#2b80c4"/>
+    <circle cx="200" cy="200" r="10" fill="#9bc5ec" stroke="#2b80c4"/>
+    <circle cx="520" cy="200" r="10" fill="#9bc5ec" stroke="#2b80c4"/>
+    <circle cx="360" cy="130" r="10" fill="#dddddd" stroke="#666"/>
+    <text x="360" y="44"  text-anchor="middle">the</text>
+    <text x="200" y="216" text-anchor="middle">cat</text>
+    <text x="520" y="216" text-anchor="middle">sat</text>
+    <text x="360" y="124" text-anchor="middle">[MASK]</text>
+
+    <!-- random walk path -->
+    <path d="M 360 50 Q 280 100 200 200 Q 340 220 360 130" fill="none" stroke="#d4a017" stroke-width="2" stroke-dasharray="4,3"/>
+    <circle cx="360" cy="50"  r="5" fill="#d4a017" class="jump-token"/>
+    <circle cx="280" cy="120" r="5" fill="#d4a017" class="jump-token"/>
+    <circle cx="200" cy="200" r="5" fill="#d4a017" class="jump-token"/>
+    <circle cx="340" cy="180" r="5" fill="#d4a017" class="jump-token"/>
+    <circle cx="360" cy="130" r="5" fill="#d4a017" class="jump-token"/>
+
+    <text x="270" y="80"  font-size="10" fill="var(--text-muted)">x_0</text>
+    <text x="180" y="190" font-size="10" fill="var(--text-muted)">x_1</text>
+    <text x="375" y="125" font-size="10" fill="var(--text-muted)">x_T = [MASK]</text>
+
+    <text x="360" y="232" text-anchor="middle" font-size="10" fill="var(--text-muted)">每一步 x_t ~ Cat(Q_t · x_{t-1})：从一个顶点跳到 simplex 内某点，再采样落到下一个顶点</text>
+  </g>
+</svg>
+
+<figure class="clip-frame">
+  <iframe src="https://www.youtube.com/embed/mXEjZblUBPs?start=99" title="CMU 10799 L12: discrete diffusion overview" allowfullscreen></iframe>
+  <figcaption>📺 CMU 10799 S26 Lecture 12（1:39 处）—— 讲师介绍"最简单的离散扩散就是 mask diffusion"</figcaption>
+</figure>
+
+<figure class="clip-frame">
+  <iframe src="https://www.youtube.com/embed/bK-LfpKLv0g?start=212" title="CMU 10799 L13: CTMC and rate matrix" allowfullscreen></iframe>
+  <figcaption>📺 CMU 10799 S26 Lecture 13（3:32 处）—— CTMC、rate matrix、列和为 0 的 Kolmogorov 守恒推导</figcaption>
+</figure>
+
+<div class="takeaways" style="background:#0b5; color:#fff; padding:1.4rem; border-radius:8px; margin-top:2rem;">
+  <h3 style="margin-top:0; color:#fff;">本章要记住的（讲师亲口给的核心）</h3>
+  <ol>
+    <li><strong>"token 上加噪 = simplex 上的马尔可夫链"</strong>。把 token 变 one-hot，所有 diffusion 工具就能复用：$q(x_t \mid x_{t-1}) = \mathrm{Cat}(Q_t x_{t-1})$。</li>
+    <li><strong>$Q_t$ 决定"噪声类型"</strong>：Uniform（终点均匀分布）、Absorbing/MASK（终点全 MASK，讲师叫"the easiest way"）、Argmax embedding（绕道连续）。</li>
+    <li><strong>$\bar Q_t = Q_t \cdots Q_1$</strong>，多步闭式与 DDPM 的 $\bar\alpha_t$ 同构。</li>
+    <li><strong>CTMC = 离散扩散的连续时间版</strong>：rate matrix 列和为 0、Kolmogorov 方程 $dp_t/dt = Q_t p_t$ 是一个线性 ODE。讲师原话：「QT is the flow, it's a velocity」。</li>
+    <li><strong>训练损失 = $x_0$-prediction 的 cross-entropy</strong>。讲师反复强调：「all discrete diffusion papers, the core is to reparameterize into something you can directly get from forward + clean data estimation」。</li>
+    <li><strong>$K \times K$ 矩阵不要显式存</strong>。用结构化 $Q_t$（uniform / absorbing 都是 $O(K)$ 参数），$Q_t v$ 用 closed form 算。这是 50K vocabulary 能跑通的工程救命招。</li>
+    <li><strong>Discrete diffusion = 非自回归 LM</strong>。$T$ 步并行解码替换自回归的 $L$ 步串行。质量–速度 trade-off 的新轴，承接到 <a href="/video-to-notebook/textbook/20/">第 20 章 SEDD</a> 与 <a href="/video-to-notebook/textbook/21/">第 21 章 LLaDA/MDLM</a>。</li>
+  </ol>
+</div>
+
+</article>

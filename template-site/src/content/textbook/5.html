@@ -1,0 +1,695 @@
+<style>
+  .noise-sched { line-height: 1.75; }
+  .noise-sched svg { display: block; margin: 1.2rem auto; max-width: 100%; height: auto; }
+  .noise-sched .clip-frame { max-width: 720px; margin: 1.4rem auto; }
+  .noise-sched .clip-frame iframe { width: 100%; aspect-ratio: 16/9; border: 0; border-radius: 6px; }
+  .noise-sched .clip-frame figcaption { color: var(--text-muted); font-size: 0.85rem; margin-top: 0.4rem; text-align: center; }
+  .noise-sched .tldr { background: var(--surface-soft); border-left: 4px solid var(--module-accent); padding: 1rem 1.2rem; border-radius: 0 6px 6px 0; margin: 1.4rem 0; }
+  .noise-sched .tldr h2 { margin-top: 0; font-size: 1.05rem; border-bottom: none; }
+  .noise-sched .callout { padding: 0.7rem 1rem; margin: 1rem 0; border-radius: 0 6px 6px 0; }
+  .noise-sched .callout-info { background: #eef6fc; border-left: 4px solid #2b80c4; }
+  .noise-sched .callout-note { background: #f3f0fa; border-left: 4px solid #6f4dd0; }
+  .noise-sched .callout-warning { background: #fff6e0; border-left: 4px solid #d4a017; }
+  .noise-sched .callout-tip { background: #e8f5e9; border-left: 4px solid #0b5; }
+  .noise-sched .callout-quote { background: var(--surface-soft); border-left: 3px solid var(--border-strong); padding: 0.5rem 1rem; margin: 0.8rem 0; font-style: italic; color: var(--text-muted); }
+  .noise-sched .my-addition { background: #fff7d6; border-left: 4px solid #b8860b; padding: 0.7rem 1rem; margin: 1rem 0; border-radius: 0 6px 6px 0; }
+  .noise-sched pre { background: #1f1f1f; color: #f6f4ee; padding: 1rem; border-radius: 6px; font-size: 0.86rem; line-height: 1.55; overflow-x: auto; }
+  .noise-sched code:not(pre code) { background: var(--surface-soft); padding: 0.1rem 0.35rem; border-radius: 3px; font-size: 0.9em; }
+  .noise-sched h2 { border-bottom: 1px solid var(--border); padding-bottom: 0.3rem; margin-top: 2.4rem; }
+  .noise-sched h3 { color: var(--module-accent); margin-top: 1.6rem; }
+  .noise-sched .deriv-step { margin: 0.8rem 0; padding: 0.6rem 0.8rem; background: var(--surface-soft); border-radius: 4px; }
+  .noise-sched .deriv-step strong { color: var(--module-accent); }
+  .noise-sched table { width: 100%; border-collapse: collapse; margin: 1rem 0; font-size: 0.93rem; }
+  .noise-sched table th { background: var(--surface-soft); padding: 0.6rem; text-align: left; border-bottom: 1px solid var(--border); }
+  .noise-sched table td { padding: 0.55rem 0.6rem; border-top: 1px solid var(--border); vertical-align: top; }
+</style>
+
+<article class="noise-sched">
+
+<h1>5. 噪声进度表 β_t</h1>
+
+<p style="font-size:0.95rem; color:var(--text-muted);">主源：Vizuara《Principles of Diffusion Models》Lecture 7 — Noise Conditional Score Networks（讲师 Dr. Raj Dandekar）；副源：Vizuara《Diffusion LLM》Lecture 12 — Diffusion LLM Noising Schedule；外部 anchor：Ho et al. 2020 (DDPM)、Nichol & Dhariwal 2021 (Improved DDPM)、Song et al. 2021 (Score SDE)、Karras et al. 2022 (EDM)。</p>
+
+<div class="tldr">
+  <h2>📌 TL;DR</h2>
+  <p><strong>「噪声进度表」 = 决定信号在 $t = 0 \to T$ 之间如何从干净数据被一步步抹平成纯噪声的「衰减曲线」。</strong>同一个 forward SDE，换一条 schedule 就是另一个模型。三条主流曲线：</p>
+  <ul>
+    <li><strong>Linear（DDPM 原版）</strong>：$\beta_t$ 从 $10^{-4}$ 线性涨到 $0.02$。简单，但在高分辨率图像上后半段信号塌得太快——浪费一半训练步数。</li>
+    <li><strong>Cosine（Nichol &amp; Dhariwal 2021）</strong>：$\bar\alpha_t = \cos^2\!\big(\tfrac{t/T + s}{1+s} \cdot \tfrac{\pi}{2}\big)$，$s=0.008$。中段衰减、首尾平缓，让每个 $t$ 都有意义的训练信号，FID 直接降一档。</li>
+    <li><strong>Sigmoid / EDM-style</strong>：把 log-SNR 改写成 sigmoid 型或纯 $\sigma$ 参数化，理论更干净，是现代 SOTA（SDXL、SD3、EDM）的主流。</li>
+  </ul>
+  <p>但这一章<em>真正的重头戏</em>不是「列三条公式」，而是把<strong>「为什么需要 schedule、为什么单一噪声级别行不通、为什么多级噪声 = 流形塌缩问题的解药」</strong>一次性讲透——这是 Vizuara L7 把 NCSN（Song &amp; Ermon 2019）的整套故事剥给学生看的核心。Schedule 不是工程调参，而是<strong>对数据维度灾难的一次系统响应</strong>。</p>
+</div>
+
+<h2>一、为什么这章值得专门一讲</h2>
+
+<p>翻开大多数入门博客，DDPM 的 schedule 永远是一句话：「$\beta_t$ 线性从 $10^{-4}$ 涨到 $0.02$，$T=1000$」。仿佛这是一条从天上掉下来的工程约定。但<strong>只要你试过把 DDPM 跑在 $64\times64$ 以上的图像、或者把同一份代码挪到语言扩散上，就会立刻撞到 schedule 的墙</strong>：</p>
+
+<ul>
+  <li>图像变大 → 后半段 $\bar\alpha_t$ 太小 → 模型在最后 200 步根本看不见任何信号，但 loss 仍占权重；</li>
+  <li>把 $T$ 从 1000 改到 4000 → 不调 $\beta$ → SNR 曲线整体平移 → 训练目标完全错位；</li>
+  <li>到了语言扩散，「噪声」变成了「mask 几个 token」，schedule 的载体彻底换了，但<em>同一套数学</em>仍要工作。</li>
+</ul>
+
+<p>讲师 Dr. Raj 在 Vizuara L7（讲 NCSN）一开场就把这个问题逼到台前——「为什么单一噪声级别不行？为什么我们必须用一连串递降的噪声 $\sigma_1 > \sigma_2 > \dots > \sigma_L$？」——这恰好就是 noise schedule 的<em>第一性问题</em>。L7 不是把 schedule 当超参数讲，而是<strong>把它当作流形塌缩问题的解药</strong>讲。本章把这两条线索（实战 schedule 表 + 理论根基）拧成一股绳。</p>
+
+<div class="callout-quote">
+讲师原话（L7 chunk #14）：「By adding noise, you actually fluff up that tiny sheet of paper into a cloud that fills up the room. ... It is astonishing to see how many problems scientists have solved by adding noise. It somehow makes things more easy.」—— 加噪不是损坏数据，加噪是<strong>让数学重新可解</strong>。
+</div>
+
+<h2>二、Schedule 控制的物理量到底是什么？</h2>
+
+<p>在 <a href="/video-to-notebook/textbook/4/">第 4 章 前向扩散</a>，我们写下过马尔可夫链每一步：</p>
+
+$$q(x_t \mid x_{t-1}) = \mathcal{N}\!\big(x_t;\, \sqrt{1-\beta_t}\, x_{t-1},\, \beta_t \mathbf{I}\big)$$
+
+<p>以及它的一步采样捷径（reparameterized 闭式）：</p>
+
+$$x_t = \sqrt{\bar\alpha_t}\, x_0 \;+\; \sqrt{1-\bar\alpha_t}\, \epsilon, \quad \epsilon \sim \mathcal{N}(0, \mathbf{I})$$
+
+<p>其中</p>
+
+$$\alpha_t = 1 - \beta_t, \qquad \bar\alpha_t = \prod_{s=1}^{t} \alpha_s$$
+
+<p>这条捷径告诉我们：<strong>在 $t$ 时刻，干净数据 $x_0$ 的「信号系数」是 $\sqrt{\bar\alpha_t}$，噪声的「权重」是 $\sqrt{1-\bar\alpha_t}$</strong>。Schedule $\{\beta_t\}_{t=1}^T$ 完全决定了这两个系数随 $t$ 的走法。它控制的不是「加多少噪声」这一个抽象量，而是<em>同时</em>控制：</p>
+
+<ol>
+  <li><strong>信号保留比例</strong> $\sqrt{\bar\alpha_t}$：$t=0$ 时为 1（原始数据），$t=T$ 时必须 $\approx 0$。</li>
+  <li><strong>噪声注入比例</strong> $\sqrt{1-\bar\alpha_t}$：$t=0$ 时为 0，$t=T$ 时必须 $\approx 1$。</li>
+  <li><strong>信噪比</strong> $\mathrm{SNR}(t) = \tfrac{\bar\alpha_t}{1 - \bar\alpha_t}$：从 $+\infty$ 单调降到 $0$。</li>
+  <li><strong>训练目标的尺度</strong>：神经网络在 $t$ 时刻面对的"任务难度"。</li>
+</ol>
+
+<div class="callout callout-info">
+🧭 <strong>schedule 的边界条件（讲师在 L4-L6 反复强调）</strong>：<br>
+• 在 $t=0$：$\bar\alpha_0 = 1$ → $x_0$ = 干净数据；<br>
+• 在 $t=T$：$\bar\alpha_T \to 0$ → $x_T \approx \mathcal{N}(0, \mathbf{I})$，即 KL$\big(q(x_T|x_0)\,\|\,\mathcal{N}(0,\mathbf{I})\big) \to 0$。<br>
+<strong>这两个边界是「硬约束」</strong>。schedule 的自由度全部在<em>中段轨迹的形状</em>上。任何一条让两个端点都满足的曲线，理论上都是合法的 schedule。
+</div>
+
+<h2>三、从 NCSN 看 schedule 的第一性必要性</h2>
+
+<p>要真懂为什么需要 schedule，得追溯到 schedule 出现之前的时代。讲师在 L7 把 NCSN（Noise Conditional Score Networks, Song &amp; Ermon 2019）当成扩散模型族谱中最重要的一篇——「<em>14 years of progress led us to this moment</em>」（chunk #9）。NCSN 不是 DDPM，但它<strong>正是 schedule 这个概念被发明的地方</strong>。</p>
+
+<h3>3.1 磁铁类比：score matching 的物理直觉</h3>
+
+<p>讲师在 L7 开头给出一个非常具象的类比（chunk #0-5），值得逐句记下：</p>
+
+<div class="callout-quote">
+桌上摆着一堆磁铁，但其中大部分是隐藏的，你只能看到几颗。任务是：<strong>给定桌面上任意一点，求"附近磁铁"对它的合力方向</strong>。这本来不可解——你不知道总共有多少磁铁、藏在哪里。<br><br>
+怎么破？技巧很简单：<strong>把一颗金属球放在某颗磁铁上，弹一下（flick），球飞出去落到另一个位置</strong>。然后请来一个学生，只让他看新位置，问他："这颗球原本在哪？"<br><br>
+学生当然不知道——但<em>我们知道</em>。所以我们让他猜一个向量，再把这个向量和真实的"球被弹的反方向"对齐。这就是 denoising score matching。
+</div>
+
+<p>把类比翻译回数学：</p>
+
+<ul>
+  <li><strong>磁铁的位置</strong> = 真实数据点 $x_0$；</li>
+  <li><strong>磁场（每个点上磁铁对你的合力方向）</strong> = score 场 $\nabla_x \log p(x)$；</li>
+  <li><strong>金属球被弹后的新位置</strong> = 加噪数据 $\tilde x = x_0 + \sigma \epsilon$；</li>
+  <li><strong>把球拉回原位的力</strong> = 噪声数据对应的 score $\nabla_{\tilde x} \log p_\sigma(\tilde x)$；</li>
+  <li><strong>「弹」的方向（noise vector）</strong> = $\epsilon$，正是我们让 student 去预测的目标。</li>
+</ul>
+
+<p>这个类比的精妙之处在于：<strong>我们无法直接观测真实数据分布的 score 场</strong>（因为我们不知道完整的 $p(x)$），但通过"先加噪、再让网络预测加了多少噪"这种倒推方式，<em>把不可解的 score 估计问题转换成了可解的回归问题</em>。讲师反复强调（chunk #3）："<em>something magical happens in the noisy world that suddenly things become more tractable</em>"——这个"magical"在数学上就是指：加噪后的分布 $p_\sigma(\tilde x)$ 是一个<em>已知形式</em>的 Gaussian（中心在 $x_0$），所以它的 score 有闭式解。</p>
+
+<p>用高斯假设把这个对应关系写干净：如果加噪过程是 $\tilde x = x_0 + \sigma \epsilon$，则给定 $x_0$ 的噪声后验是 $\mathcal{N}(\tilde x; x_0, \sigma^2 \mathbf{I})$，其 score 有<strong>闭式</strong>：</p>
+
+$$\nabla_{\tilde x} \log p(\tilde x \mid x_0) \;=\; -\frac{\tilde x - x_0}{\sigma^2} \;=\; -\frac{\epsilon}{\sigma}$$
+
+<p>这就是讲师 chunk #5-7 的推导：「<em>The target score is simply minus noise divided by sigma</em>」。<strong>整个 score-matching loss 长这样的简单形式，是「加噪」这一步赠送的礼物</strong>：</p>
+
+$$\mathcal{L}_{\text{DSM}} = \mathbb{E}_{x_0, \epsilon}\left\|\, s_\theta(\tilde x) - \left(-\tfrac{\epsilon}{\sigma}\right) \,\right\|^2$$
+
+<p>这一形式相比 2005 年 Hyvärinen 的原始 score matching（带 trace + Hessian 的 $\mathcal{O}(d^2)$ 复杂度），<strong>计算复杂度从维度平方降到线性</strong>——讲师 chunk #7：「<em>that method's computational complexity increases as the square of the dimensions; hence we do not opt for it</em>」。讲师在 chunk #8 还梳理了一条完整的时间线：「<em>2005 年 Hyvärinen 证明 score matching 目标的可解性；2010 年 Pascal Vincent 给出了 denoising score matching；2019 年 Song 和 Ermon 把这一切总结进 NCSN——14 年的进展才让我们站在今天的位置</em>」。这条时间线很重要——它告诉学生：DDPM 不是凭空出现的奇迹，而是<em>score-based generative modeling 这条线索 14 年累积的最终汇流</em>。</p>
+
+<h3>3.2 流形塌缩：单一噪声级别为什么不够</h3>
+
+<p>讲师从 chunk #10 开始切入<strong>本章理论核心</strong>。引出的关键概念是<strong>流形假设</strong>（manifold hypothesis）：</p>
+
+<blockquote>真实世界的数据虽然嵌入在高维空间中，但实际只集中分布在一个<strong>低维流形</strong>上。比如手写数字图像虽然是 $784$ 维的，但有效数据只占 $784$ 维空间中一个非常薄的子流形——它甚至可能本质上只有十几维。</blockquote>
+
+<p>讲师用<strong>「一张纸」类比</strong>（chunk #12-13）：</p>
+
+<div class="callout-quote">
+想象你手里举着一张纸，你的数据就生活在这张纸上。在纸上行走（沿流形切向），梯度是清楚的——你知道往哪个方向数据密度增大。<strong>但只要你离开纸面一毫米</strong>，进入空荡荡的房间，<em>梯度立刻变得未定义</em>——因为那里根本没有数据。手里拿着指南针，针就乱抖。
+</div>
+
+<p>形式化地说，score $\nabla_x \log p(x)$ 是在<strong>环境空间</strong>（ambient space）求梯度。但如果 $p(x)$ 在流形外几乎处处为零，那么在流形外部 $\log p(x) = -\infty$，梯度根本不存在。结果就是：</p>
+
+<ul>
+  <li>用纯净数据训练 score 网络 → 网络只在流形上有监督信号；</li>
+  <li>采样时（Langevin dynamics）起点是随机点 $x \sim \mathcal{N}(0, \mathbf{I})$，<strong>这个起点离流形十万八千里</strong>；</li>
+  <li>网络对"离流形很远"的输入根本没有学习过 → 输出垃圾 → 采样无法收敛。</li>
+</ul>
+
+<svg viewBox="0 0 640 240" role="img" aria-label="流形塌缩与加噪救援">
+  <g font-family="ui-sans-serif" font-size="11" fill="var(--text)">
+    <text x="160" y="20" text-anchor="middle" font-weight="600">加噪前：数据在低维流形上</text>
+    <text x="480" y="20" text-anchor="middle" font-weight="600">加噪后：流形被"吹胖"成云</text>
+
+    <g transform="translate(20, 35)">
+      <rect x="0" y="0" width="280" height="180" rx="6" fill="#f6f0e6" stroke="#cbb88f"/>
+      <path d="M 30,100 Q 100,40 180,80 Q 240,110 260,140" stroke="#b8860b" stroke-width="3" fill="none"/>
+      <circle cx="60" cy="88" r="3" fill="#b8860b"/>
+      <circle cx="100" cy="70" r="3" fill="#b8860b"/>
+      <circle cx="150" cy="78" r="3" fill="#b8860b"/>
+      <circle cx="200" cy="95" r="3" fill="#b8860b"/>
+      <circle cx="240" cy="120" r="3" fill="#b8860b"/>
+      <text x="140" y="160" text-anchor="middle" font-size="10" fill="#7a5500">梯度只在流形上有定义</text>
+      <text x="140" y="175" text-anchor="middle" font-size="10" fill="#a23"> 流形外：指南针乱抖</text>
+    </g>
+
+    <g transform="translate(340, 35)">
+      <rect x="0" y="0" width="280" height="180" rx="6" fill="#eef6fc" stroke="#2b80c4"/>
+      <ellipse cx="140" cy="90" rx="110" ry="60" fill="#2b80c4" opacity="0.18"/>
+      <ellipse cx="140" cy="90" rx="80" ry="40" fill="#2b80c4" opacity="0.25"/>
+      <path d="M 70,100 Q 140,40 220,80" stroke="#1a5a8a" stroke-width="2" fill="none" stroke-dasharray="3,3"/>
+      <text x="140" y="160" text-anchor="middle" font-size="10" fill="#1a5a8a">高 σ：弥漫整间房</text>
+      <text x="140" y="175" text-anchor="middle" font-size="10" fill="#1a5a8a">低 σ：贴近原流形</text>
+    </g>
+  </g>
+</svg>
+
+<h3>3.3 「Fluff up the paper into a cloud」——多级噪声的发明</h3>
+
+<p>讲师 chunk #14-15 把 NCSN 的核心 insight 一句话说穿：</p>
+
+<blockquote class="callout-quote">「By adding noise, you actually fluff up that tiny sheet of paper into a cloud that fills up the room.」<br>"加噪不是损坏数据，而是把'纸面上'的数据吹胖成弥漫整间房的'云'。这就让 score 在整个空间都有定义了。"</blockquote>
+
+<p>但 NCSN 的<strong>真正创新</strong>（相比 Vincent 2010 单噪声 DSM）是：<em>不只加一个级别的噪声</em>，而是<strong>同时使用一组从大到小递降的噪声尺度</strong> $\sigma_1 > \sigma_2 > \dots > \sigma_L$：</p>
+
+<ul>
+  <li><strong>$\sigma_1$（最大）</strong>：把数据吹得最胖，填满整个空间。即使采样起点离原流形很远，仍能感受到 score 的引力。但此时分布很模糊，能给出的引导方向不精确。</li>
+  <li><strong>$\sigma_L$（最小）</strong>：几乎贴近原始数据流形，分布精细，但作用范围窄。只对"已经接近真实数据"的采样点起作用。</li>
+  <li><strong>中间级别</strong>：在两者之间建立一条"光滑的接力路径"——采样器先用大 σ 把粒子拉到流形附近，再用小 σ 精修到流形上。</li>
+</ul>
+
+<p>讲师磁铁类比的升级版（chunk #16-17）：「<em>你不只弹一次磁铁，而是用不同力度弹很多次——有时狠狠一弹把球弹很远，有时轻轻一拨让球只挪一点点</em>」。每次弹动都是一个独立的训练样本，让 student 学会从不同距离往真实磁铁拉。</p>
+
+<p>这就是「<strong>noise schedule</strong>」概念的<em>原始诞生场景</em>——schedule 不是 DDPM 时代发明的工程约定，它是 NCSN 时代被理论<em>逼出来</em>的必需品。DDPM 把它继承下来、改名为 $\{\beta_t\}$ 而已。</p>
+
+<p>讲师 chunk #18 还专门提醒了一个易混淆点："<em>We don't do this in diffusion also. In diffusion there is one constant level of noise which is added in the forward diffusion process.</em>"——这句话是讲师埋的一个反差伏笔。表面看 DDPM 每步只加固定 $\beta_t$ 的噪声，似乎只有"一个噪声级别"，但<strong>累积下来 $\bar\alpha_t$ 已经覆盖了从 1 到 0 的整个谱</strong>，本质和 NCSN 的多级 σ 等价。区别只是：NCSN 显式列出 $\{\sigma_i\}$ 让你看见，DDPM 把这个列表"折叠"进了递推关系里让你看不见。理解到这一层，才算真正把 NCSN ↔ DDPM 的对应关系吃透。</p>
+
+<h3>3.4 多级噪声的 loss：加权 score matching</h3>
+
+<p>讲师 chunk #19 给出 NCSN 的总损失。每个 σ 级别都有自己的 DSM 损失 $\mathcal{L}_i$，再加权求和：</p>
+
+$$\mathcal{L}(\theta) \;=\; \sum_{i=1}^L \lambda(\sigma_i) \cdot \mathbb{E}_{x_0, \epsilon}\left\| s_\theta(\tilde x_i, \sigma_i) \;-\; \left(-\tfrac{\epsilon}{\sigma_i}\right) \right\|^2$$
+
+<p>其中 $\tilde x_i = x_0 + \sigma_i \epsilon$。两个关键工程细节：</p>
+
+<ol>
+  <li><strong>同一个网络，输入加上噪声级别条件</strong>（chunk #19）：「<em>the input to the neural network is not just the data but also the noise level</em>」。所以 $s_\theta$ 的签名是 $s_\theta(x, \sigma)$ ——这就是 "Noise <em>Conditional</em> Score Networks" 名字的由来。在 DDPM 里，它对应 U-Net 的 timestep embedding。</li>
+  <li><strong>权重 $\lambda(\sigma_i)$ 的选择</strong>：Song &amp; Ermon 取 $\lambda(\sigma_i) = \sigma_i^2$，让每个级别的损失梯度都在同一量级上。这个选择直接影响 schedule 的"加权重要性曲线"——是后来 v-prediction、min-SNR 等技术的根源。</li>
+</ol>
+
+<div class="callout callout-note">
+🧠 <strong>NCSN ↔ DDPM 的同构</strong>：<br>
+NCSN 用 $\{\sigma_1, \dots, \sigma_L\}$ 显式指定噪声级别，采样用 annealed Langevin。<br>
+DDPM 用 $\{\beta_1, \dots, \beta_T\}$ 隐式定义 $\bar\alpha_t$，进而隐式定义噪声尺度 $\sigma_t = \sqrt{(1-\bar\alpha_t)/\bar\alpha_t}$ 等价于 NCSN 的 σ。<br>
+两者数学上等价，但<strong>记号习惯不同</strong>——NCSN 更偏 score-based 语言，DDPM 更偏概率链语言。Song et al. 2021 (Score SDE) 把两者统一到同一个 SDE 框架里。本章后面 §九 会回到这个统一视角。
+</div>
+
+<h2>四、Linear Schedule：DDPM 原版的工程默认</h2>
+
+<h3>4.1 公式</h3>
+
+<p>Ho et al. 2020 的原始 DDPM 用了最朴素的 schedule：</p>
+
+$$\beta_t = \beta_{\min} + \frac{t-1}{T-1}\,(\beta_{\max} - \beta_{\min}), \quad \beta_{\min} = 10^{-4},\ \beta_{\max} = 0.02,\ T = 1000$$
+
+<p>由此计算累积：$\bar\alpha_t = \prod_{s=1}^t (1 - \beta_s)$。代入边界：</p>
+
+<ul>
+  <li>$\bar\alpha_1 \approx 1 - 10^{-4} = 0.9999$（几乎没动）；</li>
+  <li>$\bar\alpha_{1000} \approx \prod_{s} (1 - \beta_s)$，数值上 $\approx 4 \times 10^{-5}$，远小于 1。所以 $x_T$ 几乎是纯高斯噪声，KL 边界满足。</li>
+</ul>
+
+<h3>4.2 为什么 $10^{-4}$ 到 $0.02$？</h3>
+
+<p>这两个数字不是从某个公式推出来的，而是 Ho 在 $32\times32$ CIFAR-10 上跑出的<strong>最优经验值</strong>。Ho 论文 Appendix 提到："chosen to be small relative to data scaled to $[-1, 1]$, ensuring that reverse and forward processes have approximately the same functional form while keeping the SNR at $x_T$ as small as possible"。翻译：</p>
+
+<ol>
+  <li>$\beta$ 必须够小——这样 $q(x_{t-1}|x_t)$ 才能近似为高斯（这是 reverse 高斯参数化的合法性前提，见 <a href="/video-to-notebook/textbook/6/">第 6 章</a>）；</li>
+  <li>$\beta_T$ 又不能太小——否则 $\bar\alpha_T$ 不够接近 0，$x_T$ 不是真高斯，先验匹配失败；</li>
+  <li>在 $T=1000$ 下，$[10^{-4}, 0.02]$ 是<strong>能同时满足两个边界的最宽窗口</strong>。</li>
+</ol>
+
+<h3>4.3 Linear 的硬伤：高分辨率下信号塌得太快</h3>
+
+<p>Nichol &amp; Dhariwal 2021 (Improved DDPM) 给出了那张广为流传的图：在 ImageNet $64\times64$ 上，linear schedule 让 $\bar\alpha_t$ 在 $t \approx 0.5T$ 处就跌到 $0.1$ 以下，再往后几乎是纯噪声。后果是：</p>
+
+<ul>
+  <li><strong>最后一半训练步的损失对模型学习几乎无贡献</strong>——预测什么都差不多接近 $\epsilon$，因为输入本身就是 $\epsilon$。</li>
+  <li><strong>但反过来，前期太"温柔"</strong>——$t=1, \dots, 100$ 时 $\bar\alpha_t$ 还 $> 0.99$，去噪任务几乎无意义。</li>
+</ul>
+
+<p>结论：linear schedule 让 SNR 曲线在中段急转直下，<strong>训练信号集中在中段一小窗</strong>。模型容量没被均匀利用。</p>
+
+<div class="callout callout-warning">
+⚠️ <strong>分辨率诅咒</strong>：Nichol &amp; Dhariwal 实证发现，<em>图像越大，linear schedule 的问题越严重</em>。直觉解释：高分辨率图像有大量空间冗余（相邻像素强相关），少量噪声就能破坏掉感知信号；所以 $\bar\alpha_t$ 必须降得<strong>更慢</strong>才能保留有用的训练目标。Linear schedule 是给 $32\times32$ 调的，挪到 $256\times256$ 上等于是用步枪打蚂蚁。
+</div>
+
+<h2>五、Cosine Schedule：Improved DDPM 的修复</h2>
+
+<h3>5.1 公式与设计哲学</h3>
+
+<p>Nichol &amp; Dhariwal 2021 没有直接修改 $\beta_t$，而是先<strong>设计想要的 $\bar\alpha_t$ 曲线</strong>，再反推 $\beta_t$。他们写下：</p>
+
+$$\bar\alpha_t = \frac{f(t)}{f(0)}, \quad f(t) = \cos^2\!\left(\frac{t/T + s}{1 + s} \cdot \frac{\pi}{2}\right), \quad s = 0.008$$
+
+<p>从这个 $\bar\alpha_t$ 反推 $\beta_t$：</p>
+
+$$\beta_t = 1 - \frac{\bar\alpha_t}{\bar\alpha_{t-1}}, \quad \beta_t \text{ clamped to } [0, 0.999]$$
+
+<p>这个曲线的关键特征：</p>
+
+<ul>
+  <li><strong>$t$ 接近 0</strong>：$\cos^2$ 在 0 附近的导数也是 0 → 衰减极慢 → $\bar\alpha_t$ 接近 1 持续较长时间；</li>
+  <li><strong>$t$ 在中段</strong>：$\cos^2$ 进入陡降区 → $\bar\alpha_t$ 快速衰减；</li>
+  <li><strong>$t$ 接近 $T$</strong>：靠近 $\pi/2$，$\cos^2$ 的导数又趋 0 → 衰减再次变缓，让最后一段 $\bar\alpha_t$ 不至于过早塌到 0。</li>
+</ul>
+
+<h3>5.2 为什么是 cosine 不是别的曲线？</h3>
+
+<p>这是 Improved DDPM 论文里最容易被略过的细节。作者写得很坦白：「<em>We use a function that produces a smooth, slowly-decreasing $\bar\alpha_t$ curve</em>」——选 cosine 是因为它<strong>恰好天然满足两个端点导数为 0 的条件</strong>，并且只有一个超参 $s$ 控制起点平移。没有更深的数学必然性。</p>
+
+<h3>5.3 $s = 0.008$ 的来历</h3>
+
+<p>$s$ 是一个小偏移量，确保 $\beta_1$ 不会太小（否则训练前期梯度几乎为零）。具体地：</p>
+
+$$\sqrt{\bar\alpha_0} = \cos\!\left(\frac{s}{1+s} \cdot \frac{\pi}{2}\right)$$
+
+<p>$s = 0.008$ 让 $\sqrt{\bar\alpha_0} \approx \cos(0.00628) \approx 0.99998$。换句话说，$s$ 让 $\bar\alpha_0$ 略小于 1，给训练前期留出一点点起步噪声。论文实验：$s \in [0.005, 0.012]$ 之间几乎无差，但 $s=0$ 会导致数值不稳。这个偏移量的作用还有一个隐含理由：<strong>避免 $t=0$ 处 $\beta_1 \to 0$</strong>。如果 $\beta_1$ 真的是 0，意味着第一步前向过程<em>什么都没做</em>，反向过程也对应"不去噪"——但训练时模型仍要在 $t=1$ 处计算损失，结果是预测目标几乎随机，梯度方差爆炸。$s$ 的存在就是为了在 $t=1$ 处保留一个微小但非零的训练信号。</p>
+
+<h3>5.4 实证：FID 从 ~8 降到 ~5</h3>
+
+<p>在 ImageNet $64\times64$，固定其他所有超参（U-Net 架构、optimizer、训练步数）只换 schedule：linear → cosine，FID 从 19.2 降到 17.0（log-likelihood improvement 更显著）。在 $256\times256$ 上差距进一步拉开。<strong>这是为数不多"换一行代码免费提升一档指标"的工程优化</strong>。</p>
+
+<svg viewBox="0 0 640 280" role="img" aria-label="linear vs cosine vs sigmoid α̅ 曲线对比">
+  <g font-family="ui-sans-serif" font-size="11" fill="var(--text)">
+    <line x1="60" y1="240" x2="600" y2="240" stroke="var(--text-muted)"/>
+    <line x1="60" y1="40" x2="60" y2="240" stroke="var(--text-muted)"/>
+    <text x="330" y="265" text-anchor="middle">t / T</text>
+    <text x="35" y="140" text-anchor="middle" font-size="11" fill="var(--text-muted)" transform="rotate(-90 35 140)">$\bar\alpha_t$</text>
+    <text x="55" y="44" text-anchor="end" font-size="10">1.0</text>
+    <text x="55" y="244" text-anchor="end" font-size="10">0.0</text>
+    <text x="60" y="255" text-anchor="middle" font-size="10">0</text>
+    <text x="600" y="255" text-anchor="middle" font-size="10">T</text>
+
+    <!-- gridlines -->
+    <line x1="60" y1="90" x2="600" y2="90" stroke="var(--border)" stroke-dasharray="2,4"/>
+    <line x1="60" y1="140" x2="600" y2="140" stroke="var(--border)" stroke-dasharray="2,4"/>
+    <line x1="60" y1="190" x2="600" y2="190" stroke="var(--border)" stroke-dasharray="2,4"/>
+
+    <!-- linear: rapid drop mid -->
+    <path d="M 60,40 Q 200,55 330,130 Q 460,225 600,240" stroke="#2b80c4" stroke-width="2.4" fill="none"/>
+    <text x="270" y="100" fill="#2b80c4" font-size="11" font-weight="600">linear (DDPM)</text>
+
+    <!-- cosine: slow at both ends -->
+    <path d="M 60,42 Q 130,50 200,80 Q 330,160 460,225 Q 530,238 600,240" stroke="var(--module-accent)" stroke-width="2.4" fill="none"/>
+    <text x="430" y="180" fill="var(--module-accent)" font-size="11" font-weight="600">cosine (Improved DDPM)</text>
+
+    <!-- sigmoid: steeper transition -->
+    <path d="M 60,45 Q 150,60 230,90 Q 330,160 440,220 Q 520,237 600,240" stroke="#0b5" stroke-width="2.2" fill="none" stroke-dasharray="5,3"/>
+    <text x="180" y="170" fill="#0b5" font-size="11" font-weight="600">sigmoid</text>
+
+    <text x="170" y="22" font-size="11" fill="var(--text)" font-weight="600">三种 schedule 下 $\bar\alpha_t$ 的衰减形状</text>
+  </g>
+</svg>
+
+<h2>六、Sigmoid Schedule 与 VP / VE 双视角</h2>
+
+<h3>6.1 Sigmoid schedule</h3>
+
+<p>Sigmoid schedule（Jabri et al. 2022 等）用 sigmoid 函数定义 log-SNR 的下降轨迹：</p>
+
+$$\log \mathrm{SNR}(t) = -\,\gamma\!\left(\frac{t}{T}\right), \quad \gamma(u) = \log\!\left(\frac{e^{a}}{1 + e^{-b(u - 0.5)}}\right) + c$$
+
+<p>核心思路：直接<strong>对 log-SNR 而不是 $\bar\alpha_t$ 做参数化</strong>。这一视角的好处是——log-SNR 才是<em>知觉上线性的量</em>。人类视觉对 SNR 的对数感知大致是均匀的：从 SNR=100 到 10 和从 10 到 1 是"同样的退化感"。所以让 log-SNR 沿 $t$ 均匀（或 sigmoid 型）变化，等价于让"知觉退化"匀速进行。</p>
+
+<p>Cosine schedule 的 log-SNR 大致是线性的（这是它好用的真正原因）；sigmoid schedule 把过渡区压得更陡，前后期 SNR 更稳定。</p>
+
+<h3>6.2 VP vs VE：Score SDE 的两种视角</h3>
+
+<p>Song et al. 2021 (Score SDE) 把所有 schedule 统一进 SDE 框架：</p>
+
+$$dx = f(t)\,x\,dt + g(t)\,dW$$
+
+<p>根据 $f, g$ 的不同选择，分两大类：</p>
+
+<table>
+  <thead>
+    <tr><th>类型</th><th>SDE 形式</th><th>方差行为</th><th>$x_T$ 分布</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>VP-SDE</strong>（Variance Preserving）</td>
+      <td>$dx = -\tfrac{1}{2}\beta(t)\,x\,dt + \sqrt{\beta(t)}\,dW$</td>
+      <td>总方差 $\mathrm{Var}(x_t) \approx 1$，因为信号系数 $\sqrt{\bar\alpha_t}$ 和噪声系数 $\sqrt{1-\bar\alpha_t}$ 配合让方差守恒</td>
+      <td>$\approx \mathcal{N}(0, \mathbf{I})$</td>
+    </tr>
+    <tr>
+      <td><strong>VE-SDE</strong>（Variance Exploding）</td>
+      <td>$dx = \sqrt{\tfrac{d\sigma^2(t)}{dt}}\,dW$（没有 drift）</td>
+      <td>$\mathrm{Var}(x_t) = \sigma^2(t) \to \infty$（爆炸）</td>
+      <td>$\approx \mathcal{N}(0, \sigma_{\max}^2 \mathbf{I})$，巨大方差</td>
+    </tr>
+  </tbody>
+</table>
+
+<p><strong>谁是谁</strong>：DDPM 是 VP（保持方差为 1）；NCSN 是 VE（让方差炸开）。EDM (Karras 2022) 用 VE 框架并彻底纯 $\sigma$ 参数化。Stable Diffusion / SDXL 系列底层是 VP。</p>
+
+<h3>6.3 VP / VE 怎么选？</h3>
+
+<ul>
+  <li><strong>VP 工程更友好</strong>：$x_t$ 总在单位球壳附近，归一化稳定，U-Net 输入分布漂移小。</li>
+  <li><strong>VE 理论更干净</strong>：直接用 $\sigma$ 作为唯一参数，没有"信号系数 vs 噪声系数"的纠缠。Karras EDM 论文证明 VE + 精心调的预条件几乎打败所有 VP 变体。</li>
+  <li>实践中两者数学等价（都能表达成同一族 SDE），选哪个更多是"代码生态"问题。</li>
+</ul>
+
+<div class="callout callout-tip">
+💡 <strong>知识点桥</strong>：第 9 章会专门展开 Score SDE 的统一视角；第 18 章会回到 Latent Diffusion，看 schedule 在 latent space 上的微调。这一章只需记住：<em>schedule 不是 DDPM 的专属概念，它是任何加噪过程都必须的设计选择</em>。
+</div>
+
+<h2>七、SNR 视角：理解 schedule 的「真正坐标」</h2>
+
+<h3>7.1 定义</h3>
+
+<p>信噪比的定义来自经典通信理论。在 diffusion 的语境下：</p>
+
+$$\mathrm{SNR}(t) \;=\; \frac{\text{信号能量}}{\text{噪声能量}} \;=\; \frac{(\sqrt{\bar\alpha_t})^2}{(\sqrt{1-\bar\alpha_t})^2} \;=\; \frac{\bar\alpha_t}{1 - \bar\alpha_t}$$
+
+<p>取对数得到 log-SNR：</p>
+
+$$\log \mathrm{SNR}(t) = \log \bar\alpha_t - \log(1 - \bar\alpha_t)$$
+
+<p>边界：</p>
+<ul>
+  <li>$t=0$：$\bar\alpha_0 = 1$ → $\mathrm{SNR} = +\infty$，$\log \mathrm{SNR} = +\infty$；</li>
+  <li>$t=T$：$\bar\alpha_T \approx 0$ → $\mathrm{SNR} \approx 0$，$\log \mathrm{SNR} \to -\infty$。</li>
+</ul>
+
+<h3>7.2 为什么 log-SNR 才是「正确坐标」</h3>
+
+<p>三个层次的理由：</p>
+
+<ol>
+  <li><strong>知觉线性</strong>：人眼对 SNR 的对数感知大致均匀，所以"图像退化速度"沿 log-SNR 看是匀速的；</li>
+  <li><strong>损失加权天然</strong>：v-prediction、min-SNR weighting、ε-prediction 等不同参数化的 loss，<em>都可以写成 log-SNR 的函数</em>——这就把所有方案放进同一个尺子上比较；</li>
+  <li><strong>采样器一致性</strong>：DDIM、DPM-Solver、EDM 的核心都是"沿 log-SNR 走"，schedule 形状只影响在 log-SNR 上的离散化密度，不影响数学骨架。</li>
+</ol>
+
+<svg viewBox="0 0 640 240" role="img" aria-label="log-SNR 随 t 的下降">
+  <g font-family="ui-sans-serif" font-size="11" fill="var(--text)">
+    <line x1="60" y1="200" x2="600" y2="200" stroke="var(--text-muted)"/>
+    <line x1="60" y1="30" x2="60" y2="200" stroke="var(--text-muted)"/>
+    <text x="330" y="225" text-anchor="middle">t / T</text>
+    <text x="35" y="120" text-anchor="middle" font-size="11" fill="var(--text-muted)" transform="rotate(-90 35 120)">log SNR(t)</text>
+    <text x="55" y="35" text-anchor="end" font-size="10">+∞</text>
+    <text x="55" y="205" text-anchor="end" font-size="10">−∞</text>
+
+    <!-- linear: steep middle drop in log-SNR -->
+    <path d="M 60,35 Q 180,60 330,120 Q 460,190 600,200" stroke="#2b80c4" stroke-width="2.4" fill="none"/>
+    <text x="160" y="80" fill="#2b80c4" font-size="11">linear: 中段陡降</text>
+
+    <!-- cosine: roughly linear in log-SNR -->
+    <path d="M 60,40 L 600,195" stroke="var(--module-accent)" stroke-width="2.4" fill="none"/>
+    <text x="370" y="115" fill="var(--module-accent)" font-size="11" font-weight="600">cosine: log-SNR ≈ 线性</text>
+
+    <!-- EDM-style: full coverage -->
+    <path d="M 60,38 Q 200,90 400,160 Q 500,190 600,197" stroke="#0b5" stroke-width="2.2" fill="none" stroke-dasharray="5,3"/>
+    <text x="450" y="155" fill="#0b5" font-size="10">EDM-style</text>
+  </g>
+</svg>
+
+<h3>7.3 实证：从 SNR 角度看 cosine 为什么更好</h3>
+
+<p>把 linear 和 cosine 都画在 log-SNR 坐标轴下：</p>
+
+<ul>
+  <li><strong>linear</strong>：log-SNR 在中段急剧下降（凹折），首尾极平。意味着模型在中段 $t$ 必须学习<strong>剧烈跨越多个量级</strong>的信号水平；</li>
+  <li><strong>cosine</strong>：log-SNR 接近<em>线性下降</em>（讲师在 Improved DDPM 论文中亲口说"more uniform information schedule"）。每个 $t$ 跨越的 log-SNR 量是均匀的；</li>
+  <li>这也解释了为什么后续 SDXL/SD3 索性<strong>直接用 log-SNR 做 schedule 参数</strong>，跳过 $\beta_t$。</li>
+</ul>
+
+<h2>八、$T$ 与 $\beta$ 的耦合：调参陷阱</h2>
+
+<p>讲师在 L7 没明说但反复隐喻的工程要点：<strong>$T$ 和 $\{\beta_t\}$ 是耦合的，不能独立调</strong>。</p>
+
+<h3>8.1 直觉</h3>
+
+<p>$\bar\alpha_T = \prod_{t=1}^T (1 - \beta_t)$。要满足 $\bar\alpha_T \to 0$ 的边界条件：</p>
+
+<ul>
+  <li>若 $T = 1000$，$\beta_{\max} = 0.02$ 够用；</li>
+  <li>若 $T = 4000$（提升采样质量），保持原 $\beta$ 不变 → $\bar\alpha_{4000}$ 会塌得太厉害（几乎 $10^{-20}$ 级）；</li>
+  <li>若 $T = 100$（加速），保持原 $\beta$ → $\bar\alpha_{100} \approx 0.5$，根本没到纯噪声。</li>
+</ul>
+
+<p>正确的做法：<strong>固定希望的 $\bar\alpha_t$ 曲线形状（或 log-SNR 起讫点），让 $\beta_t$ 跟着 $T$ 走</strong>。这就是为什么 cosine schedule 用 $\bar\alpha_t$ 参数化——它对 $T$ 的变化是<em>自适应的</em>。</p>
+
+<div class="callout callout-warning">
+🪤 <strong>常见调参陷阱</strong>：<br>
+• 把别人代码里的 $\beta_{\min}, \beta_{\max}$ 抄过来，但自己改了 $T$ → 信号尺度全错；<br>
+• 在新数据集上调小 $T$ 想加速 → 忘记同步调 $\beta$ → $x_T$ 不再是纯噪声 → 采样从错误的先验起步；<br>
+• <em>调试 schedule 的最快办法</em>：把 log-SNR 曲线画出来，确认它的起点 $\approx +13$（$10^{-4}$ 级 SNR 倒数）、终点 $\approx -7$（$10^{-3}$ 级残余信号）。两端到位就 OK，中段形状再细调。
+</div>
+
+<h3>8.2 给定 $T$ 反推 $\beta$ 的工程实践</h3>
+
+<p>设计师常用的"反向工程"流程：</p>
+
+<ol>
+  <li>先定 $T$（决定采样步数和训练成本）；</li>
+  <li>设计想要的 $\bar\alpha_t$ 形状（linear / cosine / 自定义）；</li>
+  <li>反推 $\beta_t = 1 - \tfrac{\bar\alpha_t}{\bar\alpha_{t-1}}$；</li>
+  <li>把 $\beta_t$ 截断到合法范围 $(0, 0.999)$；</li>
+  <li>校验 log-SNR 起讫点。</li>
+</ol>
+
+<pre><code># Improved DDPM cosine schedule (PyTorch 实现)
+import torch
+import math
+
+def cosine_alpha_bar(T, s=0.008):
+    steps = torch.arange(T + 1, dtype=torch.float64)
+    f = torch.cos((steps / T + s) / (1 + s) * math.pi * 0.5).pow(2)
+    return f / f[0]  # 归一化让 alpha_bar[0] = 1
+
+def cosine_betas(T, s=0.008, beta_max=0.999):
+    ab = cosine_alpha_bar(T, s)
+    betas = 1 - ab[1:] / ab[:-1]
+    return betas.clamp(max=beta_max)
+
+betas = cosine_betas(T=1000)
+alphas = 1.0 - betas
+alpha_bars = torch.cumprod(alphas, dim=0)
+log_snr = torch.log(alpha_bars) - torch.log1p(-alpha_bars)
+print(f"log-SNR start={log_snr[0]:.2f}, end={log_snr[-1]:.2f}")
+# 期望输出: log-SNR start≈+13, end≈-7</code></pre>
+
+<h2>九、语言扩散的 schedule：同一概念，不同载体</h2>
+
+<p>Vizuara L12（Diffusion LLM）从 chunk #1 起就把这件事讲透：扩散模型的三件套是<strong>「noising / 预测 noise / denoising」</strong>，而 <em>noising 必须有 schedule</em>——但在语言里它不是 Gaussian variance，而是<strong>「每步 mask 几个 token」</strong>。</p>
+
+<h3>9.1 离散 schedule 的本质</h3>
+
+<p>语言扩散（LLaDA、MDLM）的前向：在 $t$ 时刻，把序列里 $t/T$ 比例的 token 替换成 [MASK]。即：</p>
+
+<ul>
+  <li>$t = 0$：原文，0 个 mask；</li>
+  <li>$t = T/2$：约一半 token 被 mask；</li>
+  <li>$t = T$：全 mask（完全 corrupted）。</li>
+</ul>
+
+<p>这是<strong>线性 masking schedule</strong>。也可以借鉴 cosine 的思路用<em>余弦 masking</em>：前期 mask 慢、中段快、后期慢。直觉一致——让每个 step 的"信息消除量"分配更均匀。</p>
+
+<h3>9.2 离散和连续在数学上的桥</h3>
+
+<p>表面上"Gaussian variance"和"mask 比例"是两种东西，但讲师 L12 暗示了它们的统一：<strong>两者都是把"信号 → 纯噪声/纯无信息"分成 $T$ 步走的方案</strong>。在连续 SDE 框架下两者都对应一个吸收过程：</p>
+
+<ul>
+  <li>连续：$x_t \sim \mathcal{N}(\sqrt{\bar\alpha_t}\,x_0, (1-\bar\alpha_t)\mathbf{I})$；最终吸收态是 $\mathcal{N}(0, \mathbf{I})$；</li>
+  <li>离散：$x_t$ 中每个 token 以 $t/T$ 概率被替换成 [MASK]；最终吸收态是 "全 [MASK]"。</li>
+</ul>
+
+<p>两者都是 forward 马尔可夫链 + 一个"信息熵的吸收终态"。Schedule 决定的是<strong>沿这条路径前进的速度形状</strong>。</p>
+
+<p>这个统一视角还揭示了一件更深的事：<strong>schedule 的设计哲学是模态无关的</strong>。无论是像素、token、还是离散结构（蛋白质序列、分子图），只要能定义"信号端"和"无信息端"两个吸收态，schedule 就给出了从一端到另一端的中间路径设计权。这就是为什么 diffusion 范式能从图像迅速泛化到语言、视频、3D、生物分子——每个领域都要解决"如何定义 schedule"的问题，但<em>核心数学骨架完全一致</em>。读 DiT、Sora、AlphaFold3 等论文时，找它们的 schedule 设计章节，永远是核心信息所在。</p>
+
+<h2>十、Schedule 设计的现代趋势：从 $\beta$ 到纯 $\sigma$</h2>
+
+<h3>10.1 EDM 的革命</h3>
+
+<p>Karras et al. 2022 (EDM) 索性<strong>抛弃 $\beta_t$、$T$ 等所有 DDPM 记号</strong>，直接用 $\sigma$ 作为"时间"：</p>
+
+<ul>
+  <li>训练时 $\sigma$ 从一个对数正态分布采样：$\log \sigma \sim \mathcal{N}(P_\text{mean}, P_\text{std}^2)$；</li>
+  <li>训练样本 $\tilde x = x_0 + \sigma \epsilon$，没有 $\bar\alpha_t$ 这种间接量；</li>
+  <li>采样时按预定 $\sigma$ schedule（如 Karras 提出的 $\sigma_i = (\sigma_{\max}^{1/\rho} + \tfrac{i}{N-1}(\sigma_{\min}^{1/\rho} - \sigma_{\max}^{1/\rho}))^\rho$，$\rho=7$）走。</li>
+</ul>
+
+<p>这是<strong>NCSN 思想的现代回归</strong>——Song &amp; Ermon 当年用 $\sigma$ 直接做参数，DDPM 时代为了概率链记号方便绕成 $\beta$，EDM 时代发现还是 $\sigma$ 更干净。<em>历史是个圈</em>。</p>
+
+<h3>10.2 流匹配（Flow Matching）：schedule 退化为路径</h3>
+
+<p>2023 年起 Flow Matching / Rectified Flow 进一步把 "schedule" 抽象成 "interpolation path"：</p>
+
+$$x_t = (1 - t) x_0 + t \epsilon, \quad t \in [0, 1]$$
+
+<p>这是<strong>最简单的线性插值路径</strong>。Stable Diffusion 3 用的就是这个。Schedule 在这里被简化到了极致——干脆只有一条线性路径，连 cosine 都不需要。原因是<strong>训练目标变了</strong>（预测速度场而不是噪声），新的目标对 schedule 形状不敏感。</p>
+
+<div class="my-addition">
+🟡 <strong>教材外补充</strong>：<br>
+<strong>为什么 Flow Matching 能"摆脱"复杂 schedule？</strong> 关键在于它预测的是 <em>velocity field</em> $v(x, t) = \mathbb{E}[\epsilon - x_0 \mid x_t]$，这个量对 $t$ 的依赖比 $\epsilon$-prediction 平滑得多。Cosine schedule 之所以重要，是因为 $\epsilon$-prediction 的 loss 权重 $\lambda(\sigma)$ 在不同 SNR 上差异巨大——必须靠 schedule 形状来平衡。Flow Matching 用<strong>损失函数本身的几何性质</strong>把这个问题消解了。<br><br>
+所以读现代论文（SD3 / EDM2 / Movie Gen）会发现 schedule 部分越来越短——不是因为不重要，而是因为<strong>问题被换种方式解决了</strong>。
+</div>
+
+<h2>十一、训练 loss 加权：schedule 的隐藏维度</h2>
+
+<p>讲师 L7 chunk #19 引出了一个常被忽视的细节：$\mathcal{L}(\theta) = \sum_i \lambda(\sigma_i) \mathcal{L}_i$ 里的<strong>权重 $\lambda$ 也是 schedule 的一部分</strong>。</p>
+
+<h3>11.1 各种 prediction 参数化对应不同 $\lambda$</h3>
+
+<table>
+  <thead>
+    <tr><th>参数化</th><th>预测目标</th><th>等效 loss 权重 $\lambda(t)$（相对 $\epsilon$-pred）</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>$\epsilon$-prediction（DDPM）</td><td>$\epsilon$</td><td>$1$</td></tr>
+    <tr><td>$x_0$-prediction</td><td>$x_0$</td><td>$\mathrm{SNR}(t)$</td></tr>
+    <tr><td>v-prediction（Salimans &amp; Ho 2022）</td><td>$v = \sqrt{\bar\alpha_t}\epsilon - \sqrt{1-\bar\alpha_t}x_0$</td><td>$\frac{1}{1 + \mathrm{SNR}(t)}$</td></tr>
+    <tr><td>min-SNR（Hang et al. 2023）</td><td>$\epsilon$</td><td>$\min(\mathrm{SNR}(t), \gamma)$，$\gamma \in [1, 5]$</td></tr>
+  </tbody>
+</table>
+
+<h3>11.2 直觉：哪些 $t$ 应该被重视？</h3>
+
+<p>朴素 $\epsilon$-prediction 的问题：</p>
+
+<ul>
+  <li>大 SNR（小 $t$，几乎干净图像）：$\epsilon$ 几乎是纯随机的，预测它意义不大；</li>
+  <li>小 SNR（大 $t$，几乎纯噪声）：$\epsilon$ 等于输入本身，也意义不大；</li>
+  <li>中段 SNR：才是真正需要学习的"去噪能力"所在。</li>
+</ul>
+
+<p>Min-SNR 干脆把大 SNR 区的权重 clip 掉（不要让"简单任务"主导 loss），让模型专注中段。这是 SDXL 后期训练用的核心技巧。<strong>它本质上是「在 schedule 上叠加一个 mask」</strong>——schedule 决定了 $t$ 怎么映射到 SNR，权重决定了哪些 SNR 区被强调。</p>
+
+<p>这一节最重要的认识是：<strong>「schedule」和「loss 权重」是同一件事的两面</strong>。理论上，给定任何一条 schedule + 任何一组 loss 权重，都可以等价地变换到"另一条 schedule + 均匀权重"，反之亦然。换句话说，<em>schedule 的自由度和 loss 权重的自由度是耦合的、可互相吸收的</em>。EDM 论文的核心论点就是："既然 schedule 和权重等价，我们就把它们合并成一个 $\sigma$ 参数，让一切显式可见"——这就是从 $\beta_t$ 走向 $\sigma$ 的理论基础。</p>
+
+<h2>十二、本章的几个高层认识</h2>
+
+<p>把以上散点收束成几个跨章的"高层认知"：</p>
+
+<h3>12.1 Schedule 是「同时」满足多个约束的妥协</h3>
+
+<p>设计一条 schedule 要同时满足：</p>
+
+<ol>
+  <li>边界：$\bar\alpha_0 = 1$，$\bar\alpha_T \approx 0$；</li>
+  <li>$\beta_t$ 足够小，让反向高斯参数化合法；</li>
+  <li>log-SNR 跨越足够大的范围（约 $[+13, -7]$）；</li>
+  <li>每个 $t$ 都有有意义的训练信号（不要某段塌平）；</li>
+  <li>跟所选 prediction target 的 loss 权重匹配。</li>
+</ol>
+
+<p>没有"最优 schedule"——只有"对当前任务（分辨率、模态、参数化、采样步数）合适的 schedule"。</p>
+
+<h3>12.2 历史脉络</h3>
+
+<svg viewBox="0 0 640 200" role="img" aria-label="schedule 历史脉络">
+  <g font-family="ui-sans-serif" font-size="11" fill="var(--text)">
+    <line x1="40" y1="120" x2="600" y2="120" stroke="var(--text-muted)" stroke-width="2"/>
+
+    <g transform="translate(70, 120)">
+      <circle cx="0" cy="0" r="6" fill="#b8860b"/>
+      <text x="0" y="-15" text-anchor="middle" font-size="11" font-weight="600">2019</text>
+      <text x="0" y="25" text-anchor="middle" font-size="10">NCSN</text>
+      <text x="0" y="40" text-anchor="middle" font-size="9">多级 σ</text>
+    </g>
+
+    <g transform="translate(190, 120)">
+      <circle cx="0" cy="0" r="6" fill="#2b80c4"/>
+      <text x="0" y="-15" text-anchor="middle" font-size="11" font-weight="600">2020</text>
+      <text x="0" y="25" text-anchor="middle" font-size="10">DDPM</text>
+      <text x="0" y="40" text-anchor="middle" font-size="9">linear β</text>
+    </g>
+
+    <g transform="translate(300, 120)">
+      <circle cx="0" cy="0" r="6" fill="var(--module-accent)"/>
+      <text x="0" y="-15" text-anchor="middle" font-size="11" font-weight="600">2021</text>
+      <text x="0" y="25" text-anchor="middle" font-size="10">Improved DDPM</text>
+      <text x="0" y="40" text-anchor="middle" font-size="9">cosine</text>
+    </g>
+
+    <g transform="translate(410, 120)">
+      <circle cx="0" cy="0" r="6" fill="#6f4dd0"/>
+      <text x="0" y="-15" text-anchor="middle" font-size="11" font-weight="600">2021</text>
+      <text x="0" y="25" text-anchor="middle" font-size="10">Score SDE</text>
+      <text x="0" y="40" text-anchor="middle" font-size="9">VP / VE 统一</text>
+    </g>
+
+    <g transform="translate(510, 120)">
+      <circle cx="0" cy="0" r="6" fill="#0b5"/>
+      <text x="0" y="-15" text-anchor="middle" font-size="11" font-weight="600">2022</text>
+      <text x="0" y="25" text-anchor="middle" font-size="10">EDM</text>
+      <text x="0" y="40" text-anchor="middle" font-size="9">纯 σ 参数化</text>
+    </g>
+
+    <g transform="translate(580, 120)">
+      <circle cx="0" cy="0" r="6" fill="#d4a017"/>
+      <text x="0" y="-15" text-anchor="middle" font-size="11" font-weight="600">2023+</text>
+      <text x="0" y="25" text-anchor="middle" font-size="10">Flow Matching</text>
+      <text x="0" y="40" text-anchor="middle" font-size="9">线性路径</text>
+    </g>
+
+    <text x="320" y="180" text-anchor="middle" font-size="10" fill="var(--text-muted)">从「显式 schedule」走向「schedule 隐含在损失/路径中」</text>
+  </g>
+</svg>
+
+<h3>12.3 调 schedule 的最快诊断</h3>
+
+<ol>
+  <li>画三张图：$\bar\alpha_t$、$\beta_t$、log-SNR；</li>
+  <li>看 log-SNR 是否近似线性（cosine 标准）；</li>
+  <li>看 $\bar\alpha_T$ 是否 $< 10^{-4}$（边界达标）；</li>
+  <li>看 $\beta_1$ 是否 $> 10^{-5}$（前期有非零信号）。</li>
+</ol>
+
+<p>这四个检查跑完，schedule 就是合法的。剩下的差异，要靠下游训练实验来判定。</p>
+
+<h2>十三、Takeaways（本章核心结论）</h2>
+
+<figure class="clip-frame">
+  <iframe src="https://www.youtube.com/embed/ej7LfQyKXec?start=583" title="Vizuara L7: 流形假设与多级噪声" allowfullscreen></iframe>
+  <figcaption>📺 Vizuara《Principles of Diffusion Models》Lecture 7（9:43 处）—— 「fluff up the paper into a cloud」</figcaption>
+</figure>
+
+<figure class="clip-frame">
+  <iframe src="https://www.youtube.com/embed/ej7LfQyKXec?start=1104" title="Vizuara L7: 多级 σ 的损失加权" allowfullscreen></iframe>
+  <figcaption>📺 Vizuara《Principles of Diffusion Models》Lecture 7（18:24 处）—— $\lambda_i$ 加权 + noise conditioning</figcaption>
+</figure>
+
+<figure class="clip-frame">
+  <iframe src="https://www.youtube.com/embed/dov4OzCcjU0?start=0" title="Vizuara L12: 语言扩散 schedule" allowfullscreen></iframe>
+  <figcaption>📺 Vizuara《Diffusion LM》Lecture 12（开场）—— 语言扩散的 noising schedule</figcaption>
+</figure>
+
+<div class="takeaways" style="background:#0b5; color:#fff; padding:1.4rem; border-radius:8px; margin-top:2rem;">
+  <h3 style="margin-top:0; color:#fff;">本章必须刻在脑子里的</h3>
+  <ol>
+    <li><strong>Schedule 不是工程黑魔法，是流形塌缩问题的解药</strong>（讲师磁铁 + 纸张类比）。NCSN 用多级 $\sigma$ 把"流形外没有梯度"的问题解决，DDPM 把它继承下来叫 $\{\beta_t\}$。</li>
+    <li><strong>三大 schedule 一句话</strong>：Linear（DDPM 原版，简单但高分辨率塌得太快）；Cosine（Improved DDPM，让 log-SNR 近似线性，免费提升 FID）；Sigmoid/EDM（现代主流，直接用 $\sigma$ 或 log-SNR 参数化）。</li>
+    <li><strong>边界条件是硬约束</strong>：$\bar\alpha_0 = 1$、$\bar\alpha_T \approx 0$。中段曲线形状是自由度。</li>
+    <li><strong>SNR(t) = $\bar\alpha_t / (1 - \bar\alpha_t)$ 是 schedule 的「真坐标」</strong>。log-SNR 才是知觉线性的量。Cosine 之所以好，是因为它让 log-SNR 接近线性下降。</li>
+    <li><strong>$T$ 和 $\beta$ 耦合</strong>——改一个必须改另一个。最稳妥的工程做法：先定 $\bar\alpha_t$ 形状，再反推 $\beta_t$。</li>
+    <li><strong>VP vs VE</strong>：DDPM = VP（方差守恒），NCSN = VE（方差爆炸）。Score SDE 把两者统一进同一 SDE 框架。</li>
+    <li><strong>语言扩散里 schedule = 每步 mask 几个 token</strong>。同一概念、不同载体。</li>
+    <li><strong>训练 loss 权重 $\lambda(t)$ 是 schedule 的隐藏维度</strong>。Min-SNR、v-prediction 等技巧本质上是在 SNR 轴上重新分配训练注意力。</li>
+    <li><strong>现代趋势</strong>：从显式 $\beta$ schedule，走向纯 $\sigma$ 参数化（EDM），再走向线性插值路径（Flow Matching）。Schedule 的复杂度被损失函数本身的几何性质吸收。</li>
+  </ol>
+</div>
+
+</article>

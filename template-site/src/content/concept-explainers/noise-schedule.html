@@ -1,0 +1,233 @@
+<style>
+/* prefix: ns- */
+.ns-quickref{background:var(--surface-soft);border-left:3px solid var(--module-accent);padding:0.8rem 1rem;border-radius:0 4px 4px 0;margin:1rem 0;font-size:0.92rem;}
+.ns-quickref div{margin:0.3rem 0;}
+.ns-svg{display:block;margin:1.2rem auto;max-width:100%;height:auto;}
+.ns-pitfalls ol{padding-left:1.4rem;} .ns-pitfalls li{margin:0.5rem 0;}
+.ns-source{font-style:italic;color:var(--text-muted);border-left:2px solid var(--border);padding:0.2rem 0.8rem;margin:0.5rem 0;font-size:0.9rem;}
+.ns-callout{background:var(--module-accent-soft);border-left:3px solid var(--module-accent);padding:0.6rem 0.9rem;margin:0.8rem 0;border-radius:0 4px 4px 0;font-size:0.93rem;}
+.my-addition{display:inline-block;background:var(--accent-soft);color:var(--text);padding:0.15rem 0.5rem;border-radius:3px;font-size:0.85rem;font-weight:600;margin-right:0.4rem;}
+.ns-controls{display:flex;gap:0.4rem;flex-wrap:wrap;margin:0.8rem 0;}
+.ns-controls button{background:var(--surface-soft);border:1px solid var(--border);color:var(--text);padding:0.3rem 0.7rem;border-radius:4px;cursor:pointer;font-size:0.88rem;}
+.ns-controls button.active{background:var(--module-accent);color:var(--surface);border-color:var(--module-accent);}
+.ns-info{font-family:ui-monospace,monospace;color:var(--text-muted);font-size:0.88rem;padding:0.4rem 0;}
+.ns-info > div{padding:0.2rem 0;}
+.ns-table{width:100%;border-collapse:collapse;font-size:0.88rem;margin:0.8rem 0;}
+.ns-table th,.ns-table td{border:1px solid var(--border);padding:0.35rem 0.55rem;text-align:left;}
+.ns-table th{background:var(--surface-soft);color:var(--text);font-weight:600;}
+</style>
+
+<article class="concept-entry">
+  <header class="concept-header">
+    <span class="concept-eyebrow">概念</span>
+    <h1>Noise Schedule</h1>
+    <p class="concept-tagline">— 一条函数曲线，决定网络在每个 $t$ 看到什么样的"信号 + 噪声"配方。</p>
+  </header>
+
+  <aside class="ns-quickref">
+    <div><strong>定义</strong> · 一组 $\{\beta_t\}_{t=1}^T$（或等价的 $\{\bar\alpha_t\}$），规定 forward 过程每一步混入多少高斯噪声。</div>
+    <div><strong>公式</strong> · $\bar\alpha_t = \prod_{s=1}^{t}(1-\beta_s)$，$\text{SNR}(t) = \bar\alpha_t / (1 - \bar\alpha_t)$。</div>
+    <div><strong>易错</strong> · schedule 不是可有可无的"超参数"，它<em>定义了网络看到的训练分布</em>——换 schedule = 换任务。</div>
+  </aside>
+
+  <section class="concept-intuition">
+    <p>很多人以为 noise schedule 是个旋钮——"调一调 $\beta$，效果好就行"。其实它<strong>不是一个可调的超参数，它<em>决定了网络究竟在学什么</em></strong>。把 schedule 换掉，$t=500$ 这个时刻喂给网络的图就完全不同：在 linear schedule 下 $t=500$ 可能已经是"几乎纯噪声"，而 cosine schedule 下 $t=500$ 还看得清结构。Loss 形式没变，但训练数据的分布变了，模型的能力分配也跟着变。</p>
+    <div class="ns-callout"><strong>讲师比喻</strong>：把扩散训练想成讲师给学生上 1000 节难度递增的课。Schedule 就是<em>课程表</em>——是把 80% 的课花在"几乎看不出原图"的高噪段，还是均匀铺开、还是把更多课花在"图还能辨认"的中间段？这门课的"难度曲线"长什么样，学生（网络）最后学到的本事就长什么样。</div>
+    <div class="ns-source">「我们需要一个 noising process。在图像的情况下，noising process 就是<em>按照某个 noising schedule</em> 给图像加噪。」—— Vizuara《Diffusion LLM Noising Schedule》L12 @00:03</div>
+    <p>Vizuara 在《Diffusion LM》L12 把这件事和语言扩散并置：图像扩散用<strong>连续高斯</strong>的 noising schedule（也就是本词条主线）；语言扩散因为 token 是离散的，必须换成<strong>离散 mask schedule</strong>——两者形式截然不同，但<em>都是</em> schedule。这条对照很关键，它提示读者：schedule 是和"加噪过程的数学结构"绑定的，不是图像独有的小细节。</p>
+
+    <p>Vizuara《Principles of Diffusion Models》L7 在引入 NCSN 之前用一个磁铁比喻铺垫了"为什么必须用<em>多个</em>噪声尺度"——这其实就是 schedule 概念的离散前身。讲师用"flicked metal ball lands at a specific position"的画面表示加噪后的数据点，球被弹出去越远（噪声越大），原磁铁位置越难猜，但球落点能采样到的空间也越大；只用一个尺度的噪声就训不好 score——必须用一系列 $\sigma_1 > \sigma_2 > \dots > \sigma_L$ 的噪声尺度，让网络在不同"球被弹多远"的情况下都能预测回拉力。这一系列 $\sigma_i$ 在连续化之后就是 noise schedule 的 $\sigma(t)$ 曲线。所以 schedule 不只是"DDPM 的训练 detail"——它源自更早的 score matching 文献，是<strong>解决 manifold hypothesis 下 score 不可学</strong>这个根本问题的工具。</p>
+    <div class="ns-source">「Adding noise does something magical. It's it it looks like it's too easy……we are artificially creating chaos which is going to help us do better.」—— Vizuara《Principles of Diffusion Models》L7 @09:43</div>
+    <p>在训练里这件事对应：每个 step 你 <code>t = randint(1, T)</code>，然后 <code>x_t = sqrt(ᾱ_t) · x_0 + sqrt(1-ᾱ_t) · ε</code>。你用什么函数计算 $\bar\alpha_t$，就决定了这个采样到的 $x_t$ 是接近 $x_0$ 还是接近纯噪声——网络在不同 $t$ 段看到的图像统计量，全由 schedule 写死。</p>
+    <p>这条直觉的实际后果是：调 schedule 不像调 learning rate 那样可以"先训完看效果再改"。Schedule 改了，前一次训练的网络等于在另一个任务上训出来的——很难直接迁移过来。这也是为什么 Imagen、SD2、SD3 每代主模型都要<em>重新选 schedule 重训</em>，而不是在旧 checkpoint 上微调。把它正确归类为"建模选择"而非"超参数"，是理解后续所有改进（IDDPM、EDM、SD3、Flux）的前提。</p>
+  </section>
+
+  <section class="concept-deepdive">
+    <h2>形式定义：$\beta_t$、$\bar\alpha_t$、SNR 三个等价视角</h2>
+    <p>给定步数 $T$（DDPM 用 $T=1000$，Imagen 用 $T=2000$，LDM 训练用 $T=1000$ 但推理跳到 50），forward 一步加噪：</p>
+    <p>$$q(x_t \mid x_{t-1}) = \mathcal{N}\!\left(\sqrt{1-\beta_t}\,x_{t-1},\ \beta_t\, I\right)$$</p>
+    <p>把整条链合起来，由独立高斯叠加性可得 closed form：</p>
+    <p>$$q(x_t \mid x_0) = \mathcal{N}\!\left(\sqrt{\bar\alpha_t}\,x_0,\ (1 - \bar\alpha_t)\,I\right),\quad \bar\alpha_t = \prod_{s=1}^{t}(1 - \beta_s)$$</p>
+    <p><strong>Why</strong>：训练 loss 只看 $x_t$ 怎么由 $x_0$ 得到（即 marginal $q(x_t \mid x_0)$），中间链 $x_{t-1}$ 是过程性的。所以 schedule 的<em>有效表征</em>是 $\bar\alpha_t$ 这条曲线，不是 $\beta_t$ 本身——两个不同的 $\beta_t$ 序列，只要 $\bar\alpha_t$ 一致，训出来的网络是同一个。</p>
+    <p>更感知化的等价表达是 signal-to-noise ratio：</p>
+    <p>$$\text{SNR}(t) \;=\; \frac{\bar\alpha_t}{1 - \bar\alpha_t},\qquad \log\text{SNR}(t) \;=\; \log\bar\alpha_t - \log(1 - \bar\alpha_t)$$</p>
+    <p><strong>Why log-SNR</strong>：人眼对"信号还剩多少"的感知是对数尺度的——SNR 从 100 降到 10 和从 10 降到 1，对图像的破坏感是相似的。Kingma 等人（VDM 2021）证明了 ELBO 在连续时间下<em>只依赖 log-SNR 的端点</em>，schedule 中间长什么样不影响最优 loss，但影响梯度方差。所以现代 schedule 设计基本都在 log-SNR 空间里画。换句话说：你看 $\beta_t$ 看不出 schedule 好不好；你看 $\bar\alpha_t$ 看一半；你看 $\log\text{SNR}(t)$ 这条曲线一眼就能看出训练时 $t$ 的分布是不是合理。这就是 EDM 论文里所有 schedule 都画在 $\log\sigma$ 轴上的原因——log-SNR 是 noise schedule 的"自然坐标"。</p>
+
+    <h2>三大经典 schedule</h2>
+    <table class="ns-table">
+      <thead><tr><th>Schedule</th><th>来源</th><th>定义</th><th>典型行为</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><strong>Linear</strong></td>
+          <td>DDPM (Ho et al. 2020)</td>
+          <td>$\beta_t$ 从 $10^{-4}$ 线性增到 $0.02$</td>
+          <td>低分辨率（CIFAR 32×32）够用；高分辨率下信号被销毁得太快，$t>700$ 几乎全是噪声、白白浪费容量。</td>
+        </tr>
+        <tr>
+          <td><strong>Cosine</strong></td>
+          <td>Improved DDPM (Nichol &amp; Dhariwal 2021)</td>
+          <td>$\bar\alpha_t = \dfrac{f(t)}{f(0)}$，$f(t) = \cos^2\!\left(\dfrac{t/T + s}{1+s}\cdot\dfrac{\pi}{2}\right)$，$s=0.008$</td>
+          <td>两端平、中间陡——给"还看得见结构"的中段更多 $t$；ImageNet 64 FID 从 32 降到 19。</td>
+        </tr>
+        <tr>
+          <td><strong>Sigmoid / EDM</strong></td>
+          <td>Karras et al. 2022 (EDM)</td>
+          <td>在 $\sigma$（噪声标准差）轴上采样 $\log\sigma \sim \mathcal{N}(P_{\text{mean}}, P_{\text{std}}^2)$，$P_{\text{mean}}{=}{-}1.2$，$P_{\text{std}}{=}1.2$</td>
+          <td>把训练 t 集中在"最有信息量"的 SNR 区段；EDM 在 CIFAR-10 拿到 1.79 FID（彼时 SOTA）。</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <p><strong>Why cosine 比 linear 好</strong>：在 linear schedule 下，$T=1000$ 时 $\bar\alpha_T \approx \exp(-\sum \beta_t) \approx \exp(-10) \approx 5\!\times\!10^{-5}$，看似"足够接近 0"，但实际<em>中段</em>下降太快——$t=500$ 时 $\bar\alpha_{500} \approx 0.006$，已经接近纯噪声。Nichol &amp; Dhariwal 提出 cosine 的核心论点：linear 在高分辨率上"前 20% 的 reverse 步几乎不影响样本质量，因为对应的图就是噪声"。换 cosine 后，$t=500$ 时 $\bar\alpha_{500} \approx 0.5$（半信号半噪声），网络的算力被花在更有意义的地方。</p>
+
+    <p>把这件事用一句话总结：linear schedule 在<em>$t$ 轴</em>上等距，但在<em>log-SNR 轴</em>上严重偏向"低 SNR 段"——大量的 $t$ 被花在"图已经是噪声"的区段，对最终生成质量贡献甚微。Cosine 把 log-SNR 改造成几乎线性的曲线，让<em>每个 $t$ 在感知尺度上是等距的</em>。这是 IDDPM 标题里"Improved"的字面含义——不是改 loss、不是改架构，只是把"训练 $t$ 该看到什么图"重新分配了一遍。</p>
+
+    <p><strong>Why $s=0.008$ 偏移</strong>：cosine 在 $t=0$ 处的导数是 0，会让 $\beta_1$ 太小（数值上接近 0），反向 SDE 在第一步几乎没动力。$s=0.008$ 让曲线在 $t=0$ 处稍微"歪一点"避开零导数，同时不影响整体形状。这是 IDDPM 论文里花了半页讲的工程细节，但实务上是 cosine 能跑通的关键。</p>
+
+    <p><strong>Why sigmoid / EDM 又是另一回事</strong>：Karras 等人观察到，cosine 在<em>极低 SNR 段</em>（$\log\text{SNR} < -5$）和<em>极高 SNR 段</em>（$\log\text{SNR} > 5$）的训练信号其实都很弱——前者图就是噪声、学不出东西，后者图就是原图、网络只要输出 0 噪声就行。真正<em>有信息量</em>的训练发生在中段 $\log\text{SNR} \in [-2, 2]$。所以 EDM 干脆把训练时 $t$ 的采样改成在 $\log\sigma$ 上跑高斯——把 80% 的样本花在中段，两端各只 10%。这不是 schedule 本身的修改，而是<em>采样 $t$ 的分布</em>的修改——但效果等价：网络的容量被花在更有意义的 SNR 区段。EDM 把这条思路推到极致，配合改进的 preconditioning 和 EDM samplers，在 CIFAR-10 拿到 1.79 FID。</p>
+
+    <h2>SVG：三条 schedule 的 $\bar\alpha_t$ 曲线对比</h2>
+    <svg class="ns-svg" viewBox="0 0 600 320" role="img" aria-label="Linear cosine sigmoid 三种 noise schedule 的 ᾱ_t 与 log-SNR 曲线对比">
+      <g font-family="ui-sans-serif" font-size="11" fill="var(--text)">
+        <!-- top panel: ᾱ_t -->
+        <text x="300" y="16" text-anchor="middle" font-weight="600">$\bar\alpha_t$ 随 $t/T$ 下降（信号留存）</text>
+        <!-- axes -->
+        <line x1="60" y1="40" x2="60" y2="160" stroke="var(--text-muted)"/>
+        <line x1="60" y1="160" x2="560" y2="160" stroke="var(--text-muted)"/>
+        <text x="50" y="44" text-anchor="end" font-size="9" fill="var(--text-muted)">1</text>
+        <text x="50" y="163" text-anchor="end" font-size="9" fill="var(--text-muted)">0</text>
+        <text x="60" y="175" text-anchor="middle" font-size="9" fill="var(--text-muted)">t/T=0</text>
+        <text x="560" y="175" text-anchor="middle" font-size="9" fill="var(--text-muted)">t/T=1</text>
+        <text x="310" y="175" text-anchor="middle" font-size="9" fill="var(--text-muted)">0.5</text>
+        <line x1="310" y1="155" x2="310" y2="160" stroke="var(--text-muted)"/>
+        <!-- linear: ᾱ_t ≈ exp(-(βmax-βmin)/2 · t² · T - βmin · t · T) — 近似画一条 quasi-exp -->
+        <!-- t=0→ᾱ=1 (y=40); t/T=0.5 → ᾱ≈0.006 → y≈159; 用大致曲线 -->
+        <path d="M 60 40 Q 110 55 160 80 Q 210 110 260 138 Q 310 155 360 158 L 560 159" fill="none" stroke="var(--red)" stroke-width="2"/>
+        <text x="155" y="65" font-size="10" fill="var(--red)">Linear (DDPM)</text>
+        <!-- cosine: smooth s-shape, midpoint ~0.5 at t/T=0.5 -->
+        <path d="M 60 40 Q 110 42 160 50 Q 235 75 310 100 Q 385 130 460 150 Q 510 158 560 159" fill="none" stroke="var(--module-accent)" stroke-width="2"/>
+        <text x="380" y="115" font-size="10" fill="var(--module-accent)">Cosine (IDDPM)</text>
+        <!-- sigmoid/EDM-style: steeper middle -->
+        <path d="M 60 40 Q 130 42 200 50 Q 260 70 310 100 Q 360 135 420 153 Q 490 158 560 159" fill="none" stroke="var(--blue)" stroke-width="2" stroke-dasharray="5,3"/>
+        <text x="200" y="48" font-size="10" fill="var(--blue)">Sigmoid / EDM</text>
+
+        <!-- bottom panel: log-SNR -->
+        <text x="300" y="200" text-anchor="middle" font-weight="600">$\log\text{SNR}(t)$ 随 $t/T$ 下降（感知尺度）</text>
+        <line x1="60" y1="220" x2="60" y2="300" stroke="var(--text-muted)"/>
+        <line x1="60" y1="260" x2="560" y2="260" stroke="var(--text-muted)"/>
+        <text x="50" y="224" text-anchor="end" font-size="9" fill="var(--text-muted)">+10</text>
+        <text x="50" y="263" text-anchor="end" font-size="9" fill="var(--text-muted)">0</text>
+        <text x="50" y="303" text-anchor="end" font-size="9" fill="var(--text-muted)">-10</text>
+        <!-- linear log-SNR: drops fast and stays low -->
+        <path d="M 60 222 Q 110 232 160 250 Q 210 270 260 285 Q 310 295 360 297 L 560 298" fill="none" stroke="var(--red)" stroke-width="2"/>
+        <!-- cosine log-SNR: more linear in log space -->
+        <path d="M 60 222 L 310 260 L 560 298" fill="none" stroke="var(--module-accent)" stroke-width="2"/>
+        <!-- edm: similar to cosine but slightly different shape -->
+        <path d="M 60 222 Q 200 240 310 260 Q 420 280 560 298" fill="none" stroke="var(--blue)" stroke-width="2" stroke-dasharray="5,3"/>
+        <text x="425" y="245" font-size="10" fill="var(--text-muted)">cosine 的 log-SNR 近似线性</text>
+      </g>
+    </svg>
+    <p style="font-size:0.88rem;color:var(--text-muted);">上：$\bar\alpha_t$ 曲线——linear 早早跌到底，cosine 缓慢过渡，sigmoid 介于两者间。下：取对数后看 log-SNR——cosine 几乎是一条<em>直线</em>，这是它训练稳定的关键（每个 $t$ 在"感知尺度"上等距）。</p>
+
+    <h2>VP vs VE：两个家族</h2>
+    <p>Song et al. 2021 的 score SDE 把 schedule 抽象成两个家族：</p>
+    <ul>
+      <li><strong>VP (Variance Preserving)</strong>：$\mathrm{Var}[x_t] = 1$ 恒定（$x_0$ 已归一化）；$\bar\alpha_t \to 0$ 时 $x_t \to \mathcal{N}(0, I)$。DDPM、IDDPM、LDM 全是 VP。</li>
+      <li><strong>VE (Variance Exploding)</strong>：$x_t = x_0 + \sigma_t \epsilon$，$\sigma_t$ 从 $0.01$ 一路涨到 $\sigma_{\max} \approx 80$（EDM 默认）；不缩 $x_0$，只无限叠加噪声。Score SDE 的 NCSN++、Karras 的 EDM 全是 VE。</li>
+    </ul>
+    <p><strong>Why 两个家族都能工作</strong>：reverse 过程的 marginals 一致即可，绝对幅度不重要。VP 的优点是 $x_t$ 数值范围稳定（U-Net 输入 always $\sim N(0,1)$），VE 的优点是噪声尺度直接对应 $\sigma$，跨分辨率迁移更顺。在 Song 2021 的 score SDE 框架下，VP 对应 $dx = -\frac{1}{2}\beta(t)x\,dt + \sqrt{\beta(t)}\,dW$，VE 对应 $dx = \sqrt{\frac{d[\sigma^2(t)]}{dt}}\,dW$——两个 SDE 看似不同，但通过定义 $\bar\alpha_t = 1/(1+\sigma_t^2)$ 后，两条曲线在 log-SNR 空间里就完全可以对齐。这条对齐是理解"为什么不同论文用不同符号但讲同一件事"的钥匙：DDPM 用 $\bar\alpha_t$、Score SDE 用 $\sigma(t)$、Flow Matching 用 $\alpha_t$ 和 $\sigma_t$ 的对，最终都是同一条 log-SNR 曲线上的不同切片视角。</p>
+    <p>实务里挑哪个看下游需求：训练分类器引导（classifier guidance）和 latent diffusion，VP 更常见，因为 latent space 已经被 VAE 归一化过；做超分辨率、跨分辨率联合训练，VE 更顺，因为 $\sigma$ 直接对应像素的物理 noise 量级。</p>
+
+    <h2>Loss 加权和 schedule 的隐藏耦合</h2>
+    <p>DDPM 的 simple loss $\mathcal{L} = \mathbb{E}_{t,x_0,\epsilon}\|\epsilon - \epsilon_\theta(x_t, t)\|^2$ 看起来对所有 $t$ 一视同仁，但<em>实际上</em>不同 $t$ 的梯度大小完全不同。理论上 ELBO 对应的 loss 是 $\mathcal{L}_{\text{ELBO}} = \sum_t w(t) \cdot \|\epsilon - \epsilon_\theta\|^2$，其中 $w(t) = \beta_t^2 / (2\sigma_t^2 \alpha_t (1-\bar\alpha_t))$。Ho 2020 的核心发现是<em>把这个权重抹平到 1</em>（即 simple loss）实际 FID 更好——这隐含着一个假设：schedule 已经做好了"难度平衡"的工作，每个 $t$ 等价。</p>
+    <p>但这个假设不总成立。Kingma 等 2021 的 VDM 论文证明：<strong>simple loss = ELBO + schedule 决定的常数</strong>。换言之，simple loss 训出的网络的 ELBO 是否最优，<em>完全取决于 schedule</em>。这是一条很深的耦合：你不能只看"我用 simple loss 训得快"，schedule 选错的话，ELBO 仍然差。SD3 进一步引入 "logit-normal" $t$ 采样来纠正这件事——它本质上是把 simple loss 里隐含的 $w(t) = 1$ 改成更接近 ELBO 最优的权重。</p>
+
+    <div class="my-addition">🟡 教材外补充：</div>
+    <p>2022 之后的主流是把 schedule "<strong>分辨率适配</strong>"。Chen 2023（"On the importance of noise scheduling"）发现：把 cosine 直接搬到 256×256 仍然有偏差——高分辨率下，"signal" 在像素冗余里被低估了，需要把 $\bar\alpha_t$ 整体向更高噪声方向 shift。这就是 Imagen / SD3 / Flux 等模型用<strong>shifted log-SNR</strong>的原因：从 cosine 出发，乘一个分辨率相关的常数 $c \approx \log(d_{\text{base}}/d_{\text{actual}})$。Stable Diffusion 3 的 paper 在 §3.1 给了具体形式。结论：高分辨率应该用<em>更激进的高噪段</em>，否则网络浪费在已经"够清晰"的中段。</p>
+    <p>Flow Matching 时代（2023-）schedule 的内涵又变了：rectified flow 用 $t \in [0, 1]$ 线性插值 $x_t = (1-t)x_0 + t \epsilon$，对应一个特定的 schedule（$\bar\alpha_t = (1-t)^2$）。SD3 论文证明 cosine、EDM、rectified flow 在合适的时间重参化下<em>同构</em>——schedule 设计正在从"调 $\beta$" 演化成"在 log-SNR 上选积分权重"。</p>
+
+    <p>另一条线索是<strong>训练 $t$ 的采样分布</strong>和<strong>推理 $t$ 的离散化</strong>解耦。早期（DDPM）训练和推理共用同一个 1000 步均匀网格；现在主流做法是训练时 $t$ 从某个 importance-weighted 分布采（比如 EDM 的 log-normal、SD3 的 logit-normal），推理时另选一组步数（DPM-Solver++ 用 20-30 步、Karras 用 18-32 步）。Schedule 本身（即 $\bar\alpha_t$ 这条曲线）保持连续不变，离散化在两端各自选——这意味着"noise schedule"在 2024 之后基本指那条<em>连续函数</em>，离散步数是采样器的事。</p>
+
+    <p>SD3 / Flux 这一代的另一项发现：对图像 token (LDM latent) 而言，<em>分辨率自适应</em>的 schedule 是必须的。在 $4096$ token 的 latent grid（对应 1024×1024 像素）上，每个 token 的"信号"比 $1024$ token 的 grid 弱得多（因为它代表的像素冗余少），相同 $\bar\alpha_t$ 下的有效 SNR 不一样。SD3 §3.1 给的公式是 $\log\text{SNR}_{\text{shifted}} = \log\text{SNR}_{\text{base}} - 2\log(d_{\text{actual}}/d_{\text{base}})$，把高分辨率训练的 $t$ 整体往高噪声方向偏移。如果不做这件事，1024×1024 训练里网络的算力会被严重浪费在过于简单的低噪段。</p>
+
+    <p>对语言扩散（discrete masked diffusion）而言，"noise schedule" 的形式变成<strong>mask 比例的时间函数</strong> $\alpha_t$：$t=0$ 时 $\alpha_0 = 1$（全部 unmask），$t=1$ 时 $\alpha_1 = 0$（全部 mask）。MaskGIT 和 MDLM 默认用 cosine mask schedule $\alpha_t = \cos(\pi t / 2)$——形式上与 IDDPM 几乎一样，但作用对象从连续高斯噪声方差换成了离散 mask 比例。这条对照说明 noise schedule 的概念是<em>跨模态</em>的：只要有"从干净到完全损坏"的连续插值过程，就有一个 schedule；schedule 设计的核心问题（在哪段 $t$ 给网络多少难度）跨模态保持一致。</p>
+
+    <p><strong>工程注意点（写代码时常踩的坑）</strong>：DDPM 实现里 $\beta_t$ 通常是 1-indexed 的（$\beta_1, \dots, \beta_T$），但 NumPy / PyTorch 数组是 0-indexed 的，导致 $\bar\alpha_t$ 的累积常常差一位。IDDPM 官方代码里在 schedule 前 prepend 一个 $\bar\alpha_0 = 1$ 来对齐；用第三方实现时一定要核对 $\bar\alpha[0]$ 是 1 还是 $1-\beta_0$。还有一个常见 bug 是 cosine schedule 没 clip $\beta_t$ 到 $[0, 0.999]$，导致最后几步 $\beta_T \approx 1$ 出现数值溢出——IDDPM 原文专门讲了这件事，但很多复现忘了。</p>
+
+    <p>另一类陷阱：训练时 $t \sim \text{Uniform}\{1, \dots, T\}$ 看似中立，其实暗含"每个 $t$ 同等重要"的强假设。当 schedule 在 log-SNR 上不均匀时（比如 linear），这等于<em>过度采样了低 SNR 段</em>——网络浪费容量学"图就是噪声"的恒等映射。EDM / SD3 的做法是把 $t$ 的采样分布也作为可调对象：EDM 用 log-normal，SD3 用 logit-normal，本质都是把 $t$ 的密度向"中段 log-SNR"集中。所以现代 paper 里讲 "noise schedule"，实际包含<em>三件事</em>：(a) $\bar\alpha_t$ 这条连续曲线，(b) 训练时 $t$ 的采样密度，(c) 推理时 $t$ 的离散网格。三者必须协同设计，单调任一项都可能掉点。</p>
+  </section>
+
+  <section class="concept-interact">
+    <p>点击切换三种 schedule。<strong>不变量</strong>：起点 $\bar\alpha_0 = 1$（纯信号）和终点 $\bar\alpha_T \to 0$（纯噪声）三种全部一致；变的只是<em>中段的下降速率</em>，也就是网络在哪些 $t$ 段"看到中间难度"的图。</p>
+    <div class="ns-controls">
+      <button data-step="0" class="active">Linear (DDPM)</button>
+      <button data-step="1">Cosine (IDDPM)</button>
+      <button data-step="2">Sigmoid / EDM</button>
+    </div>
+    <div id="ns-info" class="ns-info">
+      <div class="ns-line" data-line="0">
+        $\beta_t$: $10^{-4} \to 0.02$ 线性 · $\bar\alpha_{500} \approx 0.006$ · 中段几乎纯噪声 · 高分辨率掉点 · CIFAR-32 够用，ImageNet-256 不够
+      </div>
+      <div class="ns-line" data-line="1" hidden>
+        $\bar\alpha_t = \cos^2((t/T+s)/(1+s) \cdot \pi/2)$，$s=0.008$ · $\bar\alpha_{500} \approx 0.5$ · log-SNR 近似线性 · ImageNet-64 FID 32 → 19
+      </div>
+      <div class="ns-line" data-line="2" hidden>
+        $\log \sigma \sim \mathcal{N}(-1.2, 1.44)$（训练）· 推理用 Karras $\sigma_i$ 序列 · 把 $t$ 采样集中在 SNR=1 附近 · CIFAR-10 FID 1.79
+      </div>
+    </div>
+    <script>
+      (function () {
+        const btns = document.querySelectorAll('.ns-controls button');
+        const lines = document.querySelectorAll('#ns-info .ns-line');
+        function show(step) {
+          btns.forEach(b => b.classList.toggle('active', +b.dataset.step === step));
+          lines.forEach(l => { l.hidden = +l.dataset.line !== step; });
+        }
+        btns.forEach(b => b.addEventListener('click', () => show(+b.dataset.step)));
+        show(0);
+      })();
+    </script>
+  </section>
+
+  <section class="concept-example">
+    <h2>手算：linear vs cosine 在 $t=500$ 看到的图差多少</h2>
+    <p>设 $T=1000$，$x_0 = 1$（标量化的"信号"），同一个噪声 $\epsilon = 1$。</p>
+    <p><strong>Linear</strong>：$\beta_t$ 从 $10^{-4}$ 到 $0.02$，$\beta_{500} \approx 0.01$，$\bar\alpha_{500} \approx \exp(-\sum_{s=1}^{500}\beta_s) \approx \exp(-2.55) \approx 0.078$。所以 $x_{500} = \sqrt{0.078}\cdot 1 + \sqrt{0.922}\cdot 1 = 0.279 + 0.960 = 1.239$，信号只剩 $\sqrt{0.078} = 0.28$，<em>已经接近纯噪声</em>。</p>
+    <p><strong>Cosine</strong>（$s=0.008$）：$\bar\alpha_{500} = \cos^2((0.5+0.008)/1.008 \cdot \pi/2) = \cos^2(0.504 \cdot \pi/2) = \cos^2(0.791) \approx (0.703)^2 \approx 0.495$。$x_{500} = \sqrt{0.495}\cdot 1 + \sqrt{0.505}\cdot 1 = 0.703 + 0.711 = 1.414$，信号还剩 $0.70$，<em>"半信号半噪声"</em>，网络看得见结构。</p>
+    <p>结论：同一个 $t=500$，linear 给的图几乎是噪声，cosine 给的图还认得出来——这就是 schedule 改变"网络看到什么"的最直接体现。</p>
+
+    <p>再算一下 SNR 看感知尺度：linear 下 $\text{SNR}(500) = 0.078/0.922 \approx 0.085$，$\log\text{SNR} \approx -2.47$；cosine 下 $\text{SNR}(500) = 0.495/0.505 \approx 0.980$，$\log\text{SNR} \approx -0.02$。<em>差了 2.5 个对数单位</em>——相当于信号能量差 250 倍。所以"换 schedule"在感知上不是微调，是把"中等难度"这一档的难度从"快瞎"挪到"刚好看得清"。</p>
+
+    <p>第三步推到极端：$t=900$ 时，linear 的 $\bar\alpha_{900} \approx \exp(-15) \approx 3\times10^{-7}$（彻底是噪声、score 几乎是 0，网络在这里学到的几乎是"恒等"），而 cosine 的 $\bar\alpha_{900} \approx \cos^2(0.45\pi) \approx 0.024$（仍然有 15% 信号留存）。换言之 linear schedule 把最后 100 步全浪费了；cosine 把这 100 步用来精修。这就是 IDDPM 在 ImageNet-64 上 FID 大幅领先的<em>机理性原因</em>，不是某种神秘的"经验调参"。</p>
+
+    <p>第四步反过来验证：如果两条 schedule 选得"端点 SNR 相同、中段 SNR 也相似"，最终 FID 应该差不多——SD3 论文里的对照实验恰好印证了这点：经过 log-SNR 重对齐后，cosine、EDM、rectified flow 的 FID 几乎打平（差 ±0.5），说明真正起作用的不是"用哪条 schedule"，而是"log-SNR 曲线的形状是否匹配数据分布的难度结构"。</p>
+  </section>
+
+  <section class="concept-pitfalls">
+    <h2>常见误区</h2>
+    <ol>
+      <li><strong>"noise schedule 是一个超参数，调一调就好"。</strong>反例：把 DDPM 在 CIFAR-10 上跑通的 linear schedule 搬到 ImageNet-256，FID 会比 cosine 差 30% 以上（IDDPM Table 2）。换 schedule 不是调参，是<em>换了训练分布</em>——网络在每个 $t$ 看到的 $x_t$ 统计量完全不同。</li>
+      <li><strong>"步数 $T$ 越多越好"。</strong>反例：$T$ 和 $\beta$ 是<em>耦合</em>的。$T=1000$ 配 linear $\beta \in [10^{-4}, 0.02]$ 给的总噪声量，和 $T=4000$ 配 $\beta \in [10^{-4}, 0.005]$ 几乎相同——决定质量的是<em>累积</em>的 $\bar\alpha_T$，不是 $T$ 本身。盲目把 $T$ 拉到 4000 而不调 $\beta$ 只会让训练更慢、不会更好。</li>
+      <li><strong>"VE 和 VP 是两种不同的扩散"。</strong>反例：Karras 2022 §3 严格证明 VP 和 VE 在<em>同一族 log-SNR 函数</em>下只差一个时间重参化和 $x$ 的缩放——训出来的网络在数学上等价。所以"我要用 VE 还是 VP"其实是工程口味问题（数值稳定性、跨分辨率迁移），不是建模选择。同样地"DDPM vs flow matching"在 schedule 视角下也是同一类对象的不同参数化——SD3 论文里明确把 cosine、EDM、rectified flow 写成一个统一的"interpolant 族"，只在时间重参化上不同。</li>
+    </ol>
+  </section>
+
+  <section class="concept-seealso">
+    <h2>相关概念</h2>
+    <ul>
+      <li><a href="/video-to-notebook/concepts/score-function/">Score Function</a>（score 在不同 $\sigma_t$ 下的大小天差地别，这正是 NCSN 用<em>多 noise levels</em>的动机——某种意义上 NCSN 的"noise levels"就是离散版的 schedule）</li>
+      <li><a href="/video-to-notebook/concepts/score-matching/">Score Matching</a>（去噪 score matching 的 loss $\|s_\theta - (-\epsilon/\sigma)\|^2$ 里的 $\sigma$ 就来自 schedule）</li>
+      <li><a href="/video-to-notebook/concepts/diffusion-language-model/">Diffusion Language Model</a>（语言扩散需要把高斯 schedule 换成离散 mask schedule——schedule 是和噪声类型绑死的）</li>
+      <li><a href="/video-to-notebook/concepts/masked-diffusion/">Masked Diffusion</a>（cosine masking schedule 是 MaskGIT / MDLM 的核心——同样的 cosine 形状，但作用在 mask 比例上）</li>
+    </ul>
+  </section>
+
+  <section class="concept-sources">
+    <h2>来源</h2>
+    <ol>
+      <li><a href="https://www.youtube.com/watch?v=dov4OzCcjU0&t=3s" target="_blank" rel="noopener">diffusion-lm-vizuara · L12 · Diffusion LLM Noising Schedule：把图像 schedule 和语言 mask schedule 并置 · (00:03)</a></li>
+      <li><a href="https://www.youtube.com/watch?v=ej7LfQyKXec&t=461s" target="_blank" rel="noopener">diffusion-principles-vizuara · L7 · NCSN 引入"多 noise levels"，schedule 的离散化前身 · (07:41)</a></li>
+      <li><a href="https://www.youtube.com/watch?v=ej7LfQyKXec&t=583s" target="_blank" rel="noopener">diffusion-principles-vizuara · L7 · "加噪是 magic trick"——manifold hypothesis 解释为什么 schedule 重要 · (09:43)</a></li>
+    </ol>
+  </section>
+</article>

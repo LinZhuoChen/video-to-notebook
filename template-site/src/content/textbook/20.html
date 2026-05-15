@@ -1,0 +1,777 @@
+<style>
+  .mask-ch { line-height: 1.7; }
+  .mask-ch svg { display: block; margin: 1.2rem auto; max-width: 100%; height: auto; }
+  .mask-ch .clip-frame { max-width: 720px; margin: 1.4rem auto; }
+  .mask-ch .clip-frame iframe { width: 100%; aspect-ratio: 16/9; border: 0; border-radius: 6px; }
+  .mask-ch .clip-frame figcaption { color: var(--text-muted); font-size: 0.85rem; margin-top: 0.4rem; text-align: center; }
+  .mask-ch .tldr { background: var(--surface-soft); border-left: 4px solid var(--module-accent); padding: 1rem 1.2rem; border-radius: 0 6px 6px 0; margin: 1.4rem 0; }
+  .mask-ch .tldr h2 { margin-top: 0; font-size: 1.05rem; }
+  .mask-ch .callout { padding: 0.7rem 1rem; margin: 1rem 0; border-radius: 0 6px 6px 0; }
+  .mask-ch .callout-info { background: #eef6fc; border-left: 4px solid #2b80c4; }
+  .mask-ch .callout-note { background: #f3f0fa; border-left: 4px solid #6f4dd0; }
+  .mask-ch .callout-warning { background: #fff6e0; border-left: 4px solid #d4a017; }
+  .mask-ch .callout-tip { background: #e8f5e9; border-left: 4px solid #0b5; }
+  .mask-ch .callout-quote { background: var(--surface-soft); border-left: 3px solid var(--border-strong); padding: 0.5rem 1rem; margin: 0.8rem 0; font-style: italic; color: var(--text-muted); }
+  .mask-ch .my-addition { background: #fff7d6; border-left: 4px solid #b8860b; padding: 0.7rem 1rem; margin: 1rem 0; border-radius: 0 6px 6px 0; }
+  .mask-ch pre { background: #1f1f1f; color: #f6f4ee; padding: 1rem; border-radius: 6px; font-size: 0.86rem; line-height: 1.55; overflow-x: auto; }
+  .mask-ch code:not(pre code) { background: var(--surface-soft); padding: 0.1rem 0.35rem; border-radius: 3px; font-size: 0.9em; }
+  .mask-ch h2 { border-bottom: 1px solid var(--border); padding-bottom: 0.3rem; margin-top: 2.4rem; }
+  .mask-ch h3 { color: var(--module-accent); margin-top: 1.6rem; }
+  .mask-ch .deriv-step { margin: 0.8rem 0; padding: 0.6rem 0.8rem; background: var(--surface-soft); border-radius: 4px; }
+  .mask-ch .deriv-step strong { color: var(--module-accent); }
+  @keyframes mask-blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+  .mask-ch .mask-cell { animation: mask-blink 1.8s ease-in-out infinite; }
+</style>
+
+<article class="mask-ch">
+
+<h1>20. Masked Diffusion 与 SEDD</h1>
+
+<p style="font-size:0.95rem; color:var(--text-muted);">主源：CMU 10799 S26 Lecture 12（讲师 Hao Zhang，离散扩散与 masked diffusion 主线）；副源：Vizuara《Diffusion LLM》Lecture 12-17（Dr. Raj Dandekar，从代码层面拆 noising / noise-predict / denoising 三步）。</p>
+
+<div class="tldr">
+  <h2>📌 TL;DR</h2>
+  <p><strong>Masked Diffusion 用「把 token 遮掉」当噪声</strong>。前向过程：每一步以概率 $\beta_t$ 独立地把每个尚未被遮的 token 替换成特殊符号 <code>[MASK]</code>；走到底，整条序列全是 <code>[MASK]</code>。这个过程对应离散扩散里一个特殊的 <strong>absorbing transition</strong>——一旦掉进 <code>[MASK]</code> 状态就再也出不来。</p>
+  <p>它的好处是 <strong>$q(x_t \mid x_0)$ 有闭式解</strong>：每个位置独立地以 $\bar\beta_t$ 的概率变成 <code>[MASK]</code>、以 $1-\bar\beta_t$ 的概率保留原 token。训练损失就是<em>带变化掩码率的</em> BERT 式交叉熵——模型见过从 1% 到 99% 各种被遮比例的句子，学会在任意噪声水平上重建。</p>
+  <p>采样是迭代的：从一条全 <code>[MASK]</code> 序列起步，每一步模型并行预测所有 <code>[MASK]</code> 位置的分布，抽样揭开一部分，剩下的留给下一步。这<strong>本质上就是 BERT，但是迭代地用</strong>。</p>
+  <p>本章在最后还会铺一层 <a href="/video-to-notebook/concepts/score-entropy-discrete-diffusion/">SEDD（Score Entropy Discrete Diffusion）</a>：Aaron Lou 等人 2024 年提出的「concrete score / ratio matching」目标，把 score matching 推广到离散空间，无需依赖高斯假设，是当前离散扩散在<em>非 absorbing</em> 路线上最有理论分量的工作。</p>
+</div>
+
+<h2>一、为什么这一章要单独讲离散扩散？</h2>
+
+<p>到目前为止，本教材的全部内容都是<strong>连续空间的扩散</strong>——DDPM、score-based SDE、Flow Matching、整族都是同一回事，只不过参数化和训练目标不同。CMU L12 开场，讲师把这一点摆得很清楚：</p>
+
+<div class="callout-quote">
+"so far what we have learned are about image, or images get represented in a continuous space, right—because in your homework one and two you need to rescale it to negative one and one and stuff. So the problem is then how about discrete data?"
+</div>
+
+<p>那为什么<em>非要</em>把扩散推广到离散数据？讲师当场列了三类应用，每一类都不是"image 锦上添花"的事，而是天然就活在离散世界里：</p>
+
+<ol>
+  <li><strong>语言（text）</strong>——讲师半开玩笑地引用 Anthropic 的人在 ICML 2024 跟他说："anything that cannot be expressed or compressed into text is uninteresting information, and image generation is just not on the path to AGI"。不管你同不同意，文本就是当下最重要的离散模态，整个 GPT、Claude、Gemini 都活在 token 这种离散对象上。</li>
+  <li><strong>分子与 DNA 序列</strong>——SMILES 串、氨基酸、碱基对，全是离散字符。蛋白质设计、药物分子生成、基因序列编辑，这些 high-stakes 应用没法绕开离散建模。</li>
+  <li><strong>像素本身也是离散的</strong>——你存图像不是真存在连续空间里，是存在 0-255 的 quantized pixel space。每个 channel 是个 8-bit 整数。讲师专门把这点点出来："technically image should also be represented as discrete data"。换句话说，<em>连续扩散是我们为了好做数学硬把离散数据扔进连续空间</em>，反向操作（在原本的离散空间上做扩散）反而更"诚实"。</li>
+</ol>
+
+<p>更关键的一点是：<strong>autoregressive 模型已经把语言建模这件事卷到了天花板</strong>，GPT 系列、Llama、Qwen 这些模型的训练栈、推理优化、社区生态已经成熟。Diffusion LM 要想杀进来，必须给出 autoregressive 给不了的东西——并行解码、双向 context、可控生成。本章后面会展开这点。</p>
+
+<div class="callout callout-info">
+🧭 <strong>本章定位</strong>：本章的<a href="/video-to-notebook/concepts/masked-diffusion/">主概念</a>是 absorbing 变体的离散扩散（也叫 <em>Masked Diffusion</em>），上承<a href="/video-to-notebook/textbook/19/">第 19 章 Discrete Diffusion 总论</a>，下接<a href="/video-to-notebook/textbook/21/">第 21 章「从零写一个 Diffusion LLM」</a>（DiffLM 代码实现 + parallel decoding）。读完这一章，你应该能：(1) 在白板上推 $q(x_t\mid x_0)$ 的闭式；(2) 解释为什么 MDLM 不只是"BERT 加上时间步"；(3) 知道 SEDD 的 concrete score 和连续 score matching 怎么对应。
+</div>
+
+<h2>二、把噪声搬进文本空间：两个"显然"但失败的尝试</h2>
+
+<p>讲师在 CMU L12 上玩了一个互动游戏：让全班同学猜，<em>"文本里的噪声"应该长什么样</em>。这是 chunk #1558–#1560 完整复现的课堂讨论，值得逐条记下来——它解释了为什么我们最后会归到「masking」这一种方案。</p>
+
+<h3>2.1 方案 A：在 embedding 空间做连续扩散 + 最近邻</h3>
+
+<p>第一位同学的提议（chunk #1554）：</p>
+
+<div class="callout-quote">
+"Near space and do like a nearest neighbors type thing to match it."<br>
+即：text 先经过 embedding 变成连续向量 → 在连续空间里做正常 DDPM → 反向采样得到一个向量 → 找最近的真实 token embedding。
+</div>
+
+<p>讲师评价："this is a good approach"，并补了一句重要的历史脚注：</p>
+
+<div class="callout-quote">
+"this idea actually was explored by people from Stanford, and it's actually kind of like the first diffusion language model if you will. But this is pretty much exactly what they did—<strong>unfortunately, it didn't work as well as what we're going to talk about today</strong>. But that was the first attempt."
+</div>
+
+<div class="my-addition">
+🟡 <strong>教材外补充：</strong>讲师指的 Stanford 那条线，最典型的是 <strong>Diffusion-LM</strong>（Li et al. 2022, NeurIPS）和后续 <strong>SSD-LM</strong>。它们在 word embedding 上做高斯扩散，效果在 plug-and-play 控制生成场景下有亮点，但<em>困惑度</em>始终打不过同等规模的 GPT-2。Masked diffusion 直到 2024 年的 <strong>MDLM</strong>（Sahoo et al., NeurIPS 2024）才在 perplexity 上首次<em>追平甚至略超</em>同规模自回归基线——这就是讲师说的"works better than the first attempt"。
+</div>
+
+<h3>2.2 方案 B：用随机 token 当噪声（Uniform Transition）</h3>
+
+<p>第二位同学（chunk #1558）："Incorrect, like just random things... wrong tokens"。讲师让全班看一条 Karpathy 的 tweet 被"加噪"的版本，识别噪声的特征：</p>
+
+<ul>
+  <li>"I see random emojis in between and random characters"——随机 emoji</li>
+  <li>"Spellings are wrong"——拼写错误</li>
+  <li>"the the the envelope"——重复 token / 错位的 6、7 出现</li>
+</ul>
+
+<p>形式化下来：<strong>给定一个 token，以 $\beta$ 的概率把它替换成词表里<em>任意一个</em>随机 token（包括自己）</strong>。讲师用一个非常小的玩具词表展开了这一过程，下面我们完整复现 chunk #1562–#1564 的白板推导。</p>
+
+<h3>2.3 玩具词表：vocab = {I, love, cat}</h3>
+
+<p>设词表只有 3 个 token：<code>I</code>、<code>love</code>、<code>cat</code>。句子 "I love cat" 表示成三个 one-hot 向量：</p>
+
+<p>$$x_0^{(1)} = [1,0,0],\quad x_0^{(2)} = [0,1,0],\quad x_0^{(3)} = [0,0,1]$$</p>
+
+<p>定义<strong>转移矩阵 $Q$</strong>：以 $\beta$ 的概率「重新采样」（uniform 选一个 token，允许采到自己），其余情况保持不动。对 3-token 词表：</p>
+
+<p>$$Q = \begin{pmatrix} 1-\tfrac{2\beta}{3} & \tfrac{\beta}{3} & \tfrac{\beta}{3} \\ \tfrac{\beta}{3} & 1-\tfrac{2\beta}{3} & \tfrac{\beta}{3} \\ \tfrac{\beta}{3} & \tfrac{\beta}{3} & 1-\tfrac{2\beta}{3} \end{pmatrix}$$</p>
+
+<div class="deriv-step">
+<strong>步骤 1：为什么对角线是 $1-\tfrac{2\beta}{3}$ 而不是 $1-\beta$？</strong>
+<em>Why</em>：每个 token 都有 $\beta$ 的概率<em>触发重采样</em>。重采样时 uniform 抽，包括<em>抽到自己</i>。所以"留在原地"的总概率 = "没触发重采样"$(1-\beta)$ + "触发了但又抽到自己"$\beta\cdot\tfrac{1}{3}$ = $1-\tfrac{2\beta}{3}$。讲师在 chunk #1564 原话："every one has one-third of beta of a chance to get sampled when we try to resample, but otherwise we stay the same".
+</div>
+
+<div class="deriv-step">
+<strong>步骤 2：把转移矩阵应用到 "cat"</strong>
+$$x_0^{(3)} \cdot Q = [0,0,1] \cdot Q = \left[\tfrac{\beta}{3},\;\tfrac{\beta}{3},\;1-\tfrac{2\beta}{3}\right]$$
+<em>Why</em>：one-hot × 矩阵 = 取矩阵相应行。这个向量就是"加一步噪后 cat 变成各 token 的概率分布"。<strong>本质上，离散扩散的一步前向就是 categorical 分布上的一次 categorical resampling。</strong>
+</div>
+
+<div class="callout callout-note">
+📝 <strong>记号约定</strong>（沿用 CMU 板书）：在离散扩散里我们用<strong>转移矩阵 $Q_t$</strong> 代替 DDPM 里 $\mathcal{N}(\sqrt{1-\beta_t}x_{t-1}, \beta_t I)$ 那个连续高斯条件分布。形式同构：<br>
+• 连续：$q(x_t\mid x_{t-1}) = \mathcal{N}(\cdot)$，$\bar\alpha_t = \prod_s (1-\beta_s)$<br>
+• 离散：$q(x_t\mid x_{t-1}) = \mathrm{Cat}(x_{t-1} Q_t)$，$\bar Q_t = Q_1 Q_2 \cdots Q_t$<br>
+两边的"复合"都封闭，所以 $q(x_t\mid x_0)$ 也都能一步算出来。
+</div>
+
+<h3>2.4 Uniform Transition 为什么"够用但不够好"？</h3>
+
+<p>讲师立刻被一位同学追问（chunk #1565）："when we actually do this for real sentences with real vocabulary, it's not necessary that the noise sentence is actually..."——意思是：如果换成几万个 token 的真实词表，随机抽中一个语义上"恰好通顺"的 token 也是有可能的。讲师承认："yes, that's right. But like just think about how many tokens are available out there—the chances of that is non-zero but also not high"。</p>
+
+<p>这条 uniform transition 数学上完全合法、能跑、能拿到闭式 $q(x_t\mid x_0)$（D3PM 原论文里就有），但实践里有两个痛点：</p>
+
+<ol>
+  <li><strong>"噪声"长得像真句子</strong>：被加噪的 token 是一个真实词，模型很难判断"这个位置到底被改过没有"。如果一个 token 没被改，那它是 ground-truth；如果被改了，模型要试着重建。两种情况外观一样，模型只能靠"概率分布学得有多准"间接区分，监督信号被稀释。</li>
+  <li><strong>没有显式的「不知道」状态</strong>：去噪时模型必须既预测原 token，又判断当前位置该不该改——两个任务耦合在同一个 softmax 输出里，训练难度高。</li>
+  <li><strong>每一步对所有位置等概率扰动</strong>，但语言里位置的"重要性"差别极大（停用词 vs 关键名词），uniform 不利用任何先验。</li>
+</ol>
+
+<p>这就引出本章主角：用一个<em>独立于词表</em>的特殊符号 <code>[MASK]</code> 当吸收态，把"被改过"显式 encode 在 token 类型本身上。</p>
+
+<h2>三、Masked Diffusion 正式登场：用 <code>[MASK]</code> 当噪声</h2>
+
+<p>把上一节的 transition 改一改：</p>
+
+<blockquote>每个 token，以概率 $\beta_t$ 被<strong>替换成特殊符号 <code>[MASK]</code></strong>；否则保留原样。<code>[MASK]</code> 是个"吸收态"——一旦掉进去就永远是 <code>[MASK]</code>，不会再变回来或变成别的 token。</blockquote>
+
+<p>这条转移叫 <strong>absorbing transition</strong>，对应的转移矩阵在词表上多加一行一列（<code>[MASK]</code> 作为第 $K+1$ 个状态）：</p>
+
+<p>$$Q^{\text{abs}}_t = \begin{pmatrix} 1-\beta_t & 0 & \cdots & 0 & \beta_t \\ 0 & 1-\beta_t & \cdots & 0 & \beta_t \\ \vdots & & \ddots & & \vdots \\ 0 & 0 & \cdots & 1-\beta_t & \beta_t \\ 0 & 0 & \cdots & 0 & 1 \end{pmatrix}$$</p>
+
+<p>最后一行最后一列是 1，说明 <code>[MASK]</code> 状态只会转到自己——这就是"吸收"的形式化。</p>
+
+<h3>3.1 闭式的 $q(x_t \mid x_0)$</h3>
+
+<p>由于每个 token 独立、且 absorbing transition 极简，把 $Q^{\text{abs}}_1 \cdots Q^{\text{abs}}_t$ 乘开得到非常干净的结果。令 $\bar\beta_t = 1 - \prod_{s=1}^{t}(1-\beta_s)$，则：</p>
+
+<p>$$q(x_t^{(i)} \mid x_0^{(i)}) = \begin{cases} 1-\bar\beta_t & \text{position $i$ 保留原 token } x_0^{(i)} \\ \bar\beta_t & \text{position $i$ 变成 \texttt{[MASK]}} \end{cases}$$</p>
+
+<div class="callout callout-tip">
+💡 <strong>为什么这条公式如此重要？</strong>它说：要采一个噪声样本 $x_t$，<em>不用</em>真正跑 $t$ 步前向。直接独立地对每个位置抛硬币：以 $\bar\beta_t$ 概率改成 <code>[MASK]</code>，否则保留。和 DDPM 里 $q(x_t \mid x_0) = \mathcal{N}(\sqrt{\bar\alpha_t} x_0, (1-\bar\alpha_t)I)$ 一步采样的精神<strong>完全一致</strong>——闭式 marginal 让训练效率爆炸。
+</div>
+
+<h3>3.2 边界条件</h3>
+
+<ul>
+  <li>$t=0$：$\bar\beta_0 = 0$，序列原封不动。</li>
+  <li>$t=T$：$\bar\beta_T \to 1$，<strong>整条序列变成全 <code>[MASK]</code></strong>。和 DDPM 的"终点是纯高斯"对应——这里终点是"纯空白"。所有信息都被吸收掉了，但<em>序列长度仍然保留</em>——这是离散扩散非常微妙的一点：长度是已知的、不参与扩散，只有 token 内容参与。这也是为什么 diffusion LM 通常需要先决定生成多长再开始 sampling。</li>
+</ul>
+
+<h3>3.3 为什么用 absorbing 而不是 uniform？理论与工程双赢</h3>
+
+<p>把 absorbing transition 和 uniform transition 摆在一起对比，会发现 absorbing 的几个独门优势：</p>
+
+<ul>
+  <li><strong>位置二分清楚</strong>：每个位置要么是 <code>[MASK]</code>（需要预测）要么是已知 token（条件输入）。模型角色没有歧义。</li>
+  <li><strong>已揭开的 token 永不再被破坏</strong>：反向过程是 "<code>[MASK]</code> → 真 token" 的单向流动，可以一步步累加置信度，不会"今天揭开明天又被打回原形"。</li>
+  <li><strong>反向过程的 ELBO 项有闭式</strong>：在 absorbing 下，KL 散度退化成对每个 <code>[MASK]</code> 位置的交叉熵，<em>不需要</em>对整个词表归一化求 softmax 之外的复杂项。</li>
+  <li><strong>工程上等于"BERT + 时间嵌入"</strong>：模型架构、tokenizer、训练栈基本无变化。社区里"用 RoBERTa 权重初始化 MDLM"是常见 trick。</li>
+</ul>
+
+<p>这些性质让 absorbing 路线成为当下 diffusion LM 工业实践的默认选择。但要注意：absorbing 是个<em>受限的设计</em>，丢掉了"token 之间互相转化"的灵活性。SEDD 那条路就是为了把这种灵活性找回来——下文第十节再展开。</p>
+
+<svg viewBox="0 0 720 220" role="img" aria-label="masked diffusion 前向过程">
+  <g font-family="ui-sans-serif" font-size="12">
+    <text x="360" y="18" text-anchor="middle" font-weight="600">前向：每一步独立地把 token 变成 [MASK]</text>
+
+    <g transform="translate(20, 50)">
+      <text x="0" y="-5" font-size="11" fill="#666">t = 0 (原句)</text>
+      <rect x="0" y="0" width="60" height="28" fill="#e8f5e9" stroke="#0b5"/><text x="30" y="18" text-anchor="middle">The</text>
+      <rect x="62" y="0" width="60" height="28" fill="#e8f5e9" stroke="#0b5"/><text x="92" y="18" text-anchor="middle">cat</text>
+      <rect x="124" y="0" width="60" height="28" fill="#e8f5e9" stroke="#0b5"/><text x="154" y="18" text-anchor="middle">sat</text>
+      <rect x="186" y="0" width="60" height="28" fill="#e8f5e9" stroke="#0b5"/><text x="216" y="18" text-anchor="middle">on</text>
+      <rect x="248" y="0" width="60" height="28" fill="#e8f5e9" stroke="#0b5"/><text x="278" y="18" text-anchor="middle">mat</text>
+    </g>
+
+    <g transform="translate(20, 100)">
+      <text x="0" y="-5" font-size="11" fill="#666">t = T/3 (β̄≈0.3)</text>
+      <rect x="0" y="0" width="60" height="28" fill="#e8f5e9" stroke="#0b5"/><text x="30" y="18" text-anchor="middle">The</text>
+      <rect x="62" y="0" width="60" height="28" class="mask-cell" fill="#ccc" stroke="#555"/><text x="92" y="18" text-anchor="middle" fill="#222">[M]</text>
+      <rect x="124" y="0" width="60" height="28" fill="#e8f5e9" stroke="#0b5"/><text x="154" y="18" text-anchor="middle">sat</text>
+      <rect x="186" y="0" width="60" height="28" fill="#e8f5e9" stroke="#0b5"/><text x="216" y="18" text-anchor="middle">on</text>
+      <rect x="248" y="0" width="60" height="28" class="mask-cell" fill="#ccc" stroke="#555"/><text x="278" y="18" text-anchor="middle" fill="#222">[M]</text>
+    </g>
+
+    <g transform="translate(20, 150)">
+      <text x="0" y="-5" font-size="11" fill="#666">t = T (β̄→1)</text>
+      <rect x="0" y="0" width="60" height="28" class="mask-cell" fill="#999" stroke="#222"/><text x="30" y="18" text-anchor="middle" fill="#fff">[M]</text>
+      <rect x="62" y="0" width="60" height="28" class="mask-cell" fill="#999" stroke="#222"/><text x="92" y="18" text-anchor="middle" fill="#fff">[M]</text>
+      <rect x="124" y="0" width="60" height="28" class="mask-cell" fill="#999" stroke="#222"/><text x="154" y="18" text-anchor="middle" fill="#fff">[M]</text>
+      <rect x="186" y="0" width="60" height="28" class="mask-cell" fill="#999" stroke="#222"/><text x="216" y="18" text-anchor="middle" fill="#fff">[M]</text>
+      <rect x="248" y="0" width="60" height="28" class="mask-cell" fill="#999" stroke="#222"/><text x="278" y="18" text-anchor="middle" fill="#fff">[M]</text>
+    </g>
+
+    <g transform="translate(380, 50)">
+      <text x="0" y="-5" font-weight="600">关键性质</text>
+      <text x="0" y="20">• 每个位置独立翻硬币</text>
+      <text x="0" y="40">• 概率 β̄ₜ 变 [MASK]</text>
+      <text x="0" y="60">• 概率 1-β̄ₜ 保留</text>
+      <text x="0" y="80">• [MASK] 一旦出现就不再变</text>
+      <text x="0" y="100">• → 闭式 q(xₜ|x₀)</text>
+      <text x="0" y="125">• 终点：全 [MASK]</text>
+      <text x="0" y="145">  （对应 DDPM 终点：纯高斯）</text>
+    </g>
+  </g>
+</svg>
+
+<h2>四、反向过程：模型在干什么？</h2>
+
+<p>有了前向的闭式 $q(x_t \mid x_0)$，反向就好定义了：给定带 <code>[MASK]</code> 的 $x_t$，<strong>对每个 <code>[MASK]</code> 位置预测它的原 token</strong>。</p>
+
+<p>形式化：设 $f_\theta(x_t, t)$ 是一个 Transformer（通常就是 BERT-style 双向 encoder），输出对每个位置上的词表分布 $p_\theta(\tilde x^{(i)} \mid x_t)$。我们希望：</p>
+
+<p>$$p_\theta(\tilde x^{(i)} \mid x_t) \approx q(x_0^{(i)} \mid x_t^{(i)} = \texttt{[MASK]})$$</p>
+
+<p>注意几个微妙之处：</p>
+
+<ul>
+  <li>只对 <code>[MASK]</code> 位置预测——非 <code>[MASK]</code> 位置 ground-truth 已经摆在眼前，没什么好预测的。<em>这点和 GPT 完全不一样</em>：GPT 在训练时对每个 token 都要算 next-token loss；masked diffusion 只对被 mask 的那部分位置算 loss。</li>
+  <li>反向是<strong>并行</strong>的：所有 <code>[MASK]</code> 位置同时预测，<em>不像</em> autoregressive 一个一个吐。这是 diffusion LLM 比 GPT 在 inference latency 上有优势的源头。设序列长 $L$、扩散步数 $T$，autoregressive 推理是 $L$ 步串行；diffusion 是 $T$ 步并行，每步是 $O(L^2)$ 的 attention。只要 $T \ll L$，就能加速。</li>
+  <li>每一步反向只<strong>揭开一部分</strong> <code>[MASK]</code>，剩下的留给下一步——下一节展开。</li>
+  <li>反向过程<strong>不需要时间反向的 transition matrix</strong>：因为 absorbing 是单向的（只往 <code>[MASK]</code> 跳），所以反向天然就是 "<code>[MASK]</code> → 词表里某个真 token"，这步直接由模型给。不用像 D3PM 那样显式算 $q(x_{t-1}\mid x_t, x_0)$ 的复杂形式。</li>
+</ul>
+
+<p>Vizuara L14 chunk #179 用了一个非常 hands-on 的比喻：</p>
+
+<div class="callout-quote">
+"When we start rotating the fluid slowly, we want to predict how much noise is added at each step. So that during denoising, it will help us recover the original state."
+</div>
+
+<p>把"流体被搅拌"换成"token 被遮"，是同一回事：模型学会"识别每一步加了多少噪声、并把它撤掉"。在 masked diffusion 里，"撤掉噪声" = "对每个 <code>[MASK]</code> 位置预测原 token 分布"。</p>
+
+<h2>五、训练目标：BERT 的「变速率」版本</h2>
+
+<p>讲师在 CMU L12 后半段（以及 Vizuara L13–L14）讲了训练这件事。落到代码层面就两行：</p>
+
+<ol>
+  <li>采一个时间 $t \sim \mathcal{U}[0, 1]$；</li>
+  <li>按 $\bar\beta_t$ 的比例独立地 mask 输入序列；模型预测被 mask 位置的原 token；交叉熵 loss。</li>
+</ol>
+
+<p>这种"先采一个噪声水平、再训练"的循环和 DDPM <em>结构完全一致</em>，唯一变化是把"高斯噪声 $\epsilon$"换成了"二项 mask"。Vizuara L12（chunk #163）反复强调：扩散模型的三件套——前向加噪、噪声预测、反向去噪——在文本上和图像上是一一映射的。区别只在<em>噪声的形态</em>。</p>
+
+<p>具体损失（连续时间形式，遵循 MDLM 等近期工作）：</p>
+
+<p>$$\mathcal{L}_{\text{MDLM}}(\theta) = \mathbb{E}_{t,x_0,x_t}\!\left[ \frac{1}{\bar\beta_t}\sum_{i: x_t^{(i)}=\texttt{[M]}} -\log p_\theta\!\big(x_0^{(i)} \mid x_t\big)\right]$$</p>
+
+<div class="deriv-step">
+<strong>关于权重 $1/\bar\beta_t$</strong><br>
+<em>Why</em>：被 mask 位置的<em>期望数量</em>正比于 $\bar\beta_t$。除以 $\bar\beta_t$ 就把"不同 $t$ 下的样本量差异"抵消掉了——所有 $t$ 对总 loss 的贡献变成同量级，避免大 $t$（几乎全 mask）压住小 $t$（基本没 mask）的梯度。这是 MDLM/SUBS 那类工作的核心调度技巧之一。
+</div>
+
+<h3>5.1 这和 BERT 到底有什么区别？</h3>
+
+<p>表面看，masked diffusion 的训练目标 = 「随机 mask 一部分 token，预测被 mask 的位置」——这<strong>就是 BERT 的预训练任务</strong>。讲师对此非常自觉，专门点出来：核心不同在<em>掩码率怎么采</em>。</p>
+
+<table style="width:100%; border-collapse:collapse; margin:1rem 0;">
+  <thead>
+    <tr style="background:var(--surface-soft);">
+      <th style="padding:0.5rem; text-align:left; border:1px solid var(--border);">维度</th>
+      <th style="padding:0.5rem; text-align:left; border:1px solid var(--border);">BERT (Devlin et al. 2018)</th>
+      <th style="padding:0.5rem; text-align:left; border:1px solid var(--border);">Masked Diffusion (MDLM 2024)</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td style="padding:0.5rem; border:1px solid var(--border);">掩码率</td>
+      <td style="padding:0.5rem; border:1px solid var(--border);"><strong>固定 15%</strong></td>
+      <td style="padding:0.5rem; border:1px solid var(--border)"><strong>$\bar\beta_t$，$t\sim\mathcal{U}[0,1]$ 随机采</strong>，等价于 0%–100% 全覆盖</td>
+    </tr>
+    <tr>
+      <td style="padding:0.5rem; border:1px solid var(--border);">推理用法</td>
+      <td style="padding:0.5rem; border:1px solid var(--border);">单步：一次性把所有 <code>[MASK]</code> 填回去 → 表示学习</td>
+      <td style="padding:0.5rem; border:1px solid var(--border);"><strong>迭代</strong>：从全 <code>[MASK]</code> 开始，一步揭一小撮，直到全部还原 → 生成</td>
+    </tr>
+    <tr>
+      <td style="padding:0.5rem; border:1px solid var(--border);">能不能从零生成？</td>
+      <td style="padding:0.5rem; border:1px solid var(--border);">否——BERT 没见过"95% mask"的样本，全 <code>[MASK]</code> 输入会崩</td>
+      <td style="padding:0.5rem; border:1px solid var(--border);"><strong>能</strong>——见过 1%–99% 各种 mask 率</td>
+    </tr>
+    <tr>
+      <td style="padding:0.5rem; border:1px solid var(--border);">理论基础</td>
+      <td style="padding:0.5rem; border:1px solid var(--border);">denoising autoencoder 直觉</td>
+      <td style="padding:0.5rem; border:1px solid var(--border);">absorbing-state discrete diffusion 的 ELBO</td>
+    </tr>
+  </tbody>
+</table>
+
+<div class="callout callout-tip">
+💡 <strong>一句话总结</strong>：<em>BERT 是 masked diffusion 在固定噪声水平上的特例</em>。把 BERT 的 15% 推广到 $t\sim\mathcal{U}[0,1]$ 全覆盖，再加迭代采样，就拿到了一个能生成的 diffusion LM。
+</div>
+
+<svg viewBox="0 0 720 280" role="img" aria-label="BERT 一次性 vs masked diffusion 迭代">
+  <g font-family="ui-sans-serif" font-size="11">
+    <text x="180" y="18" text-anchor="middle" font-weight="600">BERT：一次性还原（无法生成）</text>
+    <text x="540" y="18" text-anchor="middle" font-weight="600">Masked Diffusion：迭代还原（能生成）</text>
+
+    <!-- BERT row -->
+    <g transform="translate(20, 50)">
+      <text x="0" y="-5" font-size="10" fill="#666">输入 (15% mask)</text>
+      <rect x="0" y="0" width="32" height="22" fill="#e8f5e9"/><text x="16" y="15" text-anchor="middle">The</text>
+      <rect x="33" y="0" width="32" height="22" fill="#ccc"/><text x="49" y="15" text-anchor="middle">[M]</text>
+      <rect x="66" y="0" width="32" height="22" fill="#e8f5e9"/><text x="82" y="15" text-anchor="middle">sat</text>
+      <rect x="99" y="0" width="32" height="22" fill="#e8f5e9"/><text x="115" y="15" text-anchor="middle">on</text>
+      <rect x="132" y="0" width="32" height="22" fill="#e8f5e9"/><text x="148" y="15" text-anchor="middle">mat</text>
+      <text x="180" y="14" font-size="14">→</text>
+      <text x="200" y="-5" font-size="10" fill="#666">一步还原</text>
+      <rect x="200" y="0" width="32" height="22" fill="#e8f5e9"/><text x="216" y="15" text-anchor="middle">The</text>
+      <rect x="233" y="0" width="32" height="22" fill="#cfe8ff"/><text x="249" y="15" text-anchor="middle">cat</text>
+      <rect x="266" y="0" width="32" height="22" fill="#e8f5e9"/><text x="282" y="15" text-anchor="middle">sat</text>
+      <rect x="299" y="0" width="32" height="22" fill="#e8f5e9"/><text x="315" y="15" text-anchor="middle">on</text>
+      <rect x="332" y="0" width="32" height="22" fill="#e8f5e9"/><text x="348" y="15" text-anchor="middle">mat</text>
+    </g>
+
+    <g transform="translate(20, 90)">
+      <rect x="0" y="0" width="32" height="22" fill="#ccc"/><text x="16" y="15" text-anchor="middle">[M]</text>
+      <rect x="33" y="0" width="32" height="22" fill="#ccc"/><text x="49" y="15" text-anchor="middle">[M]</text>
+      <rect x="66" y="0" width="32" height="22" fill="#ccc"/><text x="82" y="15" text-anchor="middle">[M]</text>
+      <rect x="99" y="0" width="32" height="22" fill="#ccc"/><text x="115" y="15" text-anchor="middle">[M]</text>
+      <rect x="132" y="0" width="32" height="22" fill="#ccc"/><text x="148" y="15" text-anchor="middle">[M]</text>
+      <text x="180" y="14" font-size="14">→</text>
+      <rect x="200" y="0" width="32" height="22" fill="#ffd6d6"/><text x="216" y="15" text-anchor="middle">??</text>
+      <rect x="233" y="0" width="32" height="22" fill="#ffd6d6"/><text x="249" y="15" text-anchor="middle">??</text>
+      <rect x="266" y="0" width="32" height="22" fill="#ffd6d6"/><text x="282" y="15" text-anchor="middle">??</text>
+      <rect x="299" y="0" width="32" height="22" fill="#ffd6d6"/><text x="315" y="15" text-anchor="middle">??</text>
+      <rect x="332" y="0" width="32" height="22" fill="#ffd6d6"/><text x="348" y="15" text-anchor="middle">??</text>
+      <text x="200" y="40" font-size="10" fill="#c33">没见过 100% mask，崩</text>
+    </g>
+
+    <!-- diffusion row -->
+    <g transform="translate(390, 50)">
+      <rect x="0" y="0" width="32" height="22" fill="#999"/><text x="16" y="15" text-anchor="middle" fill="#fff">[M]</text>
+      <rect x="33" y="0" width="32" height="22" fill="#999"/><text x="49" y="15" text-anchor="middle" fill="#fff">[M]</text>
+      <rect x="66" y="0" width="32" height="22" fill="#999"/><text x="82" y="15" text-anchor="middle" fill="#fff">[M]</text>
+      <rect x="99" y="0" width="32" height="22" fill="#999"/><text x="115" y="15" text-anchor="middle" fill="#fff">[M]</text>
+      <rect x="132" y="0" width="32" height="22" fill="#999"/><text x="148" y="15" text-anchor="middle" fill="#fff">[M]</text>
+      <text x="180" y="14" font-size="14">→</text>
+      <rect x="200" y="0" width="32" height="22" fill="#cfe8ff"/><text x="216" y="15" text-anchor="middle">The</text>
+      <rect x="233" y="0" width="32" height="22" fill="#ccc"/><text x="249" y="15" text-anchor="middle">[M]</text>
+      <rect x="266" y="0" width="32" height="22" fill="#ccc"/><text x="282" y="15" text-anchor="middle">[M]</text>
+      <rect x="299" y="0" width="32" height="22" fill="#cfe8ff"/><text x="315" y="15" text-anchor="middle">on</text>
+      <rect x="332" y="0" width="32" height="22" fill="#ccc"/><text x="348" y="15" text-anchor="middle">[M]</text>
+    </g>
+
+    <g transform="translate(390, 90)">
+      <text x="0" y="14" font-size="14">→</text>
+      <rect x="20" y="0" width="32" height="22" fill="#cfe8ff"/><text x="36" y="15" text-anchor="middle">The</text>
+      <rect x="53" y="0" width="32" height="22" fill="#cfe8ff"/><text x="69" y="15" text-anchor="middle">cat</text>
+      <rect x="86" y="0" width="32" height="22" fill="#ccc"/><text x="102" y="15" text-anchor="middle">[M]</text>
+      <rect x="119" y="0" width="32" height="22" fill="#cfe8ff"/><text x="135" y="15" text-anchor="middle">on</text>
+      <rect x="152" y="0" width="32" height="22" fill="#cfe8ff"/><text x="168" y="15" text-anchor="middle">mat</text>
+      <text x="190" y="14" font-size="14">→</text>
+      <rect x="210" y="0" width="32" height="22" fill="#cfe8ff"/><text x="226" y="15" text-anchor="middle">The</text>
+      <rect x="243" y="0" width="32" height="22" fill="#cfe8ff"/><text x="259" y="15" text-anchor="middle">cat</text>
+      <rect x="276" y="0" width="32" height="22" fill="#cfe8ff"/><text x="292" y="15" text-anchor="middle">sat</text>
+      <rect x="309" y="0" width="32" height="22" fill="#cfe8ff"/><text x="325" y="15" text-anchor="middle">on</text>
+      <rect x="342" y="0" width="32" height="22" fill="#cfe8ff"/><text x="358" y="15" text-anchor="middle">mat</text>
+    </g>
+
+    <text x="180" y="160" font-size="11" fill="#666" font-weight="600">关键差别</text>
+    <text x="20" y="180" font-size="11">• BERT：训练 mask 率固定 15%；推理一次性预测；适合表示学习，无法从零生成。</text>
+    <text x="20" y="200" font-size="11">• Masked Diffusion：训练 mask 率均匀采 0%–100%；推理迭代揭开一部分。</text>
+    <text x="20" y="220" font-size="11">• 「同一个 BERT 网络架构，换训练 schedule 和推理 schedule，就能生成」——这是 MDLM 给的 punchline。</text>
+    <text x="20" y="248" font-size="11" fill="#666">参考：Sahoo et al. "Simple and Effective Masked Diffusion Language Models", NeurIPS 2024.</text>
+  </g>
+</svg>
+
+<h2>六、迭代采样：怎么从全 <code>[MASK]</code> 一步步揭开？</h2>
+
+<p>训练完，给定一个学得不错的 $p_\theta(\tilde x^{(i)} \mid x_t)$，怎么用它生成？讲师在 CMU L12 后半段以及 Vizuara L13–L17 都铺过这一段。模板如下：</p>
+
+<div class="deriv-step">
+<strong>采样算法骨架</strong>
+<ol style="margin:0.4rem 0;">
+  <li>初始化：$x_T$ = 整条 <code>[MASK]</code> 序列；选定步数 $T$（典型 $T=128$ 或 $256$）。</li>
+  <li>对 $t = T, T-1, \dots, 1$：
+    <ol type="a">
+      <li>前向一次网络 $f_\theta(x_t, t)$，得到每个位置上的词表分布；</li>
+      <li>计算"应该剩多少 <code>[MASK]</code>"：$N_{t-1} = \lceil \bar\beta_{t-1} \cdot L\rceil$，$L$ 是序列长度；</li>
+      <li>当前 <code>[MASK]</code> 数减去 $N_{t-1}$ = 这一步要揭开的位置数；</li>
+      <li>按某种策略（最简单：随机；更好：confidence top-K）挑出要揭开的位置；</li>
+      <li>对挑中的位置：从对应 token 分布抽样填回；其他 <code>[MASK]</code> 位置原样保留。</li>
+    </ol>
+  </li>
+  <li>$t = 0$：所有位置都已揭开，输出 $x_0$。</li>
+</ol>
+</div>
+
+<div class="callout callout-note">
+🛠️ <strong>"揭多少"是个超参</strong>——和 DDPM 的 $\beta_t$ schedule 同等地位。线性、余弦、log-linear 都有人用。MDLM 论文里建议 log-linear 类的，让早期（高 $t$）揭得快、后期（接近 $x_0$）揭得慢。
+</div>
+
+<h3>6.1 为什么不是一步搞定？</h3>
+
+<p>理论上 $f_\theta$ 已经能给每个 <code>[MASK]</code> 位置一个分布，确实可以一次性把所有 <code>[MASK]</code> 都抽掉、得到一个 $x_0$ 候选。但这样做<strong>质量糟糕</strong>，原因：</p>
+
+<ul>
+  <li>每个位置的分布是<em>边缘分布</em> $p_\theta(\tilde x^{(i)} \mid x_t)$，<em>不</em>是联合分布。独立抽样把 token 之间的条件依赖完全丢了。结果就是各位置看起来都"局部合理"，但拼在一起不通顺（"the the the envelope" 式的 bug，对应讲师在 chunk #1559 给同学指出的那种噪声）。</li>
+  <li>迭代采样的精髓在于：<strong>先填高置信度的几个位置，再让后面的位置 condition 在这些已填上的 token 上</strong>。每步揭开一小撮 → 联合分布被"分块"展开。</li>
+</ul>
+
+<h3>6.2 选 token 的策略：随机 vs confidence vs entropy</h3>
+
+<ul>
+  <li><strong>Random</strong>：等概率挑要揭的位置。最简单，最差。</li>
+  <li><strong>Confidence top-K</strong>（MaskGIT 2022 起就这么干）：挑模型最确信（max softmax 最大）的若干位置揭开。</li>
+  <li><strong>Lowest entropy</strong>：用预测分布的 entropy 排序，挑最低 entropy 的揭开。</li>
+</ul>
+
+<div class="callout callout-warning">
+⚠️ <strong>训练-推理 gap</strong>：训练时模型见的"已揭开"位置 token 一定是<em>真实</em>原 token（来自 $x_0$）；推理时已揭开位置是<em>模型自己抽样的</em> token，可能是错的。Errors compound → 后期步骤都在错位置 condition 上预测。这是和 GPT 的 teacher-forcing 问题<em>完全同类的</em>暴露偏差，MDLM 等工作有专门的 fix（如 carry-over unmask、self-conditioning）。
+</div>
+
+<h2>七、整段拉通：训练-推理流程对照</h2>
+
+<p>把训练和推理放在一起对比，可以看到一个非常对称的图——这两边其实都是同一个网络 $f_\theta$，只是用法不同：训练时给"半遮的真实数据"、要求重建；推理时给"全遮"、要求自下而上生成。理解这个对称是看懂任何 diffusion LM 代码库的钥匙。</p>
+
+<svg viewBox="0 0 720 260" role="img" aria-label="训练与推理对照">
+  <g font-family="ui-sans-serif" font-size="11">
+    <text x="180" y="18" text-anchor="middle" font-weight="600">训练</text>
+    <text x="540" y="18" text-anchor="middle" font-weight="600">推理</text>
+
+    <g transform="translate(20, 40)">
+      <rect x="0" y="0" width="320" height="200" rx="6" fill="#eef6fc" stroke="#2b80c4"/>
+      <text x="160" y="20" text-anchor="middle" font-weight="600">每个 mini-batch:</text>
+      <text x="15" y="45">1. 采 t ~ U[0, 1]</text>
+      <text x="15" y="65">2. 每个 token 独立翻硬币，</text>
+      <text x="30" y="82">以 β̄ₜ 概率改为 [MASK]</text>
+      <text x="15" y="105">3. 网络 f_θ(x_t, t) 前向</text>
+      <text x="15" y="125">4. 对 [MASK] 位置算</text>
+      <text x="30" y="142">CE(p_θ, x₀)</text>
+      <text x="15" y="165">5. 反传，更新 θ</text>
+      <text x="15" y="185" fill="#2b80c4" font-style="italic">≈ BERT，但 mask 率变化</text>
+    </g>
+
+    <g transform="translate(380, 40)">
+      <rect x="0" y="0" width="320" height="200" rx="6" fill="#f3f0fa" stroke="#6f4dd0"/>
+      <text x="160" y="20" text-anchor="middle" font-weight="600">从 x_T = 全 [MASK] 出发:</text>
+      <text x="15" y="45">for t = T, T-1, ..., 1:</text>
+      <text x="30" y="65">a. 前向 f_θ(x_t, t)</text>
+      <text x="30" y="82">b. 算下一步该剩多少 [MASK]</text>
+      <text x="30" y="105">c. 按 confidence top-K 选</text>
+      <text x="45" y="122">要揭的位置</text>
+      <text x="30" y="142">d. 从预测分布抽样填回</text>
+      <text x="30" y="162">e. 其余 [MASK] 留给下一步</text>
+      <text x="15" y="185" fill="#6f4dd0" font-style="italic">→ 全部揭开后返回 x_0</text>
+    </g>
+  </g>
+</svg>
+
+<h2>八、PyTorch 实现骨架</h2>
+
+<p>下面是一个能跑的 MDLM-style 训练 + 采样 skeleton，对应 Vizuara L16 在 Colab Pro/H100 上演示的代码逻辑（chunk #237、#269）。为聚焦概念，省掉 dataloader、Transformer 内部、lr scheduler 等细节。</p>
+
+<pre><code>import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+MASK_ID = 50257  # 假设 GPT-2 词表末尾 +1 留给 [MASK]
+VOCAB_SIZE = MASK_ID + 1
+
+class MaskedDiffusionLM(nn.Module):
+    """BERT-style Transformer encoder + time embedding"""
+    def __init__(self, vocab_size=VOCAB_SIZE, d_model=512, n_layers=12, n_heads=8):
+        super().__init__()
+        self.tok_emb = nn.Embedding(vocab_size, d_model)
+        self.time_emb = nn.Linear(1, d_model)               # 把 t∈[0,1] 嵌进 d_model
+        self.encoder = nn.TransformerEncoder(
+            nn.TransformerEncoderLayer(d_model, n_heads, batch_first=True),
+            n_layers)
+        self.head = nn.Linear(d_model, vocab_size)
+
+    def forward(self, x_t, t):
+        # x_t: (B, L) int64; t: (B,) float in [0,1]
+        h = self.tok_emb(x_t) + self.time_emb(t[:, None, None].expand(-1, x_t.size(1), -1))
+        h = self.encoder(h)
+        return self.head(h)                                 # logits: (B, L, V)
+
+
+# -------- 训练 step --------
+def train_step(model, x0, optim):
+    B, L = x0.shape
+    t = torch.rand(B, device=x0.device)                     # t ~ U[0,1]
+    beta_bar = t                                            # 简单起见：linear schedule
+    mask = torch.rand(B, L, device=x0.device) < beta_bar[:, None]
+    x_t = torch.where(mask, torch.full_like(x0, MASK_ID), x0)
+
+    logits = model(x_t, t)                                  # (B, L, V)
+    # 只对被 mask 的位置算 CE，并按 1/β̄ 加权（见正文 step 关于权重的解释）
+    ce = F.cross_entropy(
+        logits.transpose(1, 2), x0, reduction='none')       # (B, L)
+    loss = (ce * mask.float()).sum(-1) / beta_bar.clamp(min=1e-5)
+    loss = loss.mean()
+
+    optim.zero_grad(); loss.backward(); optim.step()
+    return loss.item()
+
+
+# -------- 采样 --------
+@torch.no_grad()
+def sample(model, L=128, T=128, device='cuda', strategy='confidence'):
+    """从全 [MASK] 出发，迭代揭开。"""
+    x = torch.full((1, L), MASK_ID, device=device, dtype=torch.long)
+    for step in range(T, 0, -1):
+        t_cur = torch.tensor([step / T], device=device)
+        beta_bar_prev = (step - 1) / T
+        # 目标：下一步保留 beta_bar_prev * L 个 [MASK]
+        target_mask_count = int(round(beta_bar_prev * L))
+        cur_mask = (x == MASK_ID)
+        to_unmask = cur_mask.sum().item() - target_mask_count
+        if to_unmask <= 0:
+            continue
+
+        logits = model(x, t_cur)                            # (1, L, V)
+        probs = logits.softmax(-1)
+        # 只考虑当前 [MASK] 位置
+        conf, pred = probs.max(-1)                          # (1, L)
+        conf = conf.masked_fill(~cur_mask, -1.0)            # 非 mask 不参与
+        # 挑置信度最高的 to_unmask 个位置揭开
+        topk = conf[0].topk(to_unmask).indices
+        x[0, topk] = pred[0, topk]
+    return x
+
+
+# -------- 用法 --------
+# model = MaskedDiffusionLM().cuda()
+# optim = torch.optim.AdamW(model.parameters(), lr=3e-4)
+# for batch in loader:           # batch: (B, L) of token ids
+#     train_step(model, batch.cuda(), optim)
+# generated = sample(model, L=128, T=128)
+</code></pre>
+
+<div class="callout callout-note">
+🛠️ <strong>Vizuara 的实战 caveat（chunk #237、#269 原话压缩）</strong>：<br>
+• 在 Google Colab Pro 上跑，"H100 GPU is much faster" 比 A100 明显快。<br>
+• Diffusion LM 比同规模 GPT 慢——讲师建议至少跑 200,000 iterations 才能看到像样的 sample，比常见的 GPT-2 from-scratch 教学 demo 高出一个数量级。<br>
+• 推理时的 "neon style gif" 可视化是从 GPT-2 from-scratch 项目搬过来的，本身和 diffusion 无关，但能直观看到"全 <code>[MASK]</code> → 真实句子"逐步揭开的过程。
+</div>
+
+<h2>九、MDLM 是这一支线的引爆点</h2>
+
+<p>讲师在 CMU L12 中把 absorbing diffusion 这条线的"现代化重启"归功给一组 2024 年集中爆发的工作。其中 <a href="https://arxiv.org/abs/2406.07524">MDLM（Sahoo et al., NeurIPS 2024）</a>地位最特殊。</p>
+
+<div class="my-addition">
+🟡 <strong>教材外补充：MDLM 到底做了什么？</strong>
+<ul>
+  <li><strong>题目"Simple and Effective"</strong>不是宣传——它的训练目标和我们上面写的 PyTorch skeleton 几乎一模一样，没有花哨的 trick。</li>
+  <li><strong>关键工程改进</strong>：(1) <em>continuous-time</em> ELBO 取代 D3PM 的离散时间步；(2) 上面 $1/\bar\beta_t$ 那个权重的精确推导；(3) <em>carry-over unmasking</em>——已揭开 token 在后续步骤永不再被 re-mask；(4) zero-masking-rate 训练样本剔除等数值技巧。</li>
+  <li><strong>结果</strong>：在 LM1B、OpenWebText 上的 zero-shot perplexity <em>首次</em>超过同 size 的 GPT-2，下游 LAMBADA / HellaSwag 也与自回归基线打平。这是讲师反复强调的"breakthrough moment"——<em>discrete diffusion 终于在 scale 上证明自己</em>。</li>
+  <li>同期工作还有 <strong>RDM</strong>（Reparameterized Discrete Diffusion，He et al. 2023）、<strong>SUBS</strong>（Subsequence diffusion）、Inception Labs 的 <strong>Mercury</strong>（商业 diffusion LLM）等。</li>
+</ul>
+</div>
+
+<h2>十、第二种范式：SEDD 与 Concrete Score</h2>
+
+<p>到这里为止我们走的是 absorbing 路线——靠 <code>[MASK]</code> 这个吸收态简化分析。还有<strong>另一条理论路线</strong>，由 <a href="https://arxiv.org/abs/2310.16834">Aaron Lou, Chenlin Meng, Stefano Ermon (ICML 2024 Best Paper)</a> 的 <a href="/video-to-notebook/concepts/score-entropy-discrete-diffusion/">SEDD（Score Entropy Discrete Diffusion）</a>代表。SEDD 不依赖 <code>[MASK]</code>，而是把 score matching 直接搬到离散空间。</p>
+
+<h3>10.1 离散里没有"梯度"，怎么定义 score？</h3>
+
+<p>连续扩散里的 score 是 $\nabla_x \log p_t(x)$——分布的梯度。在离散空间没有梯度可言（你怎么"对 token 求导"？）。SEDD 给的替代叫 <strong>concrete score</strong> 或 <strong>ratio score</strong>：</p>
+
+<p>$$s_\theta(x, y, t) \;\approx\; \frac{p_t(y)}{p_t(x)}$$</p>
+
+<p>解读：对每一对状态 $(x, y)$（通常 $y$ 是 $x$ 改一个 token 得到的近邻），模型预测它们的<em>概率比</em>。这个比值在连续极限下就退回 score 的方向导数。</p>
+
+<h3>10.2 训练目标：Score Entropy Loss</h3>
+
+<p>SEDD 给的训练目标叫 <em>score entropy</em>（区别于连续空间的 score matching 的 Hyvärinen 损失）：</p>
+
+<p>$$\mathcal{L}_{\text{SE}}(\theta) = \mathbb{E}_{t,\,x\sim p_t}\,\sum_{y \neq x} w_t(x,y)\left[ s_\theta(x,y,t) - \frac{p_t(y)}{p_t(x)}\log s_\theta(x,y,t) + \text{const}\right]$$</p>
+
+<p>其中 $w_t(x,y)$ 是邻接图上的转移率（通常只在改一个 token 的邻居上非零）。<strong>不用知道 $p_t$ 的归一化常数</strong>——这点和连续 score matching 一致，是它能 scale 的关键。</p>
+
+<svg viewBox="0 0 720 220" role="img" aria-label="SEDD ratio matching">
+  <g font-family="ui-sans-serif" font-size="11">
+    <text x="360" y="18" text-anchor="middle" font-weight="600">SEDD：在状态图上估计概率比 p_t(y) / p_t(x)</text>
+
+    <g transform="translate(40, 50)">
+      <circle cx="100" cy="80" r="22" fill="#cfe8ff" stroke="#2b80c4"/>
+      <text x="100" y="84" text-anchor="middle">x</text>
+      <text x="100" y="115" text-anchor="middle" font-size="10" fill="#666">"The cat sat"</text>
+
+      <circle cx="240" cy="30" r="20" fill="#fff" stroke="#999"/>
+      <text x="240" y="34" text-anchor="middle">y₁</text>
+      <text x="240" y="60" text-anchor="middle" font-size="9" fill="#666">"The cat ran"</text>
+
+      <circle cx="280" cy="100" r="20" fill="#fff" stroke="#999"/>
+      <text x="280" y="104" text-anchor="middle">y₂</text>
+      <text x="280" y="130" text-anchor="middle" font-size="9" fill="#666">"A cat sat"</text>
+
+      <circle cx="240" cy="160" r="20" fill="#fff" stroke="#999"/>
+      <text x="240" y="164" text-anchor="middle">y₃</text>
+      <text x="240" y="188" text-anchor="middle" font-size="9" fill="#666">"The dog sat"</text>
+
+      <line x1="122" y1="70" x2="220" y2="35" stroke="#888"/>
+      <line x1="122" y1="80" x2="260" y2="100" stroke="#888"/>
+      <line x1="122" y1="90" x2="220" y2="155" stroke="#888"/>
+
+      <text x="170" y="50" font-size="10" fill="#2b80c4">s_θ(x,y₁,t)</text>
+      <text x="180" y="98" font-size="10" fill="#2b80c4">s_θ(x,y₂,t)</text>
+      <text x="170" y="135" font-size="10" fill="#2b80c4">s_θ(x,y₃,t)</text>
+    </g>
+
+    <g transform="translate(400, 60)">
+      <text x="0" y="0" font-weight="600">关键点</text>
+      <text x="0" y="22">• 每条边 = 改一个 token 的近邻</text>
+      <text x="0" y="44">• 模型 s_θ 输出概率比，不输出概率本身</text>
+      <text x="0" y="66">• 训练目标 = score entropy</text>
+      <text x="0" y="88">  （离散版的 score matching）</text>
+      <text x="0" y="110">• 不依赖 [MASK]</text>
+      <text x="0" y="132">• 推广到任意离散 noising 过程</text>
+      <text x="0" y="158" fill="#6f4dd0" font-style="italic">Lou et al., ICML 2024 Best Paper</text>
+    </g>
+  </g>
+</svg>
+
+<h3>10.3 概念直觉：什么叫"概率比"？</h3>
+
+<p>用 "I love cat" 的玩具例子回想一下。设当前状态 $x$ = "I love cat"，三个邻居：</p>
+
+<ul>
+  <li>$y_1$ = "I love dog"（把 cat 换成 dog）</li>
+  <li>$y_2$ = "You love cat"（把 I 换成 You）</li>
+  <li>$y_3$ = "I hate cat"（把 love 换成 hate）</li>
+</ul>
+
+<p>concrete score $s_\theta(x, y_i, t)$ 告诉你"在时间 $t$，从 $x$ 跳到 $y_i$ 的相对概率有多大"。如果 $y_1$ 出现得比 $x$ 频繁（在 $p_t$ 下），那 $s_\theta(x, y_1, t) > 1$；反过来则 $< 1$。这个比值就是离散版的"梯度方向"——它告诉模型应该往哪个邻居走能"上坡"，逼近真实数据分布的局部峰值。</p>
+
+<p>SEDD 训练完成后，反向 sampling 不是"填 <code>[MASK]</code>"，而是<strong>在状态图上做马尔可夫跳跃</strong>：从一个状态 $x$ 出发，按 $s_\theta(x, y, t)$ 给的相对概率挑邻居 $y$，跳过去，再从 $y$ 继续。这是和 absorbing 路线截然不同的 sampling 方式。</p>
+
+<h3>10.4 SEDD vs MDLM：选哪个？</h3>
+
+<table style="width:100%; border-collapse:collapse; margin:1rem 0;">
+  <thead>
+    <tr style="background:var(--surface-soft);">
+      <th style="padding:0.5rem; border:1px solid var(--border); text-align:left;">维度</th>
+      <th style="padding:0.5rem; border:1px solid var(--border); text-align:left;">MDLM (absorbing)</th>
+      <th style="padding:0.5rem; border:1px solid var(--border); text-align:left;">SEDD (general)</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td style="padding:0.5rem; border:1px solid var(--border);">前向噪声</td>
+      <td style="padding:0.5rem; border:1px solid var(--border);">只往 <code>[MASK]</code> 跳</td>
+      <td style="padding:0.5rem; border:1px solid var(--border);">任意 transition graph</td>
+    </tr>
+    <tr>
+      <td style="padding:0.5rem; border:1px solid var(--border);">训练目标</td>
+      <td style="padding:0.5rem; border:1px solid var(--border);">cross-entropy（≈ BERT）</td>
+      <td style="padding:0.5rem; border:1px solid var(--border);">score entropy（ratio matching）</td>
+    </tr>
+    <tr>
+      <td style="padding:0.5rem; border:1px solid var(--border);">实现难度</td>
+      <td style="padding:0.5rem; border:1px solid var(--border);"><strong>极简</strong>，重用 BERT 训练栈</td>
+      <td style="padding:0.5rem; border:1px solid var(--border);">需要在邻接图上枚举</td>
+    </tr>
+    <tr>
+      <td style="padding:0.5rem; border:1px solid var(--border);">理论一致性</td>
+      <td style="padding:0.5rem; border:1px solid var(--border);">absorbing 是特例</td>
+      <td style="padding:0.5rem; border:1px solid var(--border)"><strong>更通用</strong>的离散 score matching 框架</td>
+    </tr>
+    <tr>
+      <td style="padding:0.5rem; border:1px solid var(--border);">实证性能</td>
+      <td style="padding:0.5rem; border:1px solid var(--border);">已经追上 GPT-2 perplexity</td>
+      <td style="padding:0.5rem; border:1px solid var(--border);">和 MDLM 同档，部分指标更好</td>
+    </tr>
+  </tbody>
+</table>
+
+<div class="callout callout-tip">
+💡 <strong>从业者的选择</strong>：当前 production 里大多数 diffusion LLM（Mercury、LLaDA、Dream-7B 等）走的都是 <strong>absorbing / MDLM 路线</strong>——因为它和 BERT/GPT 训练栈兼容、调度简单。SEDD 更像理论旗手，告诉你"absorbing 不是唯一选择"。
+</div>
+
+<h2>十一、离散扩散 vs autoregressive：到底强在哪？</h2>
+
+<p>Vizuara 在 L12 chunk #163 把诉求说得很直接：</p>
+
+<div class="callout-quote">
+"We want to predict this not with an autoregressive model but we want to use a diffusion model for getting this probability distribution of the predicted sentences."
+</div>
+
+<p>那"为什么"非要换掉 autoregressive？站在 2024-2026 的视角，社区给出的卖点大致是：</p>
+
+<ol>
+  <li><strong>并行解码</strong>——一步预测所有 <code>[MASK]</code>，固定步数 $T$ 内出 token，理论上和 batch decoding 一样快，而不像 GPT 必须 $L$ 步串行。Inception Labs 的 Mercury 商业 API 演示里，diffusion LM 对长 prompt 的 wall-clock latency 可以做到比 GPT-4 快几倍——背后就是这件事。</li>
+  <li><strong>双向 context</strong>——填空时看得到左右两边，和 BERT 一样擅长 cloze、infilling、结构化生成（受控生成、约束生成天然友好）。GPT 想做填空式生成必须用 prefix LM 或者 fim 这类后门技巧；diffusion LM 天生就是填空模型。</li>
+  <li><strong>非因果场景</strong>——蛋白质设计、代码补全（中间往两头填）、多模态 token 重排，这些任务"顺序"本身就不是从左到右的因果。autoregressive 强行把它们顺序化要付出建模代价；diffusion 不需要。</li>
+  <li><strong>固定步数延迟</strong>——长文本生成的 wall-clock 不再随长度线性增长。生成 200 个 token 和生成 2000 个 token 用相同步数 $T$，只是每步的 attention 矩阵更大。</li>
+  <li><strong>更适合控制和编辑</strong>——给定一段已有文本，把不想要的位置改成 <code>[MASK]</code>，剩下原样，喂进模型重新采样——这就是局部编辑。autoregressive 做这件事得 prompt engineering + sample-and-filter。</li>
+</ol>
+
+<div class="callout callout-warning">
+⚠️ <strong>不能忽视的代价</strong>：和同样参数量的 autoregressive 模型相比，diffusion LM 训练 FLOPs <em>高很多</em>——每个 batch 都要做完整的 $L$-token forward，且需要采几十上百个不同 $t$ 才能稳定优化。Vizuara 反复提"H100 + 200k iterations" 不是夸张，是必需。另一个常见坑：<strong>perplexity 这个指标本身对 diffusion LM 不友好</strong>——它定义在 autoregressive 的 chain-rule 分解上，而 diffusion 是 ELBO 下界，两者不严格可比。MDLM 论文里报的 perplexity 用的是 ELBO 估计的 upper bound，要在脑子里默记这个 caveat。
+</div>
+
+<div class="my-addition">
+🟡 <strong>教材外补充：到 2025 年的最新进展</strong>
+<ul>
+  <li><strong>LLaDA (Renmin Univ. + AI21, 2025)</strong>：把 absorbing diffusion scale 到 8B 参数，在 MMLU、GSM8K 上和同 size 的 Llama 2 7B 持平甚至略胜，证明 masked diffusion 可以走完整的 instruction-tuning 流程。</li>
+  <li><strong>Dream-7B (HKU, 2025)</strong>：另一个 8B 量级 diffusion LM，重点在 RLHF on diffusion——把 reward 信号传回 absorbing process 的非平凡问题。</li>
+  <li><strong>Diffusion-of-thought</strong>：把 chain-of-thought 推理过程当作可以被"先想后说"的 diffusion 中间状态，让模型在 latent 里"反复修改"思考再输出。</li>
+  <li>这条线和<a href="/video-to-notebook/textbook/22/">下下章 Diffusion + RLHF</a> 紧密相关。</li>
+</ul>
+</div>
+
+<h2>十二、回到讲师反复强调的「diffusion 三视角」在离散里的对应</h2>
+
+<p>CMU L12 chunk #1556–#1557 做了一个非常有用的整理：连续扩散有<em>三种等价视角</em>（DDPM / score-based / flow matching），它们在离散世界的对应是什么？</p>
+
+<table style="width:100%; border-collapse:collapse; margin:1rem 0;">
+  <thead>
+    <tr style="background:var(--surface-soft);">
+      <th style="padding:0.5rem; border:1px solid var(--border); text-align:left;">视角</th>
+      <th style="padding:0.5rem; border:1px solid var(--border); text-align:left;">连续</th>
+      <th style="padding:0.5rem; border:1px solid var(--border); text-align:left;">离散</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td style="padding:0.5rem; border:1px solid var(--border);">Denoising</td>
+      <td style="padding:0.5rem; border:1px solid var(--border);">DDPM：学 $\epsilon_\theta$ 或 $x_0$ 预测</td>
+      <td style="padding:0.5rem; border:1px solid var(--border);"><strong>MDLM</strong>：学 $p_\theta(x_0\mid x_t)$</td>
+    </tr>
+    <tr>
+      <td style="padding:0.5rem; border:1px solid var(--border);">Score-based</td>
+      <td style="padding:0.5rem; border:1px solid var(--border);">学 $\nabla_x \log p_t(x)$</td>
+      <td style="padding:0.5rem; border:1px solid var(--border);"><strong>SEDD</strong>：学 concrete score $p_t(y)/p_t(x)$</td>
+    </tr>
+    <tr>
+      <td style="padding:0.5rem; border:1px solid var(--border);">Flow matching</td>
+      <td style="padding:0.5rem; border:1px solid var(--border);">学 velocity field $v_\theta$</td>
+      <td style="padding:0.5rem; border:1px solid var(--border);">Discrete Flow Matching（Gat et al. 2024）：在 categorical simplex 上学 velocity</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>讲师的原话（chunk #1557）："can we have a mapping from the formulations in continuous diffusion to discrete diffusion. This is the question that we're mainly going to be answering today."——本章和上一章合起来就是这个问题的回答。</p>
+
+<h2>十三、源讲座片段</h2>
+
+<figure class="clip-frame">
+  <iframe src="https://www.youtube.com/embed/mXEjZblUBPs?start=489" title="CMU 10799 L12: 在 Karpathy tweet 上识别噪声" allowfullscreen></iframe>
+  <figcaption>📺 CMU 10799 S26 Lecture 12（8:09 处）—— 讲师让全班看一条被加噪的 Karpathy tweet，逐项识别 "random emojis / wrong spellings / out-of-place tokens"，从而过渡到"用 <code>[MASK]</code> 当噪声"。</figcaption>
+</figure>
+
+<h2>十四、本章要记住的（讲师亲口给的核心）</h2>
+
+<div class="takeaways" style="background:#0b5; color:#fff; padding:1.4rem; border-radius:8px; margin-top:2rem;">
+  <ol>
+    <li><strong>离散扩散有两条主路线</strong>：uniform transition（每个 token 以 $\beta/V$ 概率乱跳）和 <em>absorbing transition</em>（只能往 <code>[MASK]</code> 跳）。Masked Diffusion 走的是后者。CMU 用 "I love cat" 玩具词表 + $Q$ 矩阵展开第一条；本章主体讲第二条。</li>
+    <li><strong>$q(x_t\mid x_0)$ 是 absorbing 路线最甜的礼物</strong>：每个位置独立翻一枚 $\bar\beta_t$ 概率的硬币，直接出 $x_t$。一步采样 = 训练效率。</li>
+    <li><strong>Masked Diffusion ≈ "变速率 + 迭代用法"的 BERT</strong>。Mask 率从 BERT 的固定 15% 推广到 $t\sim\mathcal{U}[0,1]$ 全覆盖；推理时从全 <code>[MASK]</code> 起步、迭代揭开。</li>
+    <li><strong>采样是 confidence-driven 的</strong>：每步只揭高置信度的几个位置，让剩下的位置 condition 在已揭开的真实 token 上。一次性全揭开会拼出"the the the envelope"那种 bug。</li>
+    <li><strong>MDLM (Sahoo et al. NeurIPS 2024) 是引爆点</strong>：absorbing diffusion + 连续时间 ELBO + carry-over unmask，让 discrete diffusion LM 首次在 perplexity 上追上同规模 GPT-2。讲师在 L12 反复 cite。</li>
+    <li><strong>SEDD (Lou et al. ICML 2024 Best Paper)</strong> 是另一条理论旗手：学 concrete score $p_t(y)/p_t(x)$，把 score matching 推广到离散邻接图，不依赖 <code>[MASK]</code>，但工程更重。</li>
+    <li><strong>三视角统一</strong>：DDPM ↔ MDLM、score-based ↔ SEDD、flow matching ↔ Discrete Flow Matching。这正是 CMU L12 想给学生留下的"地图"。下一章我们把这张地图落地成一份完整的 <a href="/video-to-notebook/textbook/21/">Diffusion LLM from scratch</a> 代码。</li>
+  </ol>
+</div>
+
+</article>

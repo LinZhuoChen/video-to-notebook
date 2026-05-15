@@ -1,0 +1,217 @@
+<style>
+/* prefix: clg- */
+.clg-quickref{background:var(--surface-soft);border-left:3px solid var(--module-accent);padding:0.8rem 1rem;border-radius:0 4px 4px 0;margin:1rem 0;font-size:0.92rem;}
+.clg-quickref div{margin:0.3rem 0;}
+.clg-svg{display:block;margin:1.2rem auto;max-width:100%;height:auto;}
+.clg-pitfalls ol{padding-left:1.4rem;} .clg-pitfalls li{margin:0.6rem 0;}
+.clg-source{font-style:italic;color:var(--text-muted);border-left:2px solid var(--module-accent);padding:0.3rem 0.9rem;margin:0.6rem 0;font-size:0.92rem;background:var(--surface-soft);border-radius:0 4px 4px 0;}
+.my-addition{display:inline-block;background:var(--module-accent-soft);color:var(--module-accent);padding:0.15rem 0.55rem;border-radius:3px;font-size:0.82rem;font-weight:600;margin:0.4rem 0 0.2rem 0;}
+.clg-controls{display:flex;flex-wrap:wrap;gap:0.4rem;margin:0.8rem 0;}
+.clg-controls button{background:var(--surface-soft);border:1px solid var(--border);color:var(--text);padding:0.35rem 0.75rem;border-radius:4px;cursor:pointer;font-size:0.88rem;font-family:inherit;}
+.clg-controls button.active{background:var(--module-accent);color:var(--surface);border-color:var(--module-accent);}
+#clg-readout{background:var(--surface-soft);border:1px solid var(--border);border-radius:4px;padding:0.9rem 1rem;min-height:5.5rem;font-size:0.92rem;}
+.clg-line{display:none;}
+.clg-line.clg-active-line{display:block;}
+.clg-line code{background:var(--surface);padding:0.05rem 0.3rem;border-radius:3px;}
+.clg-callout{background:var(--red-soft);border-left:3px solid var(--red);padding:0.6rem 0.9rem;border-radius:0 4px 4px 0;margin:0.8rem 0;font-size:0.92rem;}
+</style>
+
+<article class="concept-entry">
+  <header class="concept-header">
+    <span class="concept-eyebrow">概念</span>
+    <h1>Classifier Guidance</h1>
+    <p class="concept-tagline">— 用独立训练的分类器梯度把无条件扩散"拉"向某个类别。</p>
+  </header>
+
+  <aside class="clg-quickref">
+    <div><strong>定义</strong> · 在反向采样的每一步，把噪声预测加上一项 $w \cdot \nabla_{x_t} \log p_\phi(c \mid x_t)$，让样本朝条件 $c$ 的方向漂移。</div>
+    <div><strong>公式</strong> · $\nabla_{x_t} \log p(x_t \mid c) = \nabla_{x_t} \log p(x_t) + \nabla_{x_t} \log p(c \mid x_t)$（Bayes 拆解）。</div>
+    <div><strong>易错</strong> · 分类器必须在<em>带噪</em> $x_t$（每个 $t$ 都有）上重新训练；拿一个 ImageNet 上的 ResNet 直接用是<strong>不行</strong>的——这是它最大的工程负担，也是后来 CFG 把它取代的根本原因。</div>
+  </aside>
+
+  <section class="concept-intuition">
+    <p>很多人第一次看到 "classifier guidance" 这个词，会以为它是"先训一个扩散模型，再训一个普通分类器，把两者拼起来"。这句话<strong>对一半，错一半</strong>。对的是"两个模型分开训"的拓扑结构；错的是"普通分类器"那部分。一个在 ImageNet 上训练好的 ResNet—— 它见过的输入永远是干净的自然图像；可是在扩散采样的中段（比如 $t=500$，对应 $\bar\alpha_t$ 大约 0.5），$x_t$ 已经被高斯噪声糊到肉眼几乎看不出原图了。把这种噪声图喂进 ResNet，它给出的预测分布几乎是均匀的 0.001 量级，<strong>梯度方向几乎完全由数值噪声决定，而不是由"图像里到底像不像猫"决定</strong>。这条信息一旦进入反向 SDE，就会把采样轨迹推到一个跟目标类别毫无关系的地方。Dhariwal & Nichol 在 2021 年那篇被称作 "Diffusion Models Beat GANs" 的论文里给出的 trick，正是<em>额外</em>训一个能吃下"任意噪声级别 $x_t$"的分类器 $p_\phi(c \mid x_t)$——它的训练集是 $\{(x_t, t, c)\}$ 三元组，把整个 forward process 的所有 $t$ 都覆盖一遍。</p>
+
+    <p>那为什么要费这么大劲？CMU 10799 Lecture 7 的讲师用了一个非常自然的苏格拉底式引入：他先让学生回答"条件生成最朴素的做法是什么"。台下马上有人答"把条件 $c$（文本、属性向量、深度图……）和噪声一起扔进网络，从头训一个 $\epsilon_\theta(x_t, t, c)$"。也有学生补充"我会再加一个 feature extractor，从 condition 里提取一个 embedding，沿着像素输入一起送进去"。讲师肯定了这两个都是<em>正确</em>答案，但马上反问："这个写法的瓶颈在哪儿？"教室里安静了几秒，他自己把答案点破：</p>
+
+    <div class="clg-source">「Where does the label come from? You need different training for different conditions. For example, if this model is text-conditioned, then we cannot use it for class-label condition; if it's class-label conditioned, we cannot use it for depth map. Even if you could formulate your model to condition on everything you can think of, you also need to collect data for everything. That's really really expensive.」—— CMU 10799 L7（@07:53–08:45）</div>
+
+    <p>这一段把 classifier guidance 出现的<strong>真正动机</strong>讲得最透：扩散模型训练贵——一个 ImageNet 256×256 的 ADM 跑下来要数千 GPU-hours——可是<em>无条件</em>模型已经"知道怎么画一张真实的人脸"了。为什么每来一种新条件（文本、深度图、骨架、CLIP embedding……）就要把这几千 GPU-hours 重烧一遍？讲师在课程末尾把这个问题正式抛出来：「Is it possible to reuse the unconditional model to do conditional generation?」这句话<strong>就是 classifier guidance 的灵魂</strong>——把条件信息从生成器里<em>剥离</em>出来，放到一个独立的、轻量的、可以更换的"控制模块"里。</p>
+
+    <p><span class="my-addition">🟡 教材外补充：</span>讲师在课上没有给出形象比喻，但理解上你可以把它想象成<strong>无条件扩散是一辆在数据流形上自动驾驶的车，分类器梯度是副驾驶不停地往方向盘上"轻推"</strong>——车本身仍然只懂"画真实图"，副驾驶专门负责"往猫的方向偏一点"。$w$ 就是副驾驶的力气：$w=0$ 时副驾驶完全不动，采样退化为无条件；$w$ 适中（论文里通常 1.0–3.0）时车被温柔地引导到目标类别附近；$w$ 过大（10 以上）时副驾驶猛打方向，车被拽离数据流形，画出过饱和、形态怪异的"猫的卡通漫画"。这种<em>诚意过度</em>的现象在 Dhariwal & Nichol 论文 Table 3 里有详细量化，被称为 "guidance scale trade-off"——这一发现后来在 CFG、CLIP-guided diffusion 乃至 Stable Diffusion 的 CFG scale 参数里都能看到同样的 U 形曲线。</p>
+
+    <p>读到这里你应该已经能在脑子里画出整个故事：扩散模型 $\epsilon_\theta(x_t, t)$ 是<em>不变的</em>知识基座，存着"如何画一张真实图"的全部先验；分类器 $p_\phi(c \mid x_t)$ 是<em>可插拔的</em>控制头，存着"什么样的 $x$ 看起来更像类别 $c$"的判别知识；采样阶段把两者输出按 Bayes 拆解的方式相加，就得到一个朝向条件 $c$ 的采样轨迹。整个 trick 的工程优雅之处在于：换条件只需要换分类器（而且分类器比扩散模型小得多，参数量、显存、训练时间都低一个数量级）；扩散模型本身一次训好、永远复用，无论后续要做猫狗分类、年龄回归还是属性控制，底座都不动。在 2021 年那个 GPU 极其稀缺、训练一个 ImageNet 扩散模型动辄几千 GPU-hours 的时代，这种"复用性"的工程价值再怎么强调都不为过。</p>
+  </section>
+
+  <section class="concept-deepdive">
+    <h2>从 Bayes 到 score 的两行推导</h2>
+
+    <p>classifier guidance 的全部数学只需要两步。出发点是条件分布的 Bayes 拆解：</p>
+
+    $$p(x_t \mid c) = \frac{p(x_t)\, p(c \mid x_t)}{p(c)}.$$
+
+    <p>两边取对数、再对 $x_t$ 求梯度（$\log p(c)$ 不含 $x_t$，导数为 0）：</p>
+
+    $$\nabla_{x_t} \log p(x_t \mid c) = \nabla_{x_t} \log p(x_t) + \nabla_{x_t} \log p(c \mid x_t).$$
+
+    <p><strong>Why</strong>：第一项是<em>无条件 score</em>——你训练好的扩散网络（在 $\epsilon$-参数化下等价于 $-\epsilon_\theta(x_t,t)/\sqrt{1-\bar\alpha_t}$，见 Tweedie 与 score 的换算）就在算它。第二项是<em>分类器 log-似然</em>对输入的梯度——只要你有一个能吃 $x_t$ 的分类器 $p_\phi(c \mid x_t)$，反向传播一下就能拿到。</p>
+
+    <p>把第二项乘上一个 <strong>guidance scale</strong> $w$，就得到 Dhariwal & Nichol 真正用的"加权"版本：</p>
+
+    $$\tilde\nabla_{x_t} \log p(x_t \mid c) \;=\; \nabla_{x_t} \log p(x_t) \;+\; w \cdot \nabla_{x_t} \log p_\phi(c \mid x_t).$$
+
+    <p><strong>Why</strong>：$w=1$ 对应"诚实的 Bayes 拆解"；但实证上 $w>1$（论文里常用 $w=10$ 量级）会让样本更<em>像</em> 目标类别，代价是多样性下降。这是 Dhariwal & Nichol 论文里第一次以可量化的 FID/IS 给出 guidance scale 这个超参——后来 CFG、CLIP guidance 全部沿用同一个 $w$ 概念。</p>
+
+    <h2>反向采样里的具体写法</h2>
+
+    <p>在 $\epsilon$-参数化的反向步里，把上式翻译成对 $\epsilon$ 的修正（用关系 $\epsilon = -\sqrt{1-\bar\alpha_t}\,\nabla \log p$）：</p>
+
+    $$\hat\epsilon(x_t, t, c) \;=\; \epsilon_\theta(x_t, t) \;-\; w \sqrt{1-\bar\alpha_t}\; \nabla_{x_t} \log p_\phi(c \mid x_t).$$
+
+    <p><strong>Why</strong>：负号源于 Tweedie 关系里的负号；$\sqrt{1-\bar\alpha_t}$ 是把 score 换算成 $\epsilon$ 单位的尺度因子。然后照常喂给 DDPM 或 DDIM 的反向更新——只多了一次<em>分类器的 forward + backward</em>，<strong>无条件模型完全不动</strong>。</p>
+
+    <div class="clg-callout">⚠️ 工程地雷：分类器 $p_\phi(c \mid x_t)$ 必须在<em>带噪</em> 数据上训。具体做法是先按 forward process 公式 $x_t = \sqrt{\bar\alpha_t}\, x_0 + \sqrt{1-\bar\alpha_t}\,\epsilon$ 给训练集每张图加上对应 $t$ 的噪声，把 $(x_t, t, c)$ 当作分类器输入。Dhariwal & Nichol 用了一个 U-Net 编码器结构、参数量约 8× 大于普通 ImageNet 分类器，因为它要同时<em>嵌入时间步 $t$</em>。</div>
+
+    <svg class="clg-svg" viewBox="0 0 600 280" role="img" aria-label="classifier guidance 反向采样数据流">
+      <defs>
+        <marker id="clg-ar" markerWidth="7" markerHeight="7" refX="6" refY="3" orient="auto">
+          <path d="M0,0 L7,3 L0,6 Z" fill="var(--text-muted)"/>
+        </marker>
+      </defs>
+      <g font-family="ui-sans-serif" font-size="11" fill="var(--text)">
+        <!-- input x_t -->
+        <rect x="20" y="120" width="90" height="50" rx="4" fill="var(--surface-soft)" stroke="var(--border-strong)"/>
+        <text x="65" y="142" text-anchor="middle" font-weight="600">x_t</text>
+        <text x="65" y="158" text-anchor="middle" font-size="10" fill="var(--text-muted)">含噪图</text>
+
+        <!-- unconditional eps -->
+        <rect x="170" y="40" width="160" height="60" rx="4" fill="var(--blue-soft)" stroke="var(--blue)"/>
+        <text x="250" y="62" text-anchor="middle" font-weight="600">ε_θ(x_t, t)</text>
+        <text x="250" y="80" text-anchor="middle" font-size="10" fill="var(--text-muted)">无条件扩散模型</text>
+        <text x="250" y="94" text-anchor="middle" font-size="10" fill="var(--text-muted)">（冻结）</text>
+
+        <!-- classifier -->
+        <rect x="170" y="180" width="160" height="60" rx="4" fill="var(--module-accent-soft)" stroke="var(--module-accent)"/>
+        <text x="250" y="202" text-anchor="middle" font-weight="600">∇log p_φ(c | x_t)</text>
+        <text x="250" y="220" text-anchor="middle" font-size="10" fill="var(--text-muted)">噪声鲁棒分类器</text>
+        <text x="250" y="234" text-anchor="middle" font-size="10" fill="var(--text-muted)">（在所有 t 上训过）</text>
+
+        <!-- arrows from x_t -->
+        <path d="M 115 140 L 165 80" stroke="var(--text-muted)" fill="none" marker-end="url(#clg-ar)"/>
+        <path d="M 115 150 L 165 200" stroke="var(--text-muted)" fill="none" marker-end="url(#clg-ar)"/>
+
+        <!-- mix node -->
+        <circle cx="410" cy="140" r="22" fill="var(--surface)" stroke="var(--module-accent)" stroke-width="2"/>
+        <text x="410" y="146" text-anchor="middle" font-size="14" font-weight="700" fill="var(--module-accent)">+</text>
+
+        <!-- arrows to mix -->
+        <path d="M 335 75 L 392 130" stroke="var(--blue)" fill="none" marker-end="url(#clg-ar)"/>
+        <path d="M 335 205 L 392 152" stroke="var(--module-accent)" fill="none" marker-end="url(#clg-ar)"/>
+        <text x="365" y="100" font-size="10" fill="var(--blue)">ε_θ</text>
+        <text x="350" y="180" font-size="10" fill="var(--module-accent)">w · √(1−ᾱ_t) · ∇log p_φ</text>
+
+        <!-- output -->
+        <rect x="460" y="115" width="130" height="50" rx="4" fill="var(--red-soft)" stroke="var(--red)"/>
+        <text x="525" y="138" text-anchor="middle" font-weight="600" fill="var(--red)">ε̂(x_t, t, c)</text>
+        <text x="525" y="155" text-anchor="middle" font-size="10" fill="var(--text-muted)">送入 DDPM/DDIM</text>
+        <path d="M 432 140 L 455 140" stroke="var(--text-muted)" fill="none" marker-end="url(#clg-ar)"/>
+      </g>
+    </svg>
+
+    <p><strong>读图要点</strong>：蓝色框是<em>训练阶段就固定</em>的扩散网络，整个 guidance 流程中它的权重<em>一字都不会改</em>；橙色框是<em>额外</em>训的噪声鲁棒分类器；两条数据流在采样的<em>每一步</em>都各跑一次，叠加后才进 DDPM 或 DDIM 的反向更新。注意 $x_t$ 同时进两个网络——也就是说，每个反向步要付出"1 次扩散前向 + 1 次分类器前向 + 1 次分类器反向"的算力，比无条件采样贵大约 1.3× 到 2×（取决于分类器规模）。这点开销换来的好处是巨大的：你可以<em>事后</em>给任何已经训好的扩散模型加上类别控制，<em>不必</em>重训生成器。这在 2021 年是一项极有冲击力的工程胜利——它意味着 OpenAI 的 unconditional ADM checkpoint 可以被一个外部分类器"接管方向盘"，而不需要把那几千 GPU-hours 重烧一次。</p>
+
+    <h2>为什么"开放条件"会让 classifier guidance 崩溃</h2>
+
+    <p>CMU 讲师在课上把这个限制讲得很直接：「<em>You can't just condition on everything you can think of</em>」。在 classifier guidance 框架下，"条件 $c$"必须能被一个 softmax 输出表示——也就是说，$c$ 得是一个<strong>有限、离散、可枚举的类别集合</strong>。 ImageNet 的 1000 类、CIFAR 的 10 类，没问题；可一旦 $c$ 是"一句任意的英文文本"——比如 "an astronaut riding a horse on Mars"——你<em>不可能</em>训一个分类器去枚举所有自然语言句子。即使你硬要做，CLIP 风格的"text-image 对齐"也只是把文本嵌入到一个连续 embedding 空间，<em>不是</em> classifier guidance 严格要求的 softmax 输出。这是 classifier guidance 在 2021 年之后迅速被 CFG 取代的<strong>根本原因</strong>，<em>不是</em>因为 CFG 数学更优雅，而是因为 CFG 能处理 classifier guidance 在原理层面无法处理的开放条件。</p>
+
+    <p>另外两个工程痛点也值得记一下。<strong>第一，分类器训练成本</strong>：噪声鲁棒分类器虽然比扩散网络小，但仍然要在<em>整个</em>扩散数据集上训练，而且要把 $t$ 当作输入（通常用类似 sinusoidal embedding 的方式）。<strong>第二，guidance 信号的尺度不稳</strong>：分类器 logits 的范数随 $t$ 变化巨大——靠近 $t=T$ 时图像几乎全噪声，分类器输出接近均匀，梯度小；靠近 $t=0$ 时图像清晰，梯度大。这意味着固定 $w$ 在不同 $t$ 段的"实际推力"非常不均匀，工程上经常需要再加一个 $t$-相关的归一化项。</p>
+
+    <p><span class="my-addition">🟡 教材外补充：</span>CFG 的精妙之处恰好在于它<em>完全不用分类器</em>—— 它让同一个扩散网络在训练时<em>偶尔丢掉条件 $c$</em>（典型 10% 概率），采样时把"有条件预测 $\epsilon_\theta(x_t,t,c)$"与"无条件预测 $\epsilon_\theta(x_t,t,\varnothing)$"的差当作隐式的 $\nabla \log p(c \mid x_t)$ 估计，于是开放条件（文本、CLIP embedding、姿势骨架……）也能用了。可以这样理解：classifier guidance 把"控制信号"放在外部、需要单独训练；CFG 把"控制信号"内化进生成器、共享同一组权重——这正是 Stable Diffusion / DALL-E 2 / Imagen 全部选 CFG 的原因。</p>
+
+    <h2>历史定位与现代回响</h2>
+
+    <p>从时间线看，classifier guidance 是 2020–2021 年扩散模型从"能跑"走向"能打 GAN"的关键节点。在它之前，无条件扩散的样本质量虽然稳定但缺乏可控性；GAN 派阵营则一直握着 ImageNet 上最好的条件生成 FID。Dhariwal & Nichol 用 classifier guidance 在 ImageNet 128×128 上把 FID 压到 2.97，第一次正面击败 BigGAN-deep——这条新闻直接导致 OpenAI 后续把研究方向全面押注扩散，催生了 GLIDE、DALL-E 2 等模型。换句话说，<strong>classifier guidance 是扩散模型"统治视觉生成"叙事里的起爆点</strong>。</p>
+
+    <p>不过 classifier guidance 本身的寿命相当短：CFG 在同年（2021）由 Ho & Salimans 提出，几乎立刻把它替代——所有需要开放条件的应用都只能选 CFG。但 classifier guidance 的<em>思想</em>仍然活着，并且以"<strong>外挂式 guidance</strong>"的形态广泛存在。CLIP-guided diffusion 把分类器换成 CLIP 图文相似度；DPS（diffusion posterior sampling）把分类器换成测量模型 $\nabla \log p(y \mid x_t)$，用于图像修复 / 反卷积 / 压缩感知；DragDiffusion、ControlNet 的早期版本里都能看到 classifier guidance 的影子——所有"用外部信号在采样时校正扩散轨迹"的方法，都是它的现代变体。所以理解 classifier guidance 不是在学一个过时的算法，而是在学<strong>所有 guidance 方法的母版</strong>。</p>
+  </section>
+
+  <section class="concept-interact">
+    <p>下面按钮按顺序展示反向一步的等式链。<strong>注意看什么不变量</strong>：无条件项 $\epsilon_\theta(x_t,t)$ <em>始终不变</em>，变化的只是分类器梯度项的权重 $w$——这就是"复用无条件模型"的具体含义。</p>
+
+    <div class="clg-controls">
+      <button data-step="0" class="active">① Bayes 拆解</button>
+      <button data-step="1">② 取 score</button>
+      <button data-step="2">③ 加权重 w</button>
+      <button data-step="3">④ 换算到 ε</button>
+      <button data-step="4">⑤ 喂给 DDIM</button>
+    </div>
+
+    <div id="clg-readout">
+      <div class="clg-line clg-active-line" data-line="0">
+        $p(x_t \mid c) = \dfrac{p(x_t)\, p(c \mid x_t)}{p(c)}$ — 仅是 Bayes 公式，没有任何近似。
+      </div>
+      <div class="clg-line" data-line="1">
+        $\nabla_{x_t} \log p(x_t \mid c) = \underbrace{\nabla_{x_t} \log p(x_t)}_{\text{无条件 score}} + \underbrace{\nabla_{x_t} \log p(c \mid x_t)}_{\text{分类器梯度}}$
+      </div>
+      <div class="clg-line" data-line="2">
+        $\tilde\nabla = \nabla \log p(x_t) + \boldsymbol{w} \cdot \nabla \log p_\phi(c \mid x_t)$ — $w>1$ 牺牲多样性换"更像目标类别"。
+      </div>
+      <div class="clg-line" data-line="3">
+        $\hat\epsilon(x_t,t,c) = \epsilon_\theta(x_t,t) - w\sqrt{1-\bar\alpha_t}\,\nabla_{x_t}\log p_\phi(c\mid x_t)$ — 用 Tweedie 把 score 换成 $\epsilon$。
+      </div>
+      <div class="clg-line" data-line="4">
+        把 $\hat\epsilon$ 代进 DDIM 的反向更新 $x_{t-1} = \sqrt{\bar\alpha_{t-1}}\,\hat x_0 + \sqrt{1-\bar\alpha_{t-1}}\,\hat\epsilon$，迭代到 $t=0$。
+      </div>
+    </div>
+
+    <script>
+      (function () {
+        const btns = document.querySelectorAll('.clg-controls button');
+        const lines = document.querySelectorAll('#clg-readout .clg-line');
+        function show(step) {
+          btns.forEach(b => b.classList.toggle('active', +b.dataset.step === step));
+          lines.forEach(l => l.classList.toggle('clg-active-line', +l.dataset.line === step));
+        }
+        btns.forEach(b => b.addEventListener('click', () => show(+b.dataset.step)));
+        show(0);
+      })();
+    </script>
+  </section>
+
+  <section class="concept-example">
+    <h2>手算一步：1D toy</h2>
+    <p>设 $x_t = 0.8$，$t$ 对应 $\bar\alpha_t = 0.64$（即 $\sqrt{1-\bar\alpha_t} = 0.6$）。扩散网络输出 $\epsilon_\theta = 0.5$。再设你有一个二分类器（"猫 / 非猫"），它在 $x_t=0.8$ 处对类别"猫"的 log-likelihood 梯度为 $\nabla_{x_t} \log p_\phi(\text{cat}\mid x_t) = 1.5$。先取 $w=2$。</p>
+    <p>代入修正公式：</p>
+    $$\hat\epsilon \;=\; \epsilon_\theta \;-\; w \sqrt{1-\bar\alpha_t}\, \nabla \log p_\phi \;=\; 0.5 \;-\; 2 \cdot 0.6 \cdot 1.5 \;=\; 0.5 \;-\; 1.8 \;=\; -1.3.$$
+    <p>解读：无条件预测说"图里大约有 0.5 单位噪声需要扣除"；分类器说"往 +x 方向走 1.5 单位能更像猫"。两者合成后，<em>等效噪声</em>变成 $-1.3$——也就是反向步里会朝 +x 方向多走 $1.8$ 个单位。<strong>$w$ 越大，这"多走的部分"越激进</strong>。把同一道题里的 $w$ 换成 $w=0$，立即得到 $\hat\epsilon = 0.5$——退化回无条件采样；换成 $w=5$，得 $\hat\epsilon = 0.5 - 5 \cdot 0.6 \cdot 1.5 = -4$，朝 +x 方向猛冲 $4.5$ 单位，几乎肯定冲出数据流形。这个一维玩具把 $w$ 的作用刻画得很直白：它是"分类器投票权重"的旋钮。</p>
+    <p>再用同一个例子算一下 $w=1$（诚实 Bayes 拆解）：$\hat\epsilon = 0.5 - 1 \cdot 0.6 \cdot 1.5 = -0.4$。可以看到在 $w=1$ 与 $w=2$ 之间数值变化是 $-0.4 \to -1.3$，差距已经接近 1 个 $\epsilon$ 单位——而 DDIM 一步的反向更新里，$\epsilon$ 的尺度直接决定 $x_{t-1}$ 偏离无条件预测的程度。这就是为什么 Dhariwal & Nichol 论文里 $w$ 的甜点要靠 grid search 找：每个数据集、每个 $t$ schedule 下，$w$ 的"最佳值"都不一样。把这一节读到这里，你就能从单步公式直接想象多步采样的累积效应：一个反向轨迹由几十到几百步组成，每一步都有这样一次<em>无条件预测 + 分类器修正</em>的合成，累积起来就是图像被一步步"推"到条件 $c$ 所代表的区域。</p>
+  </section>
+
+  <section class="concept-pitfalls">
+    <h2>常见误区</h2>
+    <ol>
+      <li><strong>"任何预训练分类器都能拿来当 $p_\phi$"。</strong>反例：把 ImageNet 上训好的 ResNet-50 拿来，对一张 $t=500$ 的 noisy $x_t$（信噪比约 0 dB）做 forward，top-1 输出几乎是均匀分布的 0.001 量级，梯度的数值噪声远大于真实信号——采样会朝完全错误的方向漂移，最终图像跟目标类别毫无关系。<strong>必须</strong>在 $\{(x_t, t, c) : t \in [0, T]\}$ 的全噪声范围上重训分类器，并且把 $t$ 作为额外输入（通常是 sinusoidal time embedding），让它"知道"当前噪声水平。Dhariwal & Nichol 用的就是一个 U-Net 编码器结构的分类器，专门为这个目的设计。</li>
+      <li><strong>"classifier guidance 就是 CFG，只是名字不同"。</strong>反例：CFG 在<em>同一个</em>扩散网络里训 $\epsilon_\theta(x_t, t, c)$ 和 $\epsilon_\theta(x_t, t, \varnothing)$（通过条件 dropout 实现），采样时算 $(1+w)\epsilon_\theta(x_t,t,c) - w\epsilon_\theta(x_t,t,\varnothing)$——整个流程里<em>根本没有独立分类器</em>。两者数学起点都是 Bayes 拆解 $\nabla \log p(x|c) = \nabla \log p(x) + \nabla \log p(c|x)$，但实现路径完全不同：classifier guidance 需要 2 个独立网络（扩散+分类器），CFG 只需 1 个；classifier guidance 限离散类别集合，CFG 支持任意 embedding（文本、CLIP、姿势骨架……）；classifier guidance 每步多 1 次分类器反向传播，CFG 每步多 1 次扩散模型前向。理解这两条不同后，就能解释为什么 Stable Diffusion 等所有现代文本到图像模型选 CFG 而不是 classifier guidance。</li>
+      <li><strong>"$w$ 越大越好，因为更像目标类别"。</strong>反例：Dhariwal & Nichol 论文 Table 3 在 ImageNet 128×128 上的实测数据，$w=1.0$ 时 FID = 2.97；当 $w$ 增大到 10 左右，FID 飙到 11+，因为样本被推离数据流形、出现过饱和颜色、重复纹理、肢体扭曲等典型 "guidance artifacts"。$w$ 的甜点通常在 $[1, 3]$ 区间，并且<strong>对类别敏感</strong>——画"豹"的最佳 $w$ 和画"花瓶"的最佳 $w$ 可能差一倍。这一现象后来在 CFG 里被复现为"CFG scale 旋钮"，几乎每个 Stable Diffusion 用户都遇到过 "$w=15$ 出来的图像质感很塑料" 的经验——根源就是 classifier guidance 的同一条 trade-off 曲线。</li>
+    </ol>
+  </section>
+
+  <section class="concept-seealso">
+    <h2>相关概念</h2>
+    <ul>
+      <li><a href="/video-to-notebook/concepts/classifier-free-guidance/">Classifier-Free Guidance</a> — 直接继承者：去掉独立分类器，把 guidance 内化进扩散网络本身。</li>
+      <li><a href="/video-to-notebook/concepts/ddim/">DDIM</a> — classifier guidance 通常与 DDIM 反向步合用，因为后者步数少、guidance 信号每步占比更显著。</li>
+      <li><a href="/video-to-notebook/concepts/ddpm/">DDPM</a> — guidance 也兼容原始 DDPM 随机反向；论文同时报告两种采样器结果。</li>
+      <li><a href="/video-to-notebook/concepts/image-generation/">Image Generation</a> — 2021 年 "Diffusion Models Beat GANs" 的核心实证就是 classifier guidance 让 ImageNet 类条件生成首次超过 BigGAN。</li>
+    </ul>
+  </section>
+
+  <section class="concept-sources">
+    <h2>来源</h2>
+    <ol>
+      <li><a href="https://www.youtube.com/watch?v=lPipzIG6rkc&t=215s" target="_blank" rel="noopener">cmu-10799-diffusion-flow · L7 · "haven't talked about conditional generation yet" 引入 · (3:35)</a></li>
+      <li><a href="https://www.youtube.com/watch?v=lPipzIG6rkc&t=473s" target="_blank" rel="noopener">cmu-10799-diffusion-flow · L7 · "different training for different conditions" 瓶颈讨论 · (7:53)</a></li>
+      <li><a href="https://www.youtube.com/watch?v=lPipzIG6rkc&t=567s" target="_blank" rel="noopener">cmu-10799-diffusion-flow · L7 · "reuse the unconditional model" 引出 guidance · (9:27)</a></li>
+    </ol>
+  </section>
+</article>

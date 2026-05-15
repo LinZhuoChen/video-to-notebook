@@ -1,0 +1,490 @@
+<style>
+  .elbo-ch { line-height: 1.7; }
+  .elbo-ch svg { display: block; margin: 1.2rem auto; max-width: 100%; height: auto; }
+  .elbo-ch .clip-frame { max-width: 720px; margin: 1.4rem auto; }
+  .elbo-ch .clip-frame iframe { width: 100%; aspect-ratio: 16/9; border: 0; border-radius: 6px; }
+  .elbo-ch .clip-frame figcaption { color: var(--text-muted); font-size: 0.85rem; margin-top: 0.4rem; text-align: center; }
+  .elbo-ch .tldr { background: var(--surface-soft); border-left: 4px solid var(--module-accent); padding: 1rem 1.2rem; border-radius: 0 6px 6px 0; margin: 1.4rem 0; }
+  .elbo-ch .tldr h2 { margin-top: 0; font-size: 1.05rem; }
+  .elbo-ch .callout { padding: 0.7rem 1rem; margin: 1rem 0; border-radius: 0 6px 6px 0; }
+  .elbo-ch .callout-info { background: #eef6fc; border-left: 4px solid #2b80c4; }
+  .elbo-ch .callout-note { background: #f3f0fa; border-left: 4px solid #6f4dd0; }
+  .elbo-ch .callout-warning { background: #fff6e0; border-left: 4px solid #d4a017; }
+  .elbo-ch .callout-tip { background: #e8f5e9; border-left: 4px solid #0b5; }
+  .elbo-ch .callout-quote, .elbo-ch .source-quote { background: var(--surface-soft); border-left: 3px solid var(--border-strong); padding: 0.5rem 1rem; margin: 0.8rem 0; font-style: italic; color: var(--text-muted); }
+  .elbo-ch .my-addition { background: #fff7d6; border-left: 4px solid #b8860b; padding: 0.7rem 1rem; margin: 1rem 0; border-radius: 0 6px 6px 0; }
+  .elbo-ch pre { background: #1f1f1f; color: #f6f4ee; padding: 1rem; border-radius: 6px; font-size: 0.86rem; line-height: 1.55; overflow-x: auto; }
+  .elbo-ch code:not(pre code) { background: var(--surface-soft); padding: 0.1rem 0.35rem; border-radius: 3px; font-size: 0.9em; }
+  .elbo-ch h2 { border-bottom: 1px solid var(--border); padding-bottom: 0.3rem; margin-top: 2.4rem; }
+  .elbo-ch h3 { color: var(--module-accent); margin-top: 1.6rem; }
+  .elbo-ch .deriv-step { margin: 0.8rem 0; padding: 0.6rem 0.8rem; background: var(--surface-soft); border-radius: 4px; }
+  .elbo-ch .deriv-step strong { color: var(--module-accent); }
+  @keyframes elbo-lift { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-6px); } }
+  .elbo-ch .lift-arrow { animation: elbo-lift 2.6s ease-in-out infinite; transform-origin: center; }
+</style>
+
+<article class="elbo-ch">
+
+<h1>3. ELBO：似然的下界</h1>
+
+<p style="font-size:0.95rem; color:var(--text-muted);">主源：Vizuara《Principles of Diffusion Models》Lecture 2（讲师 Dr. Raj Dandekar）；副源：CMU 10799 S26 Lecture 1（讲师 Kelly Hu）。本章把上一章 <a href="/video-to-notebook/textbook/2/">VAE</a> 里"$\log p(x)$ 不可算 → 用 ELBO 替代"的那一步彻底掰开揉碎，因为它是后续整本书所有 diffusion 损失函数的母模板。</p>
+
+<div class="tldr">
+  <h2>📌 TL;DR</h2>
+  <p><strong>ELBO（Evidence Lower BOund，证据下界）是一个我们能算的量，用来"代理"我们想算但算不出的 $\log p(x)$。</strong></p>
+  <p>核心不等式：</p>
+  $$\log p(x) \;\geq\; \underbrace{\mathbb{E}_{q(z|x)}[\log p(x|z)]}_{\text{重构项}} \;-\; \underbrace{D_{\mathrm{KL}}\!\big(q(z|x) \,\|\, p(z)\big)}_{\text{KL 正则项}} \;=\; \mathrm{ELBO}(x)$$
+  <p>证明只用了三件事：(1) 在积分里乘 $q/q = 1$ 把积分写成"q 上的期望"；(2) 对凹函数 $\log$ 用 Jensen 不等式把 $\log \mathbb{E}[\cdot]$ 翻成 $\mathbb{E}[\log \cdot]$；(3) 拆 log 把"和 prior 有关的部分"识别成 KL 散度。</p>
+  <p>三个名字要记住：$\log p(x)$ 叫 <strong>evidence</strong>（证据，因为它是"数据真的出现过"的概率）；ELBO 是它的<strong>下界</strong>；两者之差恰好是 $D_{\mathrm{KL}}(q \,\|\, \text{真后验})$，所以把 ELBO 顶高同时做了两件事——逼近真实似然、把变分分布 q 推向真后验。</p>
+  <p><strong>为什么本章必读</strong>：上一章 VAE 训练就是最大化 ELBO；下一章开始的 DDPM 训练损失，本质上是把 ELBO 沿 T 步展开。后面所有"看起来很吓人"的 diffusion 损失公式，骨架都是这三行不等式。</p>
+</div>
+
+<h2>一、为什么我们要绕这一大圈？——直接最大化 $\log p(x)$ 不行吗？</h2>
+
+<p>所有生成模型的"理想目标"都写得出来：</p>
+
+$$\max_\theta \sum_{i=1}^N \log p_\theta(x_i)$$
+
+<p>给定训练集 $\{x_1, \dots, x_N\}$，调参数 $\theta$ 让模型给"真实数据"最大的概率。如果能直接做这件事，世界就太美好了。但只要模型里出现"潜变量 $z$"，</p>
+
+$$p_\theta(x) = \int p_\theta(x|z)\, p(z)\, dz$$
+
+<p>这个积分在高维里就<strong>算不出来</strong>。三个理由（上一章已展开，本章再敲一遍因为它就是 ELBO 的存在理由）：</p>
+
+<ol>
+  <li><strong>维度诅咒</strong>。$z$ 通常几十到几百维，数值积分需要的样本数随维度指数爆炸。</li>
+  <li><strong>没有解析解</strong>。$p_\theta(x|z)$ 是一个神经网络，没有 closed-form 的反导。</li>
+  <li><strong>朴素蒙特卡洛方差爆炸</strong>。如果你试着从先验 $p(z) = \mathcal{N}(0, I)$ 里采一堆 $z_k$ 然后算 $\frac{1}{K}\sum_k p(x|z_k)$，会发现绝大多数随机采到的 $z$ <em>根本解码不出 x</em>，$p(x|z_k)$ 几乎都是 0，有效样本极少。</li>
+</ol>
+
+<div class="callout-quote">
+Dr. Raj 在 L2 反复用一句话定调本讲的难点：「we can't integrate over the entire universe.」<br>
+我们没法把"宇宙中所有可能的 z"都遍历一遍。
+</div>
+
+<h3>1.1 用一个具体数字感受"不可算"</h3>
+
+<p>"高维积分算不出"这句话听多了容易麻木，给个数字感受下。假设 $z$ 是 100 维（VAE 实战常见尺度），如果你想做最朴素的数值积分，每个维度切 10 段，需要 $10^{100}$ 个网格点。宇宙里粒子总数大约 $10^{80}$。换句话说<strong>把宇宙里每个粒子都拿来算一个网格点的积分值，都不够用</strong>。这不是"算得慢"，是"物理上不可能"。所以我们必须找别的路。</p>
+
+<h3>1.2 Vizuara 的「地球-火星传送猫」类比</h3>
+
+<p>Dr. Raj 用了一个非常生动的故事来解释为什么 $p(x)$ 是 intractable 的、为什么我们必须找一个替代量去优化（这个故事在第 2 章 VAE 里也出现过，本章把它重新作为 <strong>ELBO 存在的动机</strong>）：</p>
+
+<blockquote class="source-quote">
+假设你想把一只猫从地球传送到火星。把每个原子打包发送是不可能的（数据量太大）。所以你把猫<strong>压缩成一份"秘方" z</strong>（潜变量），传到火星，然后在火星 decode 还原。<br><br>
+• <strong>重构目标</strong>：火星上 decode 出来的猫看起来要像地球上那只。<br>
+• <strong>正则目标</strong>：传送的秘方必须用"标准语言"——也就是 $\mathcal{N}(0, I)$——书写。否则火星上的人看不懂你的秘方。
+</blockquote>
+
+<p>这个比喻在 ELBO 视角下还可以再加一层：</p>
+
+<ul>
+  <li>"猫真实存在的概率" $p(x)$ 就像"猫整只完整地<em>同时</em>出现在火星地表"。这件事的概率是宇宙级别的小数，我们根本算不出来。</li>
+  <li>但我们可以算的是：<em>给定一份秘方 z，能 decode 出这只猫的概率</em> $p(x|z)$，以及<em>这份秘方本身合不合规</em> $p(z)$ vs $q(z|x)$。</li>
+  <li>把这两件可算的事相加（带上正确的符号和期望），就得到 ELBO——一个我们<strong>能写下表达式、能取梯度、能反传</strong>的代理目标。</li>
+</ul>
+
+<div class="callout callout-info">
+🧭 <strong>本章的全部魔法在一句话里</strong>：既然 $p(x)$ 算不出，我们去找一个量 $L$ 满足 $L \leq \log p(x)$ 并且 $L$ 可以算。我们 maximize $L$，相当于"把下界顶高"，间接把 $\log p(x)$ 也往上推。<strong>ELBO 就是那个 $L$。</strong>
+</div>
+
+<h2>二、CMU 副源：Kelly 把这步称为「the greatest mathematical trick of all time」</h2>
+
+<p>Vizuara 把推导讲得直觉先行（先讲 hello 机器、再上数学）；CMU 10799 这门课的讲师 Kelly Hu 则用一种近乎崇拜的语气来评价这一步代数变换。她管"在积分里乘以 $q/q$ 然后用 Jensen 不等式"叫做<strong>"史上最伟大的数学技巧"</strong>。</p>
+
+<blockquote class="source-quote">
+Kelly（CMU 10799 L1，复述要点）：当你看到 $\log p(x) = \log \int p(x, z)\, dz$ 不可解时，<em>不要</em>试图直接打这个积分。乘 1，把积分变成期望，然后把 log 移进去——这是变分推断这门学科存在的全部理由。
+</blockquote>
+
+<p>本章会把这个"史上最伟大的技巧"拆成六步，每一步都给"为什么这么做"。但在那之前，先把两条课程线索摆在一起：</p>
+
+<div class="callout callout-note">
+🎓 <strong>两个课程，两种切入口（保留双视角）</strong>：<br>
+• <strong>Vizuara / Dr. Raj</strong>：从"造一台手写 hello 机器"开始，先讲清"潜变量 z"是什么、"为什么 encoder 要输出分布而不是点"，再用「不能把猫的原子一个一个传到火星」作为 $p(x)$ 不可算的直觉，自然引出 ELBO。<br>
+• <strong>CMU 10799 / Kelly Hu</strong>：直接从概率论视角切入，把 $\log \int p(x, z) dz$ 写在板上，强调"乘 $q/q$ + Jensen"是<em>变分推断学科的灵魂技巧</em>。<br>
+两种讲法不冲突——前者负责"为什么需要"，后者负责"为什么可行"。本章把它们焊接成一条线。
+</div>
+
+<h2>三、复习一下记号（怕你忘了 VAE 里那些字母）</h2>
+
+<p>ELBO 推导里出现的字母都是 VAE 那一章定义过的，但有读者可能跳着读，所以这里再列一次，作为本章的"符号表"：</p>
+
+<ul>
+  <li><strong>$x$</strong>：观测数据（比如一张手写 hello 图）。</li>
+  <li><strong>$z$</strong>：潜变量（latent variable，secret recipe）。在 hello 例子里可以是 $z_1 = $ 倾斜度、$z_2 = $ 整洁度。</li>
+  <li><strong>$p(z)$</strong>：<strong>先验</strong>，通常取 $\mathcal{N}(0, I)$。表示"还没看到任何图像时，潜变量本身是怎么分布的"。</li>
+  <li><strong>$p_\theta(x|z)$</strong>：<strong>似然 / decoder</strong>，由神经网络参数 $\theta$ 表达。"给我一份秘方 z，我吐出一张图 x 的概率"。</li>
+  <li><strong>$p(x)$</strong>：<strong>边际似然 / evidence</strong>。$p(x) = \int p(x|z) p(z) dz$。我们最终想最大化的就是这个。<em>它是不可算的。</em></li>
+  <li><strong>$p(z|x)$</strong>：<strong>真后验</strong>。看到一张图 x 后，"产生它的潜变量"应该长什么样。由 Bayes 公式 $p(z|x) = \frac{p(x|z)p(z)}{p(x)}$ 给出，但分母里有 $p(x)$，<em>同样不可算</em>。</li>
+  <li><strong>$q_\phi(z|x)$</strong>：<strong>变分近似后验 / encoder</strong>，由另一组神经网络参数 $\phi$ 表达。它的任务是逼近 $p(z|x)$。通常令 $q_\phi(z|x) = \mathcal{N}(\mu_\phi(x), \sigma^2_\phi(x))$。</li>
+</ul>
+
+<div class="callout callout-warning">
+⚠️ <strong>最容易混的两个 KL</strong>：本章会出现两个 KL 散度，请提前分清：<br>
+• $D_{\mathrm{KL}}(q_\phi(z|x) \,\|\, p(z))$ — <strong>q 对先验 prior 的 KL</strong>，<em>可以算</em>，且有 closed-form。这是 ELBO 里的正则项。<br>
+• $D_{\mathrm{KL}}(q_\phi(z|x) \,\|\, p(z|x))$ — <strong>q 对真后验的 KL</strong>，<em>算不出来</em>（因为 $p(z|x)$ 算不出）。这是"$\log p(x)$ 和 ELBO 之间的缝隙"。<br>
+分子-分母位置一样、第二项一个是 $p(z)$、一个是 $p(z|x)$，少看一个竖线整章就糊了。
+</div>
+
+<h2>四、ELBO 的完整推导（六步，每步带 Why）</h2>
+
+<p>下面这一段是本章的"心脏"。把它读完、合上书自己默写一遍能复原，才算真的懂了 ELBO。每一步右边的 <em>Why</em> 解释这一步的代数动机。</p>
+
+<div class="deriv-step">
+<strong>步骤 1：从 evidence 的定义开始</strong>
+$$\log p(x) \;=\; \log \int p(x, z)\, dz \;=\; \log \int p(x|z)\, p(z)\, dz$$
+<em>Why</em>：$p(x)$ 是 $x$ 的边际分布，写成"先采 z，再给定 z 采 x"的两步生成过程的积分。这就是 $\int p(x, z) dz$ 的定义。我们对它取 $\log$，因为后面要最大化 log-likelihood。<br>
+<em>困难</em>：这个积分对高维 z 不可算（见第一节三大理由）。
+</div>
+
+<div class="deriv-step">
+<strong>步骤 2：乘以 $q(z|x)/q(z|x) = 1$（Kelly 的"史上最伟大数学技巧"）</strong>
+$$= \log \int p(x|z)\, p(z) \cdot \frac{q_\phi(z|x)}{q_\phi(z|x)}\, dz \;=\; \log \int q_\phi(z|x) \cdot \frac{p(x|z)\, p(z)}{q_\phi(z|x)}\, dz$$
+<em>Why</em>：在积分里乘以"自己除以自己"等于乘 1，<strong>不改变积分的值</strong>。但形式变了——现在积分有一个"密度函数 $q_\phi(z|x)$ 乘上一个函数 $\frac{p(x|z)p(z)}{q_\phi(z|x)}$"的结构。<br>
+<em>这一步的妙处</em>：原本我们要在<em>未知</em>的真分布 $p(z)$ 上积分（且要算所有 z 的贡献）；乘进 $q$ 之后，可以把积分识别成"在 $q$ 这个我们能采样的分布上的期望"。
+$$= \log \mathbb{E}_{q_\phi(z|x)}\!\left[\frac{p(x|z)\, p(z)}{q_\phi(z|x)}\right]$$
+<strong>请注意：到这里为止全是等式</strong>。我们什么信息都没丢。
+</div>
+
+<div class="deriv-step">
+<strong>步骤 3：祭出 Jensen 不等式</strong>
+$\log$ 是凹函数。对凹函数 $f$ 和随机变量 $Y$，Jensen 不等式说：
+$$f(\mathbb{E}[Y]) \;\geq\; \mathbb{E}[f(Y)]$$
+代入 $f = \log$ 得 $\log \mathbb{E}[Y] \geq \mathbb{E}[\log Y]$。所以：
+$$\log p(x) \;\geq\; \mathbb{E}_{q_\phi(z|x)}\!\left[\log \frac{p(x|z)\, p(z)}{q_\phi(z|x)}\right]$$
+<em>Why</em>：把 $\log$ 从"期望外面"移到"期望里面"是质变——里面的 $\log$ 可以被拆开、可以被识别成熟悉的 KL 形式，而外面的 $\log$ 拿期望毫无办法。<br>
+<em>代价</em>：从 = 变成 ≥。我们丢失了一些信息——丢失的部分恰好等于 $D_{\mathrm{KL}}(q_\phi(z|x) \,\|\, p(z|x))$（在第五节会证明）。
+</div>
+
+<div class="deriv-step">
+<strong>步骤 4：拆 log</strong>
+$$= \mathbb{E}_{q_\phi(z|x)}\!\big[\log p(x|z) + \log p(z) - \log q_\phi(z|x)\big]$$
+<em>Why</em>：$\log(abc) = \log a + \log b + \log c$，$\log(a/b) = \log a - \log b$。纯代数。<br>
+<em>到这里 ELBO 已经"显形"了</em>——三项里第一项是 decoder 项，剩下两项可以合并成一个 KL。
+</div>
+
+<div class="deriv-step">
+<strong>步骤 5：把和先验 prior 有关的两项捏到一起</strong>
+$$= \mathbb{E}_{q_\phi(z|x)}[\log p(x|z)] \;+\; \mathbb{E}_{q_\phi(z|x)}\!\left[\log \frac{p(z)}{q_\phi(z|x)}\right]$$
+$$= \mathbb{E}_{q_\phi(z|x)}[\log p(x|z)] \;-\; \mathbb{E}_{q_\phi(z|x)}\!\left[\log \frac{q_\phi(z|x)}{p(z)}\right]$$
+<em>Why</em>：第二项是关于 $q$ 和先验 $p(z)$ 的——形式上看就是"$q$ 上对 $\log(q/p)$ 的期望"。这正好是 KL 散度的定义。
+</div>
+
+<div class="deriv-step">
+<strong>步骤 6：识别 KL 散度，写出 ELBO</strong>
+$$\boxed{\;\log p(x) \;\geq\; \underbrace{\mathbb{E}_{q_\phi(z|x)}[\log p(x|z)]}_{\text{重构项 (recon)}} \;-\; \underbrace{D_{\mathrm{KL}}\!\big(q_\phi(z|x) \,\|\, p(z)\big)}_{\text{KL 正则项}} \;=\; \mathrm{ELBO}(x)\;}$$
+<em>Why</em>：$D_{\mathrm{KL}}(q \| p) := \mathbb{E}_q[\log(q/p)]$，所以第二项正是 $D_{\mathrm{KL}}(q_\phi(z|x) \,\|\, p(z))$。<br>
+<em>关键点</em>：这里的 KL 是 $q$ 对 <strong>prior $p(z)$</strong> 的（比如 $\mathcal{N}(0, I)$），<strong>不是</strong>对真后验 $p(z|x)$ 的。前者两个高斯之间有 closed-form，<em>可算</em>；后者算不出。这就是 ELBO 之所以"能算"的根本原因。
+</div>
+
+<div class="callout callout-tip">
+💡 <strong>第二节那句"史上最伟大数学技巧"指的就是步骤 2 + 步骤 3</strong>。
+<ul>
+  <li>步骤 2 把不能算的积分包装成 $q$ 上的期望——这一步是"乘 1"，看起来啥都没做，实际打开了所有大门。</li>
+  <li>步骤 3 用 Jensen 把 $\log$ 移进期望——这一步用不等式付了代价，但换来了可拆解的形式。</li>
+</ul>
+两步合起来构成"变分推断"这门学科的全部技术核心。后续 DDPM、Score-based model 的损失推导，几乎都是把这两步在不同概率结构上反复套用。
+</div>
+
+<h2>五、为什么 $\log p(x) - \mathrm{ELBO} = D_{\mathrm{KL}}(q \,\|\, p_{\text{真后验}})$？</h2>
+
+<p>步骤 3 我们用了不等式，<strong>≥ 的缝隙到底是多少</strong>？本节给出精确答案——这是 ELBO 一个非常优美的恒等式，所有变分推断教科书都会证一遍：</p>
+
+$$\log p(x) \;=\; \mathrm{ELBO}(x) \;+\; D_{\mathrm{KL}}\!\big(q_\phi(z|x) \,\|\, p(z|x)\big)$$
+
+<p>简短证明：从 KL 散度的定义出发：</p>
+
+$$D_{\mathrm{KL}}\!\big(q(z|x) \| p(z|x)\big) \;=\; \mathbb{E}_q\!\left[\log \frac{q(z|x)}{p(z|x)}\right]$$
+
+<p>用 Bayes 公式 $p(z|x) = p(x|z) p(z) / p(x)$ 代入分母里的 $p(z|x)$：</p>
+
+$$= \mathbb{E}_q\!\left[\log \frac{q(z|x)\, p(x)}{p(x|z)\, p(z)}\right]$$
+
+<p>拆 log，把 $\log p(x)$ 提到期望外（它和 z 无关）：</p>
+
+$$= \log p(x) \;+\; \mathbb{E}_q\!\left[\log \frac{q(z|x)}{p(x|z)\, p(z)}\right]$$
+
+$$= \log p(x) \;-\; \underbrace{\big(\mathbb{E}_q[\log p(x|z)] - D_{\mathrm{KL}}(q(z|x) \| p(z))\big)}_{= \mathrm{ELBO}(x)}$$
+
+<p>所以 $\log p(x) = \mathrm{ELBO}(x) + D_{\mathrm{KL}}(q \,\|\, p_{\text{真后验}})$，KL 非负，于是 $\log p(x) \geq \mathrm{ELBO}(x)$。等号当且仅当 $q(z|x) = p(z|x)$——也就是<strong>变分近似完美匹配真后验</strong>时成立。</p>
+
+<div class="callout callout-tip">
+💡 <strong>这个恒等式告诉我们 maximize ELBO 一举两得</strong>：
+<ol>
+  <li>$\log p(x)$ 是个固定的数（对给定 $x$），所以"顶高 ELBO" $\Leftrightarrow$ "压低 $D_{\mathrm{KL}}(q \| p_{\text{真后验}})$"。也就是<strong>训练 encoder 让 $q$ 越来越像真后验</strong>。</li>
+  <li>同时，因为 $\log p(x) \geq \mathrm{ELBO}$，顶高 ELBO 就是把 $\log p(x)$ 的"下界天花板"往上推——间接地<strong>训练 decoder 让数据似然变大</strong>。</li>
+</ol>
+一个 loss 同时干两件事——这是 VAE / 变分推断让人惊叹的优雅。
+</div>
+
+<h2>六、ELBO 在数轴上长什么样：Jensen 之"抬升"</h2>
+
+<p>抽象代数读多了容易麻木，下面这张图把上面的不等式画成"两条曲线"的样子。</p>
+
+<svg viewBox="0 0 640 280" role="img" aria-label="Jensen 不等式的几何抬升">
+  <g font-family="ui-sans-serif" font-size="12" fill="var(--text)">
+    <!-- axes -->
+    <line x1="60" y1="240" x2="600" y2="240" stroke="var(--border-strong)" stroke-width="1.2"/>
+    <line x1="60" y1="40" x2="60" y2="240" stroke="var(--border-strong)" stroke-width="1.2"/>
+    <text x="610" y="244" font-size="11" fill="var(--text-muted)">θ, φ (参数空间)</text>
+    <text x="40" y="36" font-size="11" fill="var(--text-muted)">值</text>
+
+    <!-- evidence curve (high, dashed) -->
+    <path d="M 80 90 Q 220 60 360 80 T 580 110" fill="none" stroke="#2b80c4" stroke-width="2.2" stroke-dasharray="5 4"/>
+    <text x="380" y="74" fill="#2b80c4" font-weight="600">log p(x)（不可达）</text>
+
+    <!-- elbo curve (lower, solid) -->
+    <path d="M 80 180 Q 220 140 360 170 T 580 200" fill="none" stroke="#0b5" stroke-width="2.6"/>
+    <text x="380" y="222" fill="#0b5" font-weight="600">ELBO(x)（我们能算、能优化）</text>
+
+    <!-- gap arrow -->
+    <g class="lift-arrow">
+      <line x1="240" y1="150" x2="240" y2="92" stroke="#d4a017" stroke-width="2"/>
+      <polygon points="240,84 235,96 245,96" fill="#d4a017"/>
+    </g>
+    <text x="252" y="120" fill="#d4a017" font-size="11">缝隙 = D<tspan font-size="9" baseline-shift="sub">KL</tspan>(q ∥ 真后验)</text>
+
+    <!-- optima markers -->
+    <circle cx="220" cy="60" r="4" fill="#2b80c4"/>
+    <circle cx="220" cy="140" r="4" fill="#0b5"/>
+    <text x="120" y="265" font-size="10.5" fill="var(--text-muted)">把 ELBO 顶高 → 缝隙变小 → 间接把蓝色虚线（真似然）也顶高</text>
+  </g>
+</svg>
+
+<p>把绿色实线（ELBO）往上推一点点，蓝色虚线（真 log-likelihood）至少不会比它低。如果运气好（变分族足够灵活、训练充分），缝隙会缩小到几乎为零，此时 ELBO 几乎就是 $\log p(x)$ 本身。但理论上<strong>缝隙永远 ≥ 0</strong>——所以 ELBO 是<em>下</em>界而非等价物。</p>
+
+<div class="callout-quote">
+Dr. Raj 在 L2 推导 ELBO 的板书里直接用了红绿两条曲线：「想象绿色曲线是 $\log p(x)$（不可达）。红色曲线是 ELBO，永远在绿色下面。只要把红色顶高，绿色至少不会比它低。」（本章配的 SVG 里我们把颜色对调了——蓝色为不可达的 evidence、绿色为可优化的 ELBO。）
+</div>
+
+<h2>七、ELBO 两项的物理意义</h2>
+
+<p>把 ELBO 写成 minimize 形式（取负号）就是 VAE 的训练损失：</p>
+
+$$L_{\text{VAE}}(x) \;=\; -\,\mathrm{ELBO}(x) \;=\; \underbrace{-\,\mathbb{E}_{q_\phi(z|x)}[\log p_\theta(x|z)]}_{\text{重构损失}} \;+\; \underbrace{D_{\mathrm{KL}}\!\big(q_\phi(z|x) \,\|\, p(z)\big)}_{\text{KL 正则损失}}$$
+
+<h3>7.1 重构项：让 decoder 还原原图</h3>
+
+<p>$\mathbb{E}_{q_\phi(z|x)}[\log p_\theta(x|z)]$ 这一项的物理意义：</p>
+
+<ol>
+  <li>给定真实图 $x$，让 encoder 输出潜变量分布 $q_\phi(z|x)$。</li>
+  <li>从这个分布里采一个 $z$。</li>
+  <li>把 $z$ 送进 decoder，得到 $p_\theta(x|z)$。</li>
+  <li>我们希望"在 decoder 的视角下，原图 $x$ 出现的可能性 $\log p_\theta(x|z)$ 越大越好"。</li>
+</ol>
+
+<p>实践中：</p>
+<ul>
+  <li>如果 $p_\theta(x|z) = \mathcal{N}(\mu_\theta(z), \sigma^2 I)$（连续像素，高斯似然），$-\log p_\theta(x|z)$ 化简后就是 <strong>MSE</strong>（均方误差）。</li>
+  <li>如果 $p_\theta(x|z) = \prod_i \text{Bernoulli}(\mu_i)$（0/1 像素，Bernoulli 似然），$-\log p_\theta(x|z)$ 化简后就是<strong>二值交叉熵 BCE</strong>。</li>
+</ul>
+
+<h3>7.2 KL 正则项：让 encoder 别乱发分布</h3>
+
+<p>$D_{\mathrm{KL}}(q_\phi(z|x) \,\|\, p(z))$ 这一项度量"encoder 输出的分布"和"先验"的距离。它在 loss 里扮演<strong>正则</strong>角色：</p>
+
+<ul>
+  <li>如果<em>只有</em>重构项，encoder 会作弊——把每张图映到一个超窄的 delta 分布（$\sigma \to 0$），让 decoder 死记硬背。Latent space 退化成离散点。</li>
+  <li>KL 正则强迫 $q_\phi(z|x)$ 形状像 $\mathcal{N}(0, I)$——既不能太宽（$\sigma$ 过大被罚），也不能太窄（$\sigma$ 过小被罚，因为 $-\log \sigma^2$ 会爆），中心也得靠近原点。</li>
+  <li>结果：不同图像的 $q_\phi(z|x)$ 互相重叠，latent space 变成连续的——从中任意采 $z$ 都能 decode 出合理图像。</li>
+</ul>
+
+<div class="callout callout-info">
+🛠️ <strong>当 $q_\phi(z|x) = \mathcal{N}(\mu, \sigma^2 I)$ 且 $p(z) = \mathcal{N}(0, I)$ 时，KL 有 closed-form</strong>：
+$$D_{\mathrm{KL}}\!\big(\mathcal{N}(\mu, \sigma^2) \,\|\, \mathcal{N}(0, 1)\big) \;=\; \frac{1}{2}\sum_{i=1}^d \big(\mu_i^2 + \sigma_i^2 - \log \sigma_i^2 - 1\big)$$
+所以 ELBO 中的 KL 项<strong>真的可算、有梯度、能反传</strong>——这就是把"q 对真后验的 KL（不可算）"换成"q 对 prior 的 KL（可算）"在工程上付诸实现的关键。
+</div>
+
+<h2>八、把 ELBO 和上一章 VAE 对齐</h2>
+
+<p>读到这里你应该有一种"原来 VAE 的 loss 就是 ELBO 的反"的恍然大悟感。具体对应关系：</p>
+
+<table style="width:100%; border-collapse:collapse; margin:1rem 0;">
+<thead>
+<tr style="background:var(--surface-soft);">
+<th style="text-align:left; padding:0.5rem; border:1px solid var(--border);">VAE 章里的概念</th>
+<th style="text-align:left; padding:0.5rem; border:1px solid var(--border);">ELBO 推导里的对应项</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="padding:0.5rem; border:1px solid var(--border);">Encoder $q_\phi(z|x)$</td>
+<td style="padding:0.5rem; border:1px solid var(--border);">变分近似后验</td>
+</tr>
+<tr>
+<td style="padding:0.5rem; border:1px solid var(--border);">Decoder $p_\theta(x|z)$</td>
+<td style="padding:0.5rem; border:1px solid var(--border);">出现在重构项 $\mathbb{E}_q[\log p_\theta(x|z)]$ 里</td>
+</tr>
+<tr>
+<td style="padding:0.5rem; border:1px solid var(--border);">Prior 假设 $p(z) = \mathcal{N}(0, I)$</td>
+<td style="padding:0.5rem; border:1px solid var(--border);">出现在 KL 正则项里</td>
+</tr>
+<tr>
+<td style="padding:0.5rem; border:1px solid var(--border);">重参数化 $z = \mu + \sigma \odot \epsilon$</td>
+<td style="padding:0.5rem; border:1px solid var(--border);">让重构项中的期望梯度可以反传</td>
+</tr>
+<tr>
+<td style="padding:0.5rem; border:1px solid var(--border);">$L_{\text{VAE}} = $ BCE + KL</td>
+<td style="padding:0.5rem; border:1px solid var(--border);">$L_{\text{VAE}} = -\mathrm{ELBO}$</td>
+</tr>
+</tbody>
+</table>
+
+<p>换句话说：上一章我们是"反向工程"地从直觉里凑出了 VAE 的 loss；本章我们是"正向工程"地从 $\log p(x)$ 出发推出 ELBO，发现两者完全等价。<strong>VAE 不是凭空想出来的——它是 ELBO 这个数学结构的最简实例</strong>。</p>
+
+<h3>8.1 一个常见误解</h3>
+
+<div class="callout callout-warning">
+⚠️ <strong>误解</strong>：「ELBO 是 VAE 特有的损失。」<br>
+<strong>纠正</strong>：ELBO 是<em>任何含潜变量的概率生成模型</em>的通用训练目标。VAE 是最简单的实例（1 步 latent + 高斯 prior + 神经网络 encoder/decoder）。<br>
+DDPM 是另一个实例（T 步 latent + 高斯转移核 + 固定 encoder + 神经网络 decoder）。Score-based model、Flow Matching 在某种意义上也都可以追溯到 ELBO 这条主干（虽然各家有更高效的等价目标）。
+</div>
+
+<h2>九、向前展望：DDPM 的损失就是 T 步 ELBO</h2>
+
+<p>本章读完，你已经掌握了"单步潜变量"模型的训练范式。下一道桥就是把<strong>单步</strong>变成<strong>多步</strong>——这就是 diffusion 模型的全部数学增量。</p>
+
+<p>VAE 里的 latent 是"一步": $x \to z \to x$。DDPM 把它<strong>展开成 T 步</strong>：</p>
+
+$$x = x_0 \;\to\; x_1 \;\to\; x_2 \;\to\; \cdots \;\to\; x_T \approx \mathcal{N}(0, I)$$
+
+<p>每一步都是一次"加一点噪声"的<strong>固定</strong>变分分布（forward process $q(x_t | x_{t-1})$ 不带可学参数，只有方差 schedule）。反向每一步 $p_\theta(x_{t-1} | x_t)$ 是<em>可学</em>的小型 decoder。</p>
+
+<p>整个模型的 ELBO 形式上长这样（先放个预告，第 5 章会完整推）：</p>
+
+$$\log p(x_0) \;\geq\; \mathbb{E}_q\!\left[\log p_\theta(x_0 | x_1) \;-\; \sum_{t=2}^T D_{\mathrm{KL}}\!\big(q(x_{t-1} | x_t, x_0) \,\|\, p_\theta(x_{t-1} | x_t)\big) \;-\; D_{\mathrm{KL}}\!\big(q(x_T | x_0) \,\|\, p(x_T)\big)\right]$$
+
+<p>看上去吓人，但骨架就是 VAE 的 ELBO：</p>
+
+<ul>
+  <li>最左边一项 $\log p_\theta(x_0 | x_1)$ — <strong>重构项</strong>（"最后一步把 $x_1$ 还原回 $x_0$"）。</li>
+  <li>中间一坨求和的 KL — <strong>每一步的"q 对反向 decoder 的 KL"</strong>（VAE 里只有一项；DDPM 有 T-1 项）。</li>
+  <li>最右边的 KL — <strong>$x_T$ 是否接近 prior $\mathcal{N}(0, I)$</strong>（VAE 里也有，但对应 $z$ 的 prior 项）。</li>
+</ul>
+
+<div class="callout callout-tip">
+💡 <strong>读到第 5 章 DDPM 损失时回来看这段</strong>。如果你本章把"乘 q/q + Jensen + 拆 log + 识别 KL"这四步看死了，DDPM 的损失推导就是<em>在更长的概率链上重复套用同一招</em>——长度变了，技巧本身没变。
+</div>
+
+<h3>9.1 为什么 DDPM 比 VAE 表达力更强？</h3>
+
+<p>从 ELBO 的"q 灵活度决定近似精度"视角看，DDPM 把单步的 $q(z|x)$ 换成了 T 步的 $q(x_T, x_{T-1}, \dots, x_1 | x_0)$——这是一个分解成 T 个小高斯的"链式 q"。每个 $q(x_t | x_{t-1})$ 都极其简单（一次加噪），但它们级联起来可以表达<em>非常复杂</em>的近似后验分布，理论上远比 VAE 的单步对角高斯灵活。</p>
+
+<p>反过来，<strong>反向链 $p_\theta(x_{t-1} | x_t)$ 也只需要每步都是简单高斯</strong>——这是 Sohl-Dickstein 2015 那篇原始 diffusion 论文的关键观察：如果 forward 每一步的加噪量足够小，<em>真实反向</em>也几乎是高斯，从而我们的小型反向 decoder 可以学得很准。这一切的损失推导框架，还是 ELBO。</p>
+
+<h3>9.2 simple loss 的 sneak peek</h3>
+
+<p>更让人惊叹的是：DDPM 那个看起来吓人的 T 项 ELBO，经过几步代数（重参数化 + 配方 + 选合理的方差）<strong>会化简成一行 MSE</strong>：</p>
+
+$$L_{\text{simple}}(\theta) \;=\; \mathbb{E}_{t, x_0, \epsilon}\Big[\big\|\epsilon - \epsilon_\theta(x_t, t)\big\|^2\Big]$$
+
+<p>看到这里你应该想问："为什么如此复杂的 ELBO 能压缩成预测噪声的 MSE？" 答案在第 6 章——本质上是因为 forward chain 选成了高斯加噪，每一步的 KL 都能写成"两个高斯均值之差的平方"。这是 Ho et al. 2020 那篇 DDPM 论文的工程贡献。本章你不需要懂这一步，只需要记住：<strong>所有这些化简的起点，是本章的 ELBO 公式</strong>。</p>
+
+<h2>十、把 ELBO 抽象成一个「优化范式」</h2>
+
+<p>ELBO 不止是一个公式，它代表了机器学习里一类<strong>处理"我想算的量算不出"的通用打法</strong>：</p>
+
+<ol>
+  <li><strong>识别真正想算的量</strong>（比如 $\log p(x)$）。</li>
+  <li><strong>承认它不可算</strong>，并找到造成不可算的"罪魁祸首"（这里是高维积分 $\int \cdots dz$）。</li>
+  <li><strong>引入辅助分布</strong> $q$（要求易于采样、易于参数化）。</li>
+  <li><strong>构造一个可算的下界（或上界）</strong>，使得"优化代理量"与"优化真量"在合适条件下等价或近似等价。</li>
+  <li><strong>对代理量做梯度优化</strong>。</li>
+</ol>
+
+<p>这个套路在 ML 里反复出现：</p>
+
+<ul>
+  <li><strong>EM 算法</strong>：完整数据 log-likelihood 算不出 → 引入 q → 同样用 Jensen → 得到 ELBO（事实上 EM 的 E 步就是优化 q、M 步就是优化 $\theta$，本质和 VAE 训练同构）。</li>
+  <li><strong>变分推断（VI）</strong>：精确后验算不出 → 引入参数化族 q → 最大化 ELBO ≡ 最小化 $D_{\mathrm{KL}}(q \| p_{\text{真后验}})$。</li>
+  <li><strong>Diffusion 模型的训练</strong>：完整 $\log p_\theta(x_0)$ 是 T 步嵌套积分 → 对每一步引入固定的 $q(x_t | x_{t-1})$ → 写出 T 步 ELBO → 化简为 "$\epsilon$-prediction" 简单 MSE 损失（这就是 DDPM 的"simple loss"，第 6 章细讲）。</li>
+</ul>
+
+<div class="my-addition">
+🟡 <strong>教材外补充：ELBO 之外还有别的下界吗？</strong><br>
+有。比如 <em>IWAE</em>（Importance-Weighted Autoencoder，Burda et al. 2015）用 K 个样本的重要性加权来构造一个<strong>更紧的下界</strong>——当 K → ∞ 时趋近真 $\log p(x)$。代价是计算更贵。这条路线属于"变分下界 family"的延伸，本书后续章节不会展开，但有兴趣可以查 IWAE 这关键字。<br>
+另外，<em>VAE 训练实践</em>里常用的 β-VAE（Higgins et al. 2017）不是更紧的下界，而是把 KL 项加权 $\beta > 1$，鼓励 disentangled latent；这一改动后<strong>不再是严格的 $\log p(x)$ 下界</strong>，是一个工程上的 trade-off。读论文遇到 $\beta$ 时心里有数。
+</div>
+
+<h2>十一、思维误区清扫</h2>
+
+<p>本节集中扫一下学 ELBO 时常见的几个坑，每一个都有现成的回答。</p>
+
+<h3>11.1 「ELBO 是个不等式，那训练时优化的是什么？」</h3>
+
+<p>训练时优化的是 ELBO 本身（取负后做梯度下降）。我们不试图直接优化 $\log p(x)$——优化的是它的可算下界。因为 ELBO 是 $\theta, \phi$ 两组参数的函数，对它求梯度有完全 well-defined 的语义。</p>
+
+<h3>11.2 「Jensen 是 ≥ 不等式。但 KL ≥ 0 也是不等式。这两件事是同一回事吗？」</h3>
+
+<p>是同一回事的两种说法。从 Jensen 出发推不等号、从 KL ≥ 0 出发推不等号，最终都会得到 $\log p(x) \geq \mathrm{ELBO}$；事实上第五节那个恒等式 $\log p(x) = \mathrm{ELBO} + D_{\mathrm{KL}}(q \| p_{\text{真后验}})$ 就把两条线粘起来了。</p>
+
+<h3>11.3 「ELBO 是 $x$ 的函数还是 $\theta, \phi$ 的函数？」</h3>
+
+<p>都是。对一个给定样本 $x$，ELBO$(x; \theta, \phi)$ 是关于参数 $\theta, \phi$ 的标量。训练时我们对一个 mini-batch 的样本各算 ELBO，求和（或平均）作为 batch loss，对 $\theta, \phi$ 反传。</p>
+
+<h3>11.4 「为什么不直接把 KL 算到 $p(z|x)$？反正都是 KL。」</h3>
+
+<p>因为 $p(z|x) = p(x|z)p(z)/p(x)$ 里分母有 $p(x)$，和我们想算的量等价难。ELBO 的 KL 是 $q$ 对 <strong>prior $p(z)$</strong> 的，prior 是我们选的（通常 $\mathcal{N}(0, I)$）所以可算。这就是 ELBO 设计上的关键 trick：<em>把不可算的 $p(z|x)$ 换成可算的 $p(z)$</em>，代价是引入了 Jensen 不等式的 gap。</p>
+
+<h3>11.5 「Jensen 不等式的 gap 大不大？」</h3>
+
+<p>取决于变分族 $q$ 的表达能力。如果 $q$ 太穷（比如限制为对角协方差高斯）、而真后验很复杂，gap 就大；如果 $q$ 可以是 normalizing flow 这种非常灵活的族，gap 可以很小。这是<strong>"变分推断的精度由 q 的灵活度决定"</strong>的另一种表述。Diffusion 模型在某种意义上"靠 T 步嵌套 q"实现了非常灵活的近似——这也是它为什么这么准的部分原因。</p>
+
+<h3>11.6 「ELBO 推导用了 Jensen，那等号何时成立？」</h3>
+
+<p>Jensen 不等式 $\log \mathbb{E}[Y] \geq \mathbb{E}[\log Y]$ 等号当且仅当 $Y$ 是常数（即 $Y$ 在期望分布下几乎处处取同一值）。代入我们的 ELBO 推导：$Y = \frac{p(x|z)p(z)}{q(z|x)} = \frac{p(x,z)}{q(z|x)}$。要这个比值对所有 $z$（在 $q$ 下）是常数，就必须 $q(z|x) \propto p(x,z)$，也就是 $q(z|x) = p(z|x)$。</p>
+
+<p>这和第五节恒等式 $\log p(x) - \mathrm{ELBO} = D_{\mathrm{KL}}(q \| p_{\text{真后验}})$ 给出的等号条件完全一致——两条路径推出同一个结论："$q$ 等于真后验时 ELBO 紧"。<strong>这就是为什么训练 encoder（让 $q$ 更像真后验）和最大化 ELBO 是同一回事</strong>。</p>
+
+<h3>11.7 「为什么是 KL(q‖p) 不是 KL(p‖q)？」</h3>
+
+<p>KL 散度不对称：$D_{\mathrm{KL}}(q \| p) \neq D_{\mathrm{KL}}(p \| q)$。ELBO 推导自然产生的是<strong>前向 KL</strong> $D_{\mathrm{KL}}(q \| p_{\text{真后验}})$。这一选择的代数后果是：$q$ 倾向于"在真后验为零的地方也为零"——也就是<strong>mode-seeking</strong>。如果真后验是多峰，$q$ 倾向于只覆盖其中一个峰，而不是把多个峰都涂上。</p>
+
+<p>这是变分推断一个著名的"特性"（feature, 不是 bug）。某些应用想要"覆盖所有峰"，会选择 minimize $D_{\mathrm{KL}}(p_{\text{真后验}} \| q)$（即 <em>expectation propagation</em> 那一脉），但代价是不再有 ELBO 这种漂亮的下界结构。Diffusion 模型用前向 KL，原因之一就是工程上简单可算。</p>
+
+<h2>十二、（选读）从信息论看 ELBO</h2>
+
+<p>如果你学过信息论，下面这个角度会让 ELBO 更亲切。把 ELBO 重新分组：</p>
+
+$$\mathrm{ELBO}(x) \;=\; \mathbb{E}_{q(z|x)}[\log p(x|z)] \;-\; D_{\mathrm{KL}}(q(z|x) \| p(z))$$
+
+<ul>
+  <li>第一项 $\mathbb{E}_q[\log p(x|z)]$ 是 decoder 给观测 $x$ 的"对数概率"，对应<strong>负的重构编码代价</strong>。Hinton/Frey 老的"minimum description length"视角说：好的潜变量应该让数据被便宜地编码——这就是"重构代价低"。</li>
+  <li>第二项 $D_{\mathrm{KL}}(q(z|x) \| p(z))$ 是<strong>潜变量本身的"编码代价"</strong>——把 $z$ 用 prior 这本"密码本"编码所需的比特数 - 用 q 编码所需的比特数。</li>
+</ul>
+
+<p>所以最大化 ELBO 等价于<strong>最小化总编码长度</strong>：用最少的比特把 $x$ 经过 $z$ 这条路径编码出来。这是 <em>rate-distortion</em> / <em>bits-back coding</em> 视角，<strong>把 VAE 和无损压缩联系起来</strong>。Karpathy、Hinton 在多个讲义里都强调过这一视角。本书后面讲 Latent Diffusion 时还会回到"潜空间的有效比特数"这个量化讨论。</p>
+
+<p>这种"压缩即智能"的直觉，在 2023 之后随着大模型时代被反复唤起——OpenAI 的 Ilya Sutskever 多次在采访里强调"learning is compression"。其根源就是这条 MDL/ELBO 视角。从 ELBO 出发，<em>所有生成模型都可以被解读为带损/无损的压缩器</em>。这不是花哨的修辞，是有具体比特数对应的工程量。</p>
+
+<div class="my-addition">
+🟡 <strong>教材外补充：bits-back coding 和 ELBO 的等价</strong>。Hinton 和 Zemel 1993 年那篇 "Autoencoders, minimum description length, and Helmholtz free energy" 是 VAE 思想的远祖——它从 MDL（minimum description length）原则出发推出一个目标，事后看正是 ELBO。所以 ELBO 不是 Kingma & Welling 2013 凭空发明的，而是一个被多次"重新发现"的深刻量。
+</div>
+
+<h2>十三、本章源视频片段</h2>
+
+<figure class="clip-frame">
+  <iframe src="https://www.youtube.com/embed/Yyir7-OAnlA?start=540" title="Vizuara L2: ELBO 推导板书" allowfullscreen></iframe>
+  <figcaption>📺 Vizuara《Principles of Diffusion Models》Lecture 2（约 9 分钟处）—— Dr. Raj 在白板上推导 ELBO 的关键 Jensen 步骤；本章第四节的六步等价于他这块板书的展开。</figcaption>
+</figure>
+
+<figure class="clip-frame">
+  <iframe src="https://www.youtube.com/embed/p7Q77S_ZhdA?start=0" title="CMU 10799 S26 L1: Kelly Hu 概率视角开场" allowfullscreen></iframe>
+  <figcaption>📺 CMU 10799 S26 Lecture 1 —— Kelly Hu 用概率论视角切入 diffusion 与 flow matching。她在后续把"乘 q/q + Jensen"称为"the greatest mathematical trick of all time"。</figcaption>
+</figure>
+
+<div class="takeaways" style="background:#0b5; color:#fff; padding:1.4rem; border-radius:8px; margin-top:2rem;">
+  <h3 style="margin-top:0; color:#fff;">本章要带走的（七条）</h3>
+  <ol>
+    <li><strong>$\log p(x)$ 不可算</strong>（Dr. Raj「we can't integrate over the entire universe」/「不能把猫的原子一个一个传到火星」），所以我们最大化它的可算下界 <strong>ELBO</strong>。</li>
+    <li><strong>ELBO = 重构 $-$ KL</strong>。重构项让 decoder 还原原图；KL 项让 encoder 输出的 $q(z|x)$ 贴近先验 $p(z) = \mathcal{N}(0, I)$。</li>
+    <li><strong>"史上最伟大的数学技巧"</strong>（Kelly Hu）= 在积分里乘 $q/q$ + Jensen 把 log 移进期望。这两步合起来构成<em>整个变分推断学科</em>。</li>
+    <li><strong>恒等式</strong> $\log p(x) = \mathrm{ELBO}(x) + D_{\mathrm{KL}}(q(z|x) \| p(z|x))$。"$\log p(x)$ 和 ELBO 的缝隙就是 q 对真后验的 KL"——所以顶高 ELBO 一举两得（提升似然 + 改进变分近似）。</li>
+    <li><strong>ELBO 里的 KL 是 q 对 prior 的，不是 q 对真后验的</strong>。前者可算（两个高斯有 closed-form），后者不可算（真后验本身就算不出）。这是 ELBO 之所以工程可用的核心 trick。</li>
+    <li><strong>VAE = ELBO 的最简实例</strong>；DDPM = ELBO 在 T 步链上的展开。本章四节的六步推导，是后面所有 diffusion 损失公式的母模板。</li>
+    <li><strong>ELBO 是一个通用打法</strong>：每次你遇到"想算的量算不出"，都可以套"引入 q → 乘 q/q → Jensen → 识别 KL"这四步。EM、VI、Diffusion 都靠这一招吃饭。</li>
+  </ol>
+</div>
+
+</article>

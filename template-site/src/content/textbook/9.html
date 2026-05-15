@@ -1,0 +1,574 @@
+<style>
+  .langevin-ch { line-height: 1.75; }
+  .langevin-ch svg { display: block; margin: 1.2rem auto; max-width: 100%; height: auto; }
+  .langevin-ch .clip-frame { max-width: 720px; margin: 1.4rem auto; }
+  .langevin-ch .clip-frame iframe { width: 100%; aspect-ratio: 16/9; border: 0; border-radius: 6px; }
+  .langevin-ch .clip-frame figcaption { color: var(--text-muted); font-size: 0.85rem; margin-top: 0.4rem; text-align: center; }
+  .langevin-ch .tldr { background: var(--surface-soft); border-left: 4px solid var(--module-accent); padding: 1rem 1.2rem; border-radius: 0 6px 6px 0; margin: 1.4rem 0; }
+  .langevin-ch .tldr h2 { margin-top: 0; font-size: 1.05rem; border-bottom: 0; }
+  .langevin-ch .callout { padding: 0.7rem 1rem; margin: 1rem 0; border-radius: 0 6px 6px 0; }
+  .langevin-ch .callout-info { background: #eef6fc; border-left: 4px solid #2b80c4; }
+  .langevin-ch .callout-note { background: #f3f0fa; border-left: 4px solid #6f4dd0; }
+  .langevin-ch .callout-warning { background: #fff6e0; border-left: 4px solid #d4a017; }
+  .langevin-ch .callout-tip { background: #e8f5e9; border-left: 4px solid #0b5; }
+  .langevin-ch .callout-quote { background: var(--surface-soft); border-left: 3px solid var(--border-strong); padding: 0.5rem 1rem; margin: 0.8rem 0; font-style: italic; color: var(--text-muted); }
+  .langevin-ch .my-addition { background: #fff7d6; border-left: 4px solid #b8860b; padding: 0.7rem 1rem; margin: 1rem 0; border-radius: 0 6px 6px 0; }
+  .langevin-ch pre { background: #1f1f1f; color: #f6f4ee; padding: 1rem; border-radius: 6px; font-size: 0.86rem; line-height: 1.55; overflow-x: auto; }
+  .langevin-ch code:not(pre code) { background: var(--surface-soft); padding: 0.1rem 0.35rem; border-radius: 3px; font-size: 0.9em; }
+  .langevin-ch h2 { border-bottom: 1px solid var(--border); padding-bottom: 0.3rem; margin-top: 2.4rem; }
+  .langevin-ch h3 { color: var(--module-accent); margin-top: 1.6rem; }
+  .langevin-ch .deriv-step { margin: 0.8rem 0; padding: 0.6rem 0.8rem; background: var(--surface-soft); border-radius: 4px; }
+  .langevin-ch .deriv-step strong { color: var(--module-accent); }
+  .langevin-ch .source-quote { font-style: italic; color: var(--text-muted); border-left: 3px solid var(--module-accent); padding: 0.5rem 1rem; margin: 0.8rem 0; background: var(--surface-soft); border-radius: 0 4px 4px 0; }
+  @keyframes lan-pulse { 0%, 100% { opacity: 0.6; } 50% { opacity: 1; } }
+  .langevin-ch .walker { animation: lan-pulse 1.8s ease-in-out infinite; }
+</style>
+
+<article class="langevin-ch">
+
+<h1>9. Langevin 采样：用 score 走出数据流形</h1>
+
+<p style="font-size:0.95rem; color:var(--text-muted);">主源：Vizuara《Principles of Diffusion Models》Lecture 5（Energy-Based Models &amp; Score Function，讲师 Dr. Raj Dandekar，chunk #0、#4–19）、Lecture 7（Noise Conditional Score Networks，chunk #3「磁铁类比」）、Lecture 8（SDE 框架统一视角，chunk #2）；副源：CMU 10799 Lecture 4（Score-based Models，chunk #1）。</p>
+
+<div class="tldr">
+  <h2>📌 TL;DR</h2>
+  <p><strong>问题</strong>：我们已经学会估计 <a href="/video-to-notebook/textbook/8/">score 函数</a> $s_\theta(x) \approx \nabla_x \log p(x)$，但 score 只告诉我"在 $x$ 这一点哪个方向密度上升最快"。<em>怎么真正从 $p(x)$ 里采样？</em></p>
+  <p><strong>答案：Langevin Dynamics（朗之万动力学）</strong>。它把"沿 score 上升"和"高斯抖动"拼到同一个迭代里：</p>
+  $$\boxed{\,x_{k+1} \;=\; x_k \;+\; \tfrac{\delta}{2}\, \nabla_x \log p(x_k) \;+\; \sqrt{\delta}\, \epsilon_k, \qquad \epsilon_k \sim \mathcal{N}(0, I)\,}$$
+  <p>第一项 <strong>drift（漂移）</strong>把当前点拉向高密度区；第二项 <strong>diffusion（扩散）</strong>给它随机踢一脚。<em>没有抖动</em>时这退化成纯梯度上升，会卡死在 $\log p$ 的局部最大点（mode）；<em>有了抖动</em>，链子就能在所有 mode 之间游走，<strong>采样概率正比于密度</strong>——这才是"从分布里采样"。</p>
+  <p><strong>承上启下</strong>：这是 score-based 生成模型（Song &amp; Ermon 2019）实际"出图"的那一步。整条 NCSN 采样流程 = 在递减噪声尺度上跑若干次 annealed Langevin。下一章我们就会看到 DDPM 的反向步骤本质上是<em>带噪声尺度 $t$ 的 Langevin 步</em>——本章打下的迭代式后面会被反复复用。</p>
+</div>
+
+<h2>一、回顾：我们走到哪了？为什么需要 Langevin？</h2>
+
+<p>Vizuara 这门课从 VAE 起步、走到 DDPM、再到 Energy-Based Models / Score Function——每一节都在解一个"如何刻画数据分布 $p_{\text{data}}(x)$"的子问题。Dr. Raj 在 L5 开场的复盘把整条主线串得很清楚：</p>
+
+<blockquote class="source-quote">「We started off with deep generative models. We looked at—these kind of models try to predict the true distribution which governs the underlying data... we do not have access to the true distribution. The only thing we have access to is samples from the data. And given the data samples, our objective is to predict the true distribution which governs this data distribution.」（chunk #0）</blockquote>
+
+<p>讲师把目标记成 $p_\phi(x) \approx p_{\text{data}}(x)$，并把已经学过的两条路线点了名：</p>
+
+<ol>
+  <li><strong>VAE</strong>（L2）：把数据从像素空间映射到 latent，再 decoder 还原；训练 encoder + decoder 两个网络；缺点是<em>输出模糊、双网络训练麻烦</em>（chunk #4–5）。</li>
+  <li><strong>DDPM</strong>（L3–L4）：前向是无参的加噪链，反向是一个共享网络一步步去噪；本质是<em>把 VAE 拉成 T 步</em>（chunk #6–10）。</li>
+</ol>
+
+<p>L5 引入了第三条路线——<strong>Energy-Based Models（EBM）+ score function</strong>（chunk #11–19，对应本书 <a href="/video-to-notebook/textbook/7/">第 7 章</a>和 <a href="/video-to-notebook/textbook/8/">第 8 章</a>）：</p>
+
+<blockquote class="source-quote">「So having understood both variational autoencoders and diffusion models, we move to another important concept which... will closely intersect with the diffusion framework... the concept or the framework that we are going to learn today is called as energy based models, and... we will look at in detail how energy based models combine very nicely with diffusion models in a single cohesive framework.」（chunk #11）</blockquote>
+
+<p>EBM 用<strong>能量函数</strong> $E_\phi(x)$ 给每个数据点打一个"不喜欢度"：能量低 = 概率高、能量高 = 概率低（chunk #14–15 的"小球落山谷"画面）。它的标准概率写法是 Boltzmann/Gibbs 形式：</p>
+
+$$p_\phi(x) \;=\; \frac{\exp(-E_\phi(x))}{Z_\phi}, \qquad Z_\phi = \int \exp(-E_\phi(x))\, dx$$
+
+<p>讲师用 $e^{-x}$ 的三条性质——单调递减、值域非负、把<em>低能量</em>映成<em>高概率</em>——解释了为什么是<em>指数</em>而不是别的（chunk #17–19）。但 EBM 有一个臭名昭著的拦路虎：<strong>配分函数 $Z_\phi$ 是高维积分，算不动</strong>。Score function 正是为了绕开 $Z_\phi$ 才登场：</p>
+
+$$\nabla_x \log p_\phi(x) \;=\; -\nabla_x E_\phi(x), \qquad (\text{配分函数 } Z_\phi \text{ 被求导消掉了！})$$
+
+<p>到这里，<strong>第 7、8 两章</strong>讲完了"<em>怎么学 score</em>"（denoising score matching、NCSN 多噪声尺度）。但还差最后一步——<strong>有了 score 怎么真正吐出一张图</strong>？这正是本章 Langevin 要回答的问题。</p>
+
+<div class="callout callout-note">
+🧭 <strong>本章在全书的位置</strong>：score = "地图上每一点的方向箭头"；Langevin = "拿着这张图怎么走"。两者合起来才是 score-based generation 的完整闭环。
+</div>
+
+<h2>二、磁铁类比：score 给出的不只是一个值，是一个矢量场</h2>
+
+<p>Dr. Raj 在 L7 用了一个非常好用的物理类比，先把 score 是什么<strong>具象化</strong>，这样后面才能讲清楚"沿着 score 走"是什么意思：</p>
+
+<blockquote class="source-quote">「Imagine that there are a bunch of magnets kept on a table and you have access to only a few of those magnets. Many of the other magnets are hidden from you. Now the idea or the objective is to calculate—given any point on this table, what is the direction in which the nearest magnet is pulling you. This is what we want to calculate. Now, inherently this is a very hard problem because we do not know the exact location of the magnets.」（chunk #3）</blockquote>
+
+<p>翻译成我们的语言：</p>
+
+<ul>
+  <li><strong>桌子</strong> = 数据空间 $\mathbb{R}^d$；</li>
+  <li><strong>磁铁</strong> = 真实数据点 $x^{(1)}, x^{(2)}, \dots, x^{(N)} \sim p_{\text{data}}$（你只看见一部分）；</li>
+  <li><strong>桌面上每一点的"被磁铁拉向哪"的方向</strong> = $\nabla_x \log p_{\text{data}}(x)$，正是 <strong>score</strong>；</li>
+  <li><strong>训练 score network $s_\theta(x)$</strong> = 学一张覆盖整张桌子的<em>磁力线图</em>，让神经网络能告诉你任意一点（包括没有磁铁的地方）"附近磁铁在哪个方向"。</li>
+</ul>
+
+<p>有了这张矢量场，<em>采样</em>的直觉立刻变成：<strong>把一颗小铁屑随便扔到桌上，让它顺着磁力一路滑过去</strong>——它最终会停在磁铁附近，也就是数据分布的高密度区。但"一路滑过去"具体怎么离散化成一个可执行的算法？Langevin 就是答案。</p>
+
+<p>讲师在 chunk #3 也明确点出了这个类比的难点：「we do not know the exact location of the magnets. If we knew that we would calculate the magnetic field for all the...」——我们既不知道有多少磁铁、也不知道它们具体在哪儿，只有有限的训练样本。这恰好对应"我们既不知道 $p_{\text{data}}$ 的解析形式、也不知道它的所有 mode，只有有限个样本"。<em>Score network 的任务，就是从这些"看得见的磁铁"外推出整张磁力图</em>——这是<a href="/video-to-notebook/textbook/8/">第 8 章</a>讲清楚的事。本章假设这张图已经训好。</p>
+
+<h2>三、第一性原理推导（一）：先尝试纯梯度上升，看它会出什么问题</h2>
+
+<p>"沿着 score 走"最朴素的写法是 <strong>对 $\log p(x)$ 做梯度上升</strong>：</p>
+
+<div class="deriv-step">
+<strong>步骤 1：写下梯度上升迭代</strong>
+$$x_{k+1} \;=\; x_k \;+\; \eta\, \nabla_x \log p(x_k)$$
+<em>Why</em>：这是优化里最熟悉的工具——想最大化函数，沿其梯度方向走步长 $\eta$。把它套到 $f(x) = \log p(x)$ 上，就是"找密度最高的点"。
+</div>
+
+<div class="deriv-step">
+<strong>步骤 2：分析收敛点</strong>
+当 $\eta$ 足够小且迭代足够多次，$x_k$ 会停在 $\nabla_x \log p = 0$ 的位置——也就是 $\log p$ 的<strong>局部最大点（mode）</strong>。<br>
+<em>Why</em>：梯度为零是极值的必要条件。从随机初始点出发，这条链子的极限分布是 mode 上的 δ-函数，而不是 $p(x)$ 本身。
+</div>
+
+<p>这就引出本章<strong>最关键的认识错位</strong>：</p>
+
+<div class="callout callout-warning">
+⚠️ <strong>"找峰值"和"按密度比例采样"是两件不同的事</strong>。<br>
+• 你想画一张<em>典型</em>的 MNIST 数字 → 应该按 $p(x)$ 的密度采样，"7" 这种常见数字采到的次数多、"奇形怪状的边缘样本"采到的次数少。<br>
+• 单纯梯度上升 → 只会输出"最像 7"的那张图，<em>而且每次都一模一样</em>。这是<strong>argmax 模式</strong>，不是<strong>sampling 模式</strong>。<br>
+真实分布几乎一定是<em>多峰</em>的（数字 0–9 至少 10 个 mode），纯梯度上升不仅输出无变化，<strong>还会卡死在距离初始点最近的那个 mode</strong>，从此再也跳不出去。
+</div>
+
+<p>所以朴素方案的失败可以一句话概括：<em>梯度上升只想往山顶爬，但采样要的是"在山上以正比于海拔的概率随机停下"</em>。</p>
+
+<h2>四、第一性原理推导（二）：加噪声把"爬山"变成"采样"</h2>
+
+<p>现在做<strong>本章最关键的一个小手术</strong>——在梯度上升的右边加一个随机扰动 $\sqrt{\delta}\, \epsilon$，并且把步长写成 $\delta/2$（很快会看到为什么是 $/2$）：</p>
+
+$$\boxed{\,x_{k+1} \;=\; x_k \;+\; \frac{\delta}{2}\, \nabla_x \log p(x_k) \;+\; \sqrt{\delta}\, \epsilon_k, \qquad \epsilon_k \sim \mathcal{N}(0, I)\,}$$
+
+<p>这就是 <strong>Unadjusted Langevin Algorithm（ULA）</strong>——又称 Langevin Monte Carlo、Langevin sampling。三个部件做三件事：</p>
+
+<ol>
+  <li><strong>当前位置</strong> $x_k$：你站的地方；</li>
+  <li><strong>漂移项</strong> $\tfrac{\delta}{2}\nabla_x \log p(x_k)$：朝高密度方向走一小步；</li>
+  <li><strong>扩散项</strong> $\sqrt{\delta}\, \epsilon_k$：往任意方向随机踢一脚。</li>
+</ol>
+
+<p>关键直觉：</p>
+
+<ul>
+  <li>在<em>低密度区</em>（远离数据流形），$\|\nabla \log p\|$ 很大，<em>漂移占主导</em>——链子被"吸"向数据流形；</li>
+  <li>在<em>高密度区</em>（已经在 mode 附近），$\|\nabla \log p\| \to 0$，<em>扩散占主导</em>——链子在 mode 附近<em>抖动</em>，不会卡死，过几步又能跳到邻近 mode；</li>
+  <li>抖动的大小 $\sqrt{\delta}$ 和漂移的大小 $\delta/2$ <strong>不是随便配的</strong>，它们的比例是被一个连续时间方程<em>强制</em>的，下一节就推。</li>
+</ul>
+
+<h2>五、为什么是 $\delta/2$ 和 $\sqrt{\delta}$？连续时间 SDE 视角</h2>
+
+<p>Vizuara L8 一开场就预告了：Score、EBM、DDPM 最终统一在<strong>随机微分方程</strong>（SDE）框架里——本节是这个统一的<em>第一个齿轮</em>。</p>
+
+<blockquote class="source-quote">「Today we are going to look at a framework which unifies everything together... we have so far covered variational autoencoders, then DDPMs—denoising diffusion probabilistic models—then we have covered the energy based approach which includes score function and noise conditional score network. Today we are going to look at a framework which unifies everything together.」（L8，chunk #2）</blockquote>
+
+<h3>5.1 朗之万 SDE：物理学的源头</h3>
+
+<p>"Langevin" 这个名字来自法国物理学家 Paul Langevin（1908），他研究<strong>布朗粒子在势场里的运动</strong>。物理图景值得花一段把它讲完——因为它直接给出了"为什么这条迭代式能采样"的物理直觉。</p>
+
+<p>想象一颗花粉颗粒漂在水里：</p>
+
+<ul>
+  <li>它被周围水分子<strong>不停撞击</strong>——每个撞击是随机的、方向和大小都不可预测、单位时间内的累积效应是<strong>高斯白噪声</strong>（中心极限定理）；</li>
+  <li>同时它处在某种<strong>外部势场</strong> $U(x)$ 中（比如重力、电场、化学势），受力 $F = -\nabla U(x)$；</li>
+  <li>水的<strong>阻力</strong>很大（过阻尼），速度等于受力（牛顿第二定律退化成一阶 ODE）。</li>
+</ul>
+
+<p>把这些写到一起就是<strong>过阻尼朗之万方程</strong>：</p>
+
+$$dx_t \;=\; -\nabla U(x_t)\, dt \;+\; \sqrt{2}\, dW_t$$
+
+<p>其中 $dW_t$ 是 <strong>Wiener 过程</strong>（标准布朗运动）的增量，$\sqrt{2}$ 是被温度归一化后的强度。如果令势能 $U(x) = -\log p(x)$（"低能量 = 高密度"，正是 chunk #14–15 那个小球落山谷的画面），就得到：</p>
+
+$$\boxed{\,dx_t \;=\; \nabla_x \log p(x_t)\, dt \;+\; \sqrt{2}\, dW_t\,}$$
+
+<p>这条 SDE 有一个<strong>了不起的结论</strong>：它的<em>平稳分布</em>恰好是 $p(x)$。也就是说，让粒子在 $-\log p$ 的势场里跑得够久，它停留在每一点的频率就<em>正比于 $p(x)$</em>——这才是真正的"从 $p$ 中采样"。换句话说，物理学中"系统在热平衡时的位置分布服从 Boltzmann 分布 $p(x) \propto e^{-U(x)/kT}$"这个结论，<strong>反过来给了我们一个采样器</strong>：你只要能模拟一段足够长的物理时间，统计粒子位置的频率分布就等于 Boltzmann 分布。</p>
+
+<p>在生成模型的语境里，把目标分布 $p(x)$ 当作 Boltzmann 分布，让能量函数 $U(x) = -\log p(x)$（多差一个常数无所谓，因为常数项的梯度是零）——于是<strong>"从 $p$ 中采样"被翻译成"模拟一段朗之万动力学"</strong>。这是统计物理学送给机器学习的一个礼物。</p>
+
+<div class="callout callout-info">
+🧪 <strong>Fokker-Planck 视角的草证</strong>：对应这条 SDE 的 Fokker-Planck 方程是
+$$\partial_t \rho(x, t) \;=\; -\nabla\!\cdot\!\big(\rho \, \nabla \log p\big) + \Delta \rho$$
+要找平稳态，令 $\partial_t \rho = 0$。把 $\rho = p$ 代入：$\nabla\!\cdot\!(p \nabla \log p) = \nabla\!\cdot\!\nabla p = \Delta p$，正好和右端第二项抵消。所以 $\rho = p$ 是平稳解。<em>这是 Langevin 能"采样"的数学命门——配上 $\sqrt{2}$ 的扩散强度，平稳分布才<em>恰好是</em> $p$。</em>
+</div>
+
+<h3>5.2 为什么扩散强度<em>恰好</em>是 $\sqrt{2}$？细致平衡视角</h3>
+
+<p>很多读者第一次看到 SDE 里那个 $\sqrt{2}$ 都会愣一下——为什么不是 $\sqrt{1}$ 或 $\sqrt{3}$？答案藏在<strong>细致平衡（detailed balance）</strong>条件里。一个连续时间马尔可夫过程的平稳分布是 $p$，<em>当且仅当</em> 漂移项和扩散项的比例满足：</p>
+
+$$\text{drift} \;=\; D \cdot \nabla \log p, \qquad \text{diffusion variance per unit time} \;=\; 2D$$
+
+<p>其中 $D$ 是任选的<strong>扩散系数</strong>（决定单位时间走多远）。这个关系叫 <strong>Einstein 关系</strong>，最早由爱因斯坦在 1905 年的布朗运动论文里推出。当我们令 $D = 1$ 就得到 $\sqrt{2}$ 的扩散强度；如果令 $D = 1/2$，则得到 $\sqrt{1}$ 的扩散——两者的<em>比例</em>始终是 $1:2$，决定了平稳分布是 $p$ 而不是其它。</p>
+
+<p><strong>简单说</strong>：如果你随意把噪声调大或调小（不动漂移），链子的平稳分布会偏离 $p$；只有<em>这一种比例</em>能恰好给出 $p$。这正是 Langevin 公式里最"神奇"的那个常数。</p>
+
+<h3>5.3 Euler–Maruyama 离散化：把 SDE 变成可跑的迭代</h3>
+
+<p>SDE 是连续时间的，我们要在计算机里跑就必须<strong>离散化</strong>。最朴素的方法是 <strong>Euler–Maruyama 格式</strong>：把 $dt$ 换成步长 $\delta$，把 $dW_t$ 换成 $\sqrt{\delta}\,\epsilon$（因为 Wiener 增量满足 $W_{t+\delta} - W_t \sim \mathcal{N}(0, \delta)$）：</p>
+
+<div class="deriv-step">
+<strong>SDE</strong>：$\quad dx_t = \nabla \log p(x_t)\, dt + \sqrt{2}\, dW_t$<br>
+<strong>离散化</strong>（取步长 $\delta$）：$\quad x_{k+1} = x_k + \nabla \log p(x_k)\, \delta + \sqrt{2}\, \sqrt{\delta}\, \epsilon_k$<br>
+<strong>把 $\delta$ 和 $2$ 重新组合</strong>（约定 $\delta \to \delta/2$，等价于换了时间尺度的常数）：
+$$x_{k+1} \;=\; x_k \;+\; \frac{\delta}{2}\, \nabla \log p(x_k) \;+\; \sqrt{\delta}\, \epsilon_k$$
+</div>
+
+<p><strong>Why 是 $\delta/2$？</strong>纯粹是<em>历史约定</em>——文献里常把 $\delta$ 写成 SDE 里 $dt$ 的两倍，方差项就刚好是 $\sqrt{\delta}$ 而非 $\sqrt{2\delta}$。两种写法等价，<em>只要漂移和扩散的比例固定</em>。如果你看到别的文献写成 $x_{k+1} = x_k + \eta \nabla \log p + \sqrt{2\eta}\, \epsilon$（"$\eta$-版本"），同样正确，只是把 $\delta$ 替换成了 $2\eta$。</p>
+
+<p><strong>Why 比例必须固定？</strong>因为这个比例决定了平稳分布。如果你把噪声方差调大一倍（写成 $\sqrt{2\delta}$ 而漂移仍是 $\delta/2$），平稳分布会变成 <em>"温度更高"</em>的 $p(x)^{1/T}$，不再是 $p$ 本身。Annealed Langevin（第八节）就是有意地<em>玩这个温度</em>。</p>
+
+<h2>六、能量景观图：Langevin 链子到底在干什么</h2>
+
+<p>把所有概念可视化。设 $p(x)$ 是一个 1D 双峰高斯混合（两座山），$-\log p(x)$ 就是两个对称的山谷。Langevin 链子就是<em>一颗在这片山谷里"被踹来踹去的小球"</em>：</p>
+
+<svg viewBox="0 0 660 280" role="img" aria-label="Langevin 链子在能量景观上游走">
+  <g font-family="ui-sans-serif" font-size="11" fill="var(--text)">
+    <rect x="10" y="10" width="640" height="260" rx="8" fill="var(--surface-soft)" stroke="var(--border)"/>
+    <text x="330" y="30" text-anchor="middle" font-weight="600">能量景观 $U(x) = -\log p(x)$ 与 Langevin 轨迹</text>
+
+    <!-- axes -->
+    <line x1="50" y1="240" x2="620" y2="240" stroke="var(--border-strong)"/>
+    <line x1="50" y1="240" x2="50" y2="50" stroke="var(--border-strong)"/>
+    <text x="630" y="244" font-size="10">x</text>
+    <text x="32" y="55" font-size="10">U(x)</text>
+
+    <!-- energy landscape: two wells -->
+    <path d="M 60 90 Q 120 230 200 220 Q 260 215 330 110 Q 400 215 460 220 Q 540 230 610 90"
+          stroke="var(--module-accent)" stroke-width="2.5" fill="none"/>
+
+    <!-- well labels -->
+    <text x="200" y="255" text-anchor="middle" font-size="10" fill="var(--module-accent)">mode 1（高密度）</text>
+    <text x="460" y="255" text-anchor="middle" font-size="10" fill="var(--module-accent)">mode 2（高密度）</text>
+    <text x="330" y="135" text-anchor="middle" font-size="10" fill="var(--red)">能垒</text>
+
+    <!-- trajectory dots -->
+    <g class="walker">
+      <circle cx="80" cy="105" r="4" fill="var(--red)"/>
+      <circle cx="105" cy="140" r="4" fill="var(--red)" opacity="0.85"/>
+      <circle cx="135" cy="180" r="4" fill="var(--red)" opacity="0.75"/>
+      <circle cx="170" cy="210" r="4" fill="var(--red)" opacity="0.7"/>
+      <circle cx="195" cy="218" r="4" fill="var(--red)" opacity="0.7"/>
+      <circle cx="210" cy="220" r="4" fill="var(--red)" opacity="0.7"/>
+      <circle cx="190" cy="219" r="4" fill="var(--red)" opacity="0.7"/>
+      <circle cx="225" cy="215" r="4" fill="var(--red)" opacity="0.65"/>
+      <circle cx="260" cy="200" r="4" fill="var(--red)" opacity="0.65"/>
+      <circle cx="300" cy="160" r="4" fill="var(--red)" opacity="0.6"/>
+      <circle cx="330" cy="125" r="4" fill="var(--red)" opacity="0.55"/>
+      <circle cx="370" cy="170" r="4" fill="var(--red)" opacity="0.6"/>
+      <circle cx="420" cy="210" r="4" fill="var(--red)" opacity="0.7"/>
+      <circle cx="455" cy="219" r="4" fill="var(--red)" opacity="0.8"/>
+      <circle cx="470" cy="220" r="4" fill="var(--red)" opacity="0.85"/>
+      <circle cx="450" cy="219" r="4" fill="var(--red)" opacity="0.85"/>
+    </g>
+
+    <!-- start label -->
+    <text x="80" y="90" text-anchor="middle" font-size="10" fill="var(--red)">$x_0$ 起点</text>
+
+    <!-- drift arrow -->
+    <g>
+      <line x1="105" y1="140" x2="135" y2="175" stroke="var(--blue)" stroke-width="1.5" marker-end="url(#lan-arr1)"/>
+      <text x="150" y="155" font-size="9" fill="var(--blue)">漂移 → 下山</text>
+    </g>
+
+    <!-- noise kick -->
+    <g>
+      <line x1="370" y1="170" x2="350" y2="155" stroke="#b48000" stroke-width="1.5" stroke-dasharray="3,2" marker-end="url(#lan-arr2)"/>
+      <text x="380" y="155" font-size="9" fill="#b48000">扩散 ← 翻越能垒</text>
+    </g>
+
+    <defs>
+      <marker id="lan-arr1" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+        <path d="M0,0 L6,3 L0,6 Z" fill="var(--blue)"/>
+      </marker>
+      <marker id="lan-arr2" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+        <path d="M0,0 L6,3 L0,6 Z" fill="#b48000"/>
+      </marker>
+    </defs>
+  </g>
+</svg>
+
+<p>怎么读这张图：</p>
+
+<ul>
+  <li><strong>红点</strong>是 Langevin 链子 $x_0, x_1, x_2, \dots$ 的轨迹；颜色越浅表示时间越晚；</li>
+  <li>链子从左上方高能量区开始，<strong>被漂移项拉下山</strong>，掉进左边的山谷（mode 1）；</li>
+  <li>它在 mode 1 附近<em>抖动</em>——这里 $\nabla \log p \approx 0$，主要靠噪声；</li>
+  <li>等过了若干步，<strong>累积的噪声踢碎了能垒</strong>，链子翻到右边山谷（mode 2）；</li>
+  <li>长时间统计下来，<em>左右两个 mode 各被访问 50%</em>——正好等于 $p(x)$ 给两座山分配的概率质量。</li>
+</ul>
+
+<div class="callout callout-tip">
+💡 <strong>"小球在山谷里被踢"——和 chunk #13–14 衔接</strong>：Dr. Raj 在 L5 用了几乎一样的画面解释 EBM：「imagine that you take a ball and you drop this ball in this curve... the ball will slowly settle down, slowly fall down and settle into let's say this configuration because it appears to be a valley.」（chunk #13–14）Langevin 干的事情就是<em>给这个小球加上了热噪声</em>——它不再死在最深的山谷里，而是按 Boltzmann 分布在所有山谷之间随机切换。<strong>EBM 的能量景观 + Langevin 的热抖动 = 从 $e^{-E}/Z$ 中采样</strong>。
+</div>
+
+<figure class="clip-frame">
+  <iframe src="https://www.youtube.com/embed/zRyD7GQ9RHs?start=717" title="Vizuara L5: 小球在能量山谷中（chunk #13–14）" allowfullscreen></iframe>
+  <figcaption>📺 Vizuara《Principles of Diffusion Models》Lecture 5（11:57 处）—— 讲师用"小球落山谷"解释 EBM 的能量极小值</figcaption>
+</figure>
+
+<h3>6.1 把"漂移"和"扩散"分开来看：一个动画式的拆解</h3>
+
+<p>把单步 Langevin 拆成两个动作（先漂、后抖），有助于更好理解链子在景观上"走法"。第 $k$ 步：</p>
+
+<ol>
+  <li><strong>"漂"</strong>：$\tilde x_{k} = x_k + \tfrac{\delta}{2} \nabla \log p(x_k)$——纯梯度上升一小步。在山谷里，这一步把球拉向最近的谷底。</li>
+  <li><strong>"抖"</strong>：$x_{k+1} = \tilde x_k + \sqrt{\delta}\, \epsilon_k$——往任意方向高斯扰动。</li>
+</ol>
+
+<p>这种拆解叫 <strong>splitting scheme</strong>，在数值 SDE 文献里也被叫做 "Lie-Trotter splitting"。它给出两个工程上有用的结论：</p>
+
+<ul>
+  <li>"漂"是<em>确定性</em>的，可以反复迭代直到接近极值再"抖"——这就是 <strong>预条件 Langevin</strong>（preconditioned Langevin）的基础；</li>
+  <li>"抖"的方差 $\delta$ 不必和"漂"的步长 $\delta/2$ 严格绑定（如果你愿意接受非 $p$ 的平稳分布）。比如把"抖"调大、"漂"不动，得到的平稳分布是 $p^\beta$（温度 $\beta < 1$ 把分布抹平）——这就是 <strong>tempered Langevin</strong>，常用于跨 mode 探索。</li>
+</ul>
+
+<h2>七、离散化误差与 Metropolis–Hastings 修正</h2>
+
+<p>上一节的 Euler-Maruyama 离散化引入了一个理论代价：<strong>当 $\delta > 0$ 时，链子的平稳分布<em>并不严格等于</em> $p(x)$，而是 $p$ 的一个 $\mathcal{O}(\delta)$ 偏移</strong>。换句话说：</p>
+
+<ul>
+  <li>$\delta \to 0$ 且 $k \to \infty$ 时，$x_k \overset{d}{\to} p(x)$（理论极限）；</li>
+  <li>实际 $\delta > 0$ 时，存在<strong>离散化偏差</strong>——尤其在高曲率区域（密度变化剧烈的地方）。</li>
+</ul>
+
+<h3>7.1 朴素办法：把 $\delta$ 调小</h3>
+
+<p>把步长砍一半，偏差也就砍一半（一阶精度）。代价：要跑两倍的迭代次数才能走同样的"物理时间"。在高维问题里这非常昂贵。</p>
+
+<h3>7.2 严格办法：Metropolis–Hastings 修正</h3>
+
+<p>把 Langevin 当成<strong>提议分布</strong>，每步用 MH 接受/拒绝准则消除离散化偏差。完整算法叫 <strong>MALA</strong>（Metropolis-Adjusted Langevin Algorithm）：</p>
+
+<div class="deriv-step">
+<strong>步骤 1：提议</strong> 用 Langevin 算出候选点 $x^* = x_k + \tfrac{\delta}{2} \nabla \log p(x_k) + \sqrt{\delta}\,\epsilon$。<br>
+<strong>步骤 2：算接受率</strong>
+$$\alpha = \min\!\left(1,\; \frac{p(x^*) \cdot q(x_k \mid x^*)}{p(x_k) \cdot q(x^* \mid x_k)}\right)$$
+其中 $q(\cdot \mid \cdot)$ 是 Langevin 提议的高斯密度。<br>
+<strong>步骤 3：接受/拒绝</strong> 以概率 $\alpha$ 接受 $x_{k+1} = x^*$；否则 $x_{k+1} = x_k$。
+</div>
+
+<p>MALA 的平稳分布<strong>严格等于</strong> $p$（任意 $\delta$ 下）；代价是要算 $p(x^*)/p(x_k)$ 的比值——但这正好是 EBM 的<strong>未归一化</strong>密度比，<em>配分函数 $Z_\phi$ 在比值里直接消掉</em>，所以可算。</p>
+
+<div class="callout callout-warning">
+⚠️ <strong>实践中 score-based 生成模型几乎不用 MH 修正</strong>。原因：（1）NCSN/DDPM 训的是 score $\nabla \log p_\sigma$ 而不是 $\log p_\sigma$，算接受率需要的 $\log p$ 拿不到；（2）多噪声尺度的 annealed Langevin 在<em>有限步</em>就能给出视觉上很好的样本，理论收敛严格性让位给工程速度。Song &amp; Ermon 2019 的原论文就直接用 ULA + annealing。
+</div>
+
+<h2>八、Annealed Langevin：在递减噪声尺度上跑</h2>
+
+<p>直接对真实数据分布 $p_{\text{data}}$ 跑 Langevin 有两个工程灾难：</p>
+
+<ol>
+  <li><strong>低密度区 score 估不准</strong>：数据流形外面几乎没有训练样本，<a href="/video-to-notebook/textbook/8/">score network</a> 在那里输出近乎随机。但 Langevin 链子的起点正是<em>纯高斯噪声</em>——它一定在低密度区，<em>第一步就跟错方向</em>。</li>
+  <li><strong>多 mode 之间难以混合</strong>：数据流形上的 mode 之间隔着大量低密度区，链子很难从 mode A 翻越到 mode B，<em>mixing time 巨大</em>。</li>
+</ol>
+
+<p>Song &amp; Ermon 在 NCSN（<a href="/video-to-notebook/textbook/8/">第 8 章</a>）里给出了一招神兵：<strong>不要对 $p_{\text{data}}$ 直接采样，对一族递减噪声尺度上的"被平滑分布"依次采样</strong>。</p>
+
+<div class="deriv-step">
+<strong>Annealed Langevin Dynamics 算法骨架</strong><br>
+取递减序列 $\sigma_1 > \sigma_2 > \dots > \sigma_L \approx 0$。<br>
+1. 初始化 $x \sim \mathcal{N}(0, \sigma_1^2 I)$（在最大噪声尺度下采初值）。<br>
+2. <strong>for</strong> $i = 1, 2, \dots, L$ <strong>do</strong>：<br>
+&nbsp;&nbsp;&nbsp;调整步长 $\delta_i = \delta \cdot (\sigma_i / \sigma_L)^2$。<br>
+&nbsp;&nbsp;&nbsp;<strong>for</strong> $k = 1, \dots, T$ <strong>do</strong>：<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$x \leftarrow x + \tfrac{\delta_i}{2} s_\theta(x, \sigma_i) + \sqrt{\delta_i}\, \epsilon$<br>
+3. 输出 $x$。
+</div>
+
+<p>为什么这样能工作？</p>
+
+<ul>
+  <li><strong>大尺度 $\sigma_1$</strong>：$p_{\sigma_1}(x)$ 是真实分布卷上很宽高斯——几乎填满整个空间，<em>低密度区不存在</em>、$s_\theta$ 处处可信、所有 mode 被"模糊"成一个大 blob，<em>容易混合</em>；</li>
+  <li><strong>中等尺度</strong>：blob 开始分裂出粗粒度结构（"这是数字、这是数字 7"），链子被引导到正确大类；</li>
+  <li><strong>小尺度 $\sigma_L$</strong>：$p_{\sigma_L} \approx p_{\text{data}}$，链子最终落到流形上具体某张图。</li>
+</ul>
+
+<p>这正是 chunk #6 提到的"perfume diffusion"的逆过程：<strong>annealing 把"扩散开的香水分子"一缩缩缩回到了喷嘴口</strong>。</p>
+
+<div class="callout callout-tip">
+💡 <strong>Annealed Langevin 和 DDPM 的关系</strong>：DDPM 的反向步骤 $x_{t-1} = \mu_\theta(x_t, t) + \sigma_t \epsilon$ 拆开看就是<em>带噪声尺度 $t$ 的一步 Langevin</em>，其中 $\mu_\theta$ 的核心就是 score $\nabla \log p_t(x_t)$（通过 Tweedie 公式从噪声预测换算得到）。<strong>NCSN 和 DDPM 是同一个 SDE 在两种离散化下的孪生兄弟</strong>——L8（chunk #2）的"unifying framework"指的就是这件事。
+</div>
+
+<h2>九、收敛性：Langevin 链子要跑多久？</h2>
+
+<p>实际跑 Langevin 时，最现实的问题是<strong>"我跑 1000 步够吗？10000 步呢？"</strong> 这取决于两件事：</p>
+
+<h3>9.1 burn-in（预热期）</h3>
+
+<p>从初始点出发，链子的分布在前若干步还远没有收敛到 $p$。这段时间叫 <strong>burn-in</strong>，期间采到的样本统计上不能算作"从 $p$ 采的"。常见做法：跑 $T$ 步、丢掉前 $T/4$ 或 $T/10$ 步，剩下的当样本。</p>
+
+<h3>9.2 mixing time（混合时间）</h3>
+
+<p>即使过了 burn-in，链子<em>探索整个分布</em>还需要时间。混合时间的严格定义是：让链子的分布和真实 $p$ 的总变差距离降到 $\epsilon$ 所需的步数。对一个有 $K$ 个间隔很远的 mode 的分布，混合时间至少是 $\mathcal{O}(\exp(\Delta E_{\max}))$——这是为什么<em>纯 ULA 在多 mode 上无法用</em>的根本原因。</p>
+
+<p>实践上的判断标准：</p>
+
+<ul>
+  <li>跑多条独立链子（不同初值），看它们的<strong>样本均值/方差是否一致</strong>（Gelman-Rubin $\hat R$ 诊断）；</li>
+  <li>看<strong>自相关函数</strong>什么时候衰减到 0——衰减得越慢，每条样本携带的"有效信息"越少；</li>
+  <li>实际生成模型里，因为只要图像看起来合理就行、不需要严格统计保证，多数论文跑固定的 $L \times T$ 步（如 NCSN 默认 $L=10$ 噪声尺度 × $T=100$ 步 = 1000 总步数）。</li>
+</ul>
+
+<h2>十、失败模式：Langevin 什么时候会出问题</h2>
+
+<p>把可能踩坑的地方列清楚，比记公式更重要。</p>
+
+<h3>10.1 Score 估不准 → 链子走错方向</h3>
+
+<p>已经讨论过：低密度区训练样本稀少，<a href="/video-to-notebook/textbook/8/">denoising score matching</a> 的目标在那里几乎没有信号。Annealed Langevin 是工程上的标准修法。一个更隐蔽的问题是<strong>过拟合 score</strong>——当 score network 把训练样本本身记得太死，链子会被吸进训练样本而不是它们的"流形邻域"，输出看起来像数据集里的某张图（缺乏新颖性）。</p>
+
+<h3>10.2 Mode 之间隔得太远 → mixing time 爆炸</h3>
+
+<p>如果两个 mode 之间的能垒高度是 $\Delta E$，理论上链子翻越它需要的时间是 $\mathcal{O}(\exp(\Delta E / T))$（Eyring–Kramers 公式）。在多 mode 数据集（如 MNIST 10 个数字）上，<em>纯 ULA 几乎不会跨 mode 切换</em>。这又一次说明 annealing 的必要——大尺度时所有 mode 合并成一个 blob，能垒被抹平。</p>
+
+<h3>10.3 步长 $\delta$ 调得不对</h3>
+
+<ul>
+  <li><strong>$\delta$ 太大</strong>：链子会"飞出"高密度区、进入 score 不可信的地方，发散；</li>
+  <li><strong>$\delta$ 太小</strong>：单步几乎不动，需要的迭代次数爆炸；</li>
+  <li><strong>实践</strong>：Song &amp; Ermon 推荐 $\delta_i = \epsilon \cdot \sigma_i^2 / \sigma_L^2$，把步长按噪声尺度<em>平方缩放</em>。Why：大噪声尺度上 score 量级小（分布更平），需要更大步长才能动得起来；小尺度反之。</li>
+</ul>
+
+<h3>10.4 高维 score 不准的"概率泡沫"</h3>
+
+<p>在高维空间里，绝大多数体积都集中在<em>典型集</em>（typical set）—— 一层薄壳。如果初始化扔到了典型集外面，纯 Langevin 不仅 score 估不准、连"该往哪个 mode 走"都搞错。再次：annealing 是救星。还有一个推论：<strong>高维下"用 $\mathcal{N}(0, I)$ 采初值"和"低密度区"几乎是同义词</strong>，因为典型集的薄壳在像素空间里是一个非常小的子集。这也是为什么 score-based 方法<em>不能</em>跳过 annealing 直接用 ULA——单尺度 ULA 在像素空间根本走不到任何 mode。</p>
+
+<h2>十一、最小可跑的 Langevin 采样：1D 双峰高斯混合</h2>
+
+<p>下面是一个 60 行就能跑通的玩具实验，用<em>已知的</em> $\log p$（不需要训神经网络）来直观验证"Langevin 链子的样本分布会收敛到 $p$"。</p>
+
+<pre><code>import torch
+import matplotlib.pyplot as plt
+
+# ===== 目标分布：两个高斯的等权混合 =====
+# p(x) = 0.5 * N(x; -2, 1) + 0.5 * N(x; +2, 1)
+def log_p(x):
+    log_g1 = -0.5 * (x + 2.0) ** 2  # 未归一化
+    log_g2 = -0.5 * (x - 2.0) ** 2
+    return torch.logsumexp(torch.stack([log_g1, log_g2]), dim=0)
+
+def score(x):
+    # 对 log_p 自动求导得到 ∇_x log p(x)
+    x = x.detach().requires_grad_(True)
+    lp = log_p(x).sum()
+    g, = torch.autograd.grad(lp, x)
+    return g
+
+# ===== Langevin sampling =====
+def langevin_sample(n_chains=2000, n_steps=1000, delta=0.05):
+    # 初始化在远离 mode 的位置：x_0 ~ N(0, 5^2)
+    x = torch.randn(n_chains) * 5.0
+    for _ in range(n_steps):
+        g = score(x)
+        eps = torch.randn_like(x)
+        x = x + 0.5 * delta * g + (delta ** 0.5) * eps
+    return x.detach()
+
+samples = langevin_sample()
+
+# ===== 对比真实 p(x) =====
+xs = torch.linspace(-6, 6, 400)
+true_p = 0.5 * torch.exp(-0.5 * (xs + 2)**2) / (2*torch.pi)**0.5 \
+       + 0.5 * torch.exp(-0.5 * (xs - 2)**2) / (2*torch.pi)**0.5
+
+plt.hist(samples.numpy(), bins=80, density=True, alpha=0.5, label='Langevin samples')
+plt.plot(xs.numpy(), true_p.numpy(), 'r-', lw=2, label='True p(x)')
+plt.legend(); plt.xlabel('x'); plt.ylabel('density')
+plt.title('Langevin sampling on a 2-mode GMM')
+plt.show()</code></pre>
+
+<p>跑完会看到的现象：</p>
+
+<ul>
+  <li>1000 步之后，2000 条链子的样本直方图与红色真实 $p(x)$ 高度重合；</li>
+  <li>左右两个 mode 大约各占一半——<em>这是抖动让链子能跨过中间能垒</em>的直接证据；</li>
+  <li>如果你把 <code>(delta ** 0.5) * eps</code> 这一行去掉（关掉噪声），所有链子全部聚到了离自己最近的 mode 上、密度变成两个 δ 函数——<strong>这就是 argmax 失败模式</strong>。</li>
+</ul>
+
+<svg viewBox="0 0 620 240" role="img" aria-label="Langevin 采样直方图收敛到目标分布">
+  <g font-family="ui-sans-serif" font-size="11" fill="var(--text)">
+    <rect x="10" y="10" width="600" height="220" rx="8" fill="var(--surface-soft)" stroke="var(--border)"/>
+    <text x="310" y="30" text-anchor="middle" font-weight="600">1000 步后的样本直方图 vs. 真实 p(x)</text>
+
+    <!-- axis -->
+    <line x1="50" y1="200" x2="590" y2="200" stroke="var(--border-strong)"/>
+    <line x1="50" y1="200" x2="50" y2="55" stroke="var(--border-strong)"/>
+    <text x="50" y="215" font-size="10" text-anchor="middle">-6</text>
+    <text x="320" y="215" font-size="10" text-anchor="middle">0</text>
+    <text x="590" y="215" font-size="10" text-anchor="middle">+6</text>
+
+    <!-- histogram bars (samples) -->
+    <g fill="var(--blue)" opacity="0.45">
+      <rect x="100" y="195" width="14" height="5"/>
+      <rect x="115" y="180" width="14" height="20"/>
+      <rect x="130" y="155" width="14" height="45"/>
+      <rect x="145" y="125" width="14" height="75"/>
+      <rect x="160" y="100" width="14" height="100"/>
+      <rect x="175" y="90" width="14" height="110"/>
+      <rect x="190" y="100" width="14" height="100"/>
+      <rect x="205" y="120" width="14" height="80"/>
+      <rect x="220" y="150" width="14" height="50"/>
+      <rect x="235" y="170" width="14" height="30"/>
+      <rect x="250" y="180" width="14" height="20"/>
+      <rect x="265" y="183" width="14" height="17"/>
+      <rect x="280" y="185" width="14" height="15"/>
+      <rect x="295" y="183" width="14" height="17"/>
+      <rect x="310" y="180" width="14" height="20"/>
+      <rect x="325" y="175" width="14" height="25"/>
+      <rect x="340" y="170" width="14" height="30"/>
+      <rect x="355" y="150" width="14" height="50"/>
+      <rect x="370" y="125" width="14" height="75"/>
+      <rect x="385" y="100" width="14" height="100"/>
+      <rect x="400" y="90" width="14" height="110"/>
+      <rect x="415" y="100" width="14" height="100"/>
+      <rect x="430" y="120" width="14" height="80"/>
+      <rect x="445" y="150" width="14" height="50"/>
+      <rect x="460" y="175" width="14" height="25"/>
+      <rect x="475" y="190" width="14" height="10"/>
+    </g>
+
+    <!-- true p(x) curve: two-mode GMM -->
+    <path d="M 60 200 L 100 198 Q 140 175 175 95 Q 195 75 215 95 Q 245 175 280 195 L 320 198 L 360 195 Q 395 175 415 95 Q 435 75 455 95 Q 490 175 525 198 L 590 200"
+          stroke="var(--red)" stroke-width="2.5" fill="none"/>
+
+    <text x="180" y="65" text-anchor="middle" font-size="10" fill="var(--red)">mode @ -2</text>
+    <text x="420" y="65" text-anchor="middle" font-size="10" fill="var(--red)">mode @ +2</text>
+    <text x="320" y="160" text-anchor="middle" font-size="10" fill="#666">能垒区（链子靠抖动跳过）</text>
+
+    <g transform="translate(420, 50)">
+      <rect x="0" y="0" width="14" height="10" fill="var(--blue)" opacity="0.5"/>
+      <text x="20" y="9" font-size="10">Langevin 样本</text>
+      <line x1="80" y1="5" x2="100" y2="5" stroke="var(--red)" stroke-width="2"/>
+      <text x="105" y="9" font-size="10">真实 p(x)</text>
+    </g>
+  </g>
+</svg>
+
+<h2>十二、把所有线索接起来：score-based 生成的完整闭环</h2>
+
+<p>到这里，"用 score 生成样本"的整条流水线终于齐备：</p>
+
+<ol>
+  <li><strong>建模目标</strong>：估计 $\nabla_x \log p_{\text{data}}(x)$（不是 $p$ 本身，不需要 $Z$，<a href="/video-to-notebook/textbook/7/">EBM 的福音</a>）；</li>
+  <li><strong>学</strong>：denoising score matching 配多个噪声尺度（<a href="/video-to-notebook/textbook/8/">NCSN</a>），得到 $s_\theta(x, \sigma)$；</li>
+  <li><strong>采</strong>：annealed Langevin dynamics（本章）从纯噪声出发，沿递减噪声尺度迭代式去噪到 $p_{\text{data}}$。</li>
+</ol>
+
+<p>这条路线第一次在 CIFAR-10 上把"用 score 生成"做到了和 GAN 同档的 FID（Song &amp; Ermon 2019）。一年后 <strong>Song et al. 2021</strong> 在《Score-Based Generative Modeling through SDEs》里把这一切和 DDPM 一并写进 SDE 框架——也就是 Vizuara L8 那句"unifying framework"。</p>
+
+<div class="my-addition">
+🟡 <strong>教材外补充（讲师本章没展开但下游章节会用）：</strong>
+<ul>
+  <li><strong>HMC / underdamped Langevin</strong>：把动量项加回来（"小球除了位置还有速度"），mixing time 在高维上比 ULA 更快。在大型 EBM 训练中常用。</li>
+  <li><strong>Predictor-Corrector 采样</strong>（Song et al. 2021）：把 SDE 的 Euler-Maruyama "predictor" 和 Langevin "corrector" 交错使用——两者的<em>组合</em>比单独跑任一一个都更稳。这是 score SDE 论文的事实标准采样器。</li>
+  <li><strong>Probability-flow ODE</strong>：把 Langevin 的<em>随机</em>项扔掉、改成等价的 ODE。代价是失去多样性、但获得了"deterministic invertible map"——这是 DDIM、consistency model 的根基（详见 <a href="/video-to-notebook/textbook/15/">第 15 章</a>）。</li>
+  <li><strong>Tweedie 公式</strong>：把"预测噪声 $\epsilon_\theta$"和"score $\nabla \log p_\sigma$"显式联系起来，$\epsilon_\theta(x_t, t) = -\sigma_t \cdot s_\theta(x_t, t)$。这一公式是 DDPM ↔ NCSN 互译的钥匙，下一章 <a href="/video-to-notebook/textbook/10/">第 10 章</a>会用到。</li>
+</ul>
+</div>
+
+<figure class="clip-frame">
+  <iframe src="https://www.youtube.com/embed/ej7LfQyKXec?start=4" title="Vizuara L7: 磁铁类比解释 score（chunk #3）" allowfullscreen></iframe>
+  <figcaption>📺 Vizuara《Principles of Diffusion Models》Lecture 7（00:04 处）—— 用"桌上的磁铁"解释 score 是矢量场</figcaption>
+</figure>
+
+<figure class="clip-frame">
+  <iframe src="https://www.youtube.com/embed/57EFSTxL_5o?start=5" title="Vizuara L8: SDE 框架统一 VAE/DDPM/Score（chunk #2）" allowfullscreen></iframe>
+  <figcaption>📺 Vizuara《Principles of Diffusion Models》Lecture 8（00:05 处）—— SDE 框架预告 score 和 DDPM 的同构</figcaption>
+</figure>
+
+<div class="takeaways" style="background:#0b5; color:#fff; padding:1.4rem; border-radius:8px; margin-top:2rem;">
+  <h3 style="margin-top:0; color:#fff;">本章要记住的（讲师线索 + 推导命门）</h3>
+  <ol>
+    <li><strong>Score 是矢量场，Langevin 是"走法"</strong>。前者告诉你"哪里高"，后者告诉你"怎么按密度比例去那里"。两者合起来才完成 score-based 生成的闭环。</li>
+    <li><strong>核心迭代</strong>：$x_{k+1} = x_k + \tfrac{\delta}{2} \nabla_x \log p(x_k) + \sqrt{\delta}\, \epsilon_k$，$\epsilon_k \sim \mathcal{N}(0, I)$。漂移项往 mode 拉、扩散项防止卡死。</li>
+    <li><strong>为什么必须有噪声</strong>：去掉 $\sqrt{\delta}\,\epsilon$ 退化成梯度上升，结果是 mode 上的 δ 函数（argmax），不是从 $p$ 采样。"找峰值" ≠ "按密度采样"。</li>
+    <li><strong>为什么这迭代恰好采到 $p$</strong>：它是 SDE $dx_t = \nabla \log p\, dt + \sqrt{2}\, dW_t$ 的 Euler-Maruyama 离散化，该 SDE 的<em>平稳分布</em>正好是 $p(x)$（Fokker-Planck 平稳态验证）。</li>
+    <li><strong>离散化代价</strong>：$\delta > 0$ 时存在 $\mathcal{O}(\delta)$ 偏差；可用 MALA（Metropolis–Hastings）做严格修正，但生成模型里几乎都用 ULA。</li>
+    <li><strong>annealed Langevin 是工程必需</strong>：直接对 $p_{\text{data}}$ 跑会被"低密度区 score 不准 + 多 mode 难混合"双杀；沿递减噪声尺度 $\sigma_1 > \dots > \sigma_L$ 跑解决这两个问题。</li>
+    <li><strong>和 DDPM 的同构</strong>：DDPM 反向每一步本质是带噪声尺度 $t$ 的 Langevin（Tweedie 公式把 $\epsilon$ 预测和 score 显式联系）。L8 的 SDE 框架就是把它们合二为一。</li>
+  </ol>
+</div>
+
+</article>

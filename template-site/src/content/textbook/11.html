@@ -1,0 +1,612 @@
+<style>
+  .sde-ch { line-height: 1.7; }
+  .sde-ch svg { display: block; margin: 1.2rem auto; max-width: 100%; height: auto; }
+  .sde-ch .clip-frame { max-width: 720px; margin: 1.4rem auto; }
+  .sde-ch .clip-frame iframe { width: 100%; aspect-ratio: 16/9; border: 0; border-radius: 6px; }
+  .sde-ch .clip-frame figcaption { color: var(--text-muted); font-size: 0.85rem; margin-top: 0.4rem; text-align: center; }
+  .sde-ch .tldr { background: var(--surface-soft); border-left: 4px solid var(--module-accent); padding: 1rem 1.2rem; border-radius: 0 6px 6px 0; margin: 1.4rem 0; }
+  .sde-ch .tldr h2 { margin-top: 0; font-size: 1.05rem; }
+  .sde-ch .callout { padding: 0.7rem 1rem; margin: 1rem 0; border-radius: 0 6px 6px 0; }
+  .sde-ch .callout-info { background: #eef6fc; border-left: 4px solid #2b80c4; }
+  .sde-ch .callout-note { background: #f3f0fa; border-left: 4px solid #6f4dd0; }
+  .sde-ch .callout-warning { background: #fff6e0; border-left: 4px solid #d4a017; }
+  .sde-ch .callout-tip { background: #e8f5e9; border-left: 4px solid #0b5; }
+  .sde-ch .callout-quote { background: var(--surface-soft); border-left: 3px solid var(--border-strong); padding: 0.5rem 1rem; margin: 0.8rem 0; font-style: italic; color: var(--text-muted); }
+  .sde-ch .my-addition { background: #fff7d6; border-left: 4px solid #b8860b; padding: 0.7rem 1rem; margin: 1rem 0; border-radius: 0 6px 6px 0; }
+  .sde-ch pre { background: #1f1f1f; color: #f6f4ee; padding: 1rem; border-radius: 6px; font-size: 0.86rem; line-height: 1.55; overflow-x: auto; }
+  .sde-ch code:not(pre code) { background: var(--surface-soft); padding: 0.1rem 0.35rem; border-radius: 3px; font-size: 0.9em; }
+  .sde-ch h2 { border-bottom: 1px solid var(--border); padding-bottom: 0.3rem; margin-top: 2.4rem; }
+  .sde-ch h3 { color: var(--module-accent); margin-top: 1.6rem; }
+  .sde-ch .deriv-step { margin: 0.8rem 0; padding: 0.6rem 0.8rem; background: var(--surface-soft); border-radius: 4px; }
+  .sde-ch .deriv-step strong { color: var(--module-accent); }
+  @keyframes brownian-jiggle { 0% { transform: translate(0,0); } 25% { transform: translate(4px,-3px); } 50% { transform: translate(-2px,5px); } 75% { transform: translate(-5px,-2px); } 100% { transform: translate(0,0); } }
+  .sde-ch .particle { animation: brownian-jiggle 1.6s ease-in-out infinite; }
+  @keyframes pf-flow { 0% { stroke-dashoffset: 0; } 100% { stroke-dashoffset: -80; } }
+  .sde-ch .ode-flow { stroke-dasharray: 6 4; animation: pf-flow 3s linear infinite; }
+</style>
+
+<article class="sde-ch">
+
+<h1>11. SDE 框架与 Probability Flow ODE</h1>
+
+<p style="font-size:0.95rem; color:var(--text-muted);">主源：Vizuara《Principles of Diffusion Models》Lecture 8（讲师 Dr. Rajat Dandekar，物理直觉版 SDE）；副源：CMU 10-799 Lecture 10 / 11（Luma AI 嘉宾 Linqi (Alex) Zhou 讲 Flow Map）；核心论文：Song et al. 2021 ICLR《Score-Based Generative Modeling Through Stochastic Differential Equations》。</p>
+
+<div class="tldr">
+  <h2>📌 TL;DR</h2>
+  <p><strong>SDE 框架 = 把 DDPM 与 NCSN 同时塞进一个连续时间方程的「物理外衣」。</strong>讲师 Dr. Rajat 用一滴红色染料扩散在水里的画面切入：宏观看不可逆，但微观看每个粒子在做 Brownian motion（布朗运动），<em>微观运动是时间可逆的</em>——这就是整个 diffusion 文献的「魔术心脏」。形式化为：</p>
+  $$dx = f(x, t)\, dt + g(t)\, dW$$
+  <p>其中 $f$ 是漂移、$g\,dW$ 是 Brownian noise。Anderson (1982) 给出反向时间 SDE：</p>
+  $$dx = \big[f(x,t) - g(t)^2 \nabla_x \log p_t(x)\big] dt + g(t)\, d\bar W$$
+  <p>只要学好<strong>每一个时间 $t$ 上的 score</strong> $s_\theta(x,t) \approx \nabla_x \log p_t(x)$，就能解这个反向 SDE 把噪声"还原"成数据。</p>
+  <p>更妙的：Song et al. 证明存在一个<strong>等价的 Probability Flow ODE</strong>（PF-ODE）</p>
+  $$\frac{dx}{dt} = f(x,t) - \tfrac{1}{2}\, g(t)^2\, \nabla_x \log p_t(x)$$
+  <p>它和反向 SDE 在每个时刻有<em>完全相同的边际分布</em> $p_t(x)$，但<strong>给定 $x_T$ 后轨迹是确定的</strong>。这一切打开了：精确似然估计、确定性采样（DDIM 的雏形）、高阶 ODE 求解器（DPM-Solver）、图像精确反演。</p>
+  <p><strong>本章基本论点</strong>：DDPM 是 VP-SDE 的 Euler-Maruyama 离散；NCSN 是 VE-SDE 的离散；DDIM 是对应 PF-ODE 的确定性 Euler。<em>三条看似不同的路线，其实是同一根方程的不同切片。</em></p>
+</div>
+
+<h2>一、为什么本章要把"连续时间"摆到 C 位</h2>
+
+<p>到目前为止你已经学过两条看上去并行的路线：</p>
+
+<ol>
+  <li><strong>DDPM</strong>（第 5–9 章）：离散 T 步加噪、去噪，写成 $q(x_t | x_{t-1}) = \mathcal{N}(\sqrt{1-\beta_t}\, x_{t-1}, \beta_t I)$。</li>
+  <li><strong>Score-based / NCSN</strong>（第 10 章）：在多个噪声尺度上学 $\nabla_x \log p(x)$，再用 Langevin dynamics 反过来采样。</li>
+</ol>
+
+<p>讲师 Dr. Rajat 在 L8 开场就把今天要做的事情讲得很直白（chunk #386）：</p>
+
+<div class="callout-quote">
+"So far we have covered VAEs, then DDPMs, then the energy-based approach which includes score function and noise conditional score network. Today we are going to look at a framework which <strong>unifies everything together</strong>."
+</div>
+
+<p>这个统一不是事后包装——它由 Song 等人在 2021 年 ICLR 论文里完成。<strong>这个统一发生在两篇原始论文之后</strong>（DDPM 在 NeurIPS 2020、NCSN 在 NeurIPS 2019），讲师特意提了这一点（chunk #387）：</p>
+
+<div class="callout-quote">
+"This unification happened <em>later</em> after both these previous papers came out. And when you view everything from this lens, it makes a lot of sense. It turns out that both DDPM and score-based approach are special cases of this overall unified approach."
+</div>
+
+<p>所以本章在课程里扮演的是「<strong>盖瓦顶</strong>」的角色——把两根承重柱拢成一座屋顶。下面 8 节按照讲师的物理直觉路线走，最后 4 节才进入数学正餐与 PF-ODE。</p>
+
+<h2>二、Anti-bias 开篇：你脑子里关于 diffusion 的几个常见误解</h2>
+
+<div class="callout callout-warning">
+⚠️ 在开始这一章之前，请先把下面这些"想当然"<strong>从脑子里删掉</strong>：
+<ul>
+  <li><strong>误解 A：扩散过程是不可逆的</strong>。宏观上是，但微观上每个粒子运动<em>恰好</em>是时间可逆的——这正是反向 SDE 存在的物理根据。</li>
+  <li><strong>误解 B：DDPM 和 score-based 是两套独立的方法</strong>。它们其实是同一个 SDE 的两种不同离散选择。</li>
+  <li><strong>误解 C：要去噪就一定要走随机轨迹</strong>。给定终点噪声 $x_T$，存在一条<em>确定的、不带随机性的</em>轨迹（PF-ODE）能把它送回数据，并且每个时刻的分布与随机版本完全一致。</li>
+  <li><strong>误解 D：连续时间只是为了优雅</strong>。它带来真实的工程红利：高阶 ODE 求解器把 1000 步压到 10 步；精确 likelihood 评估；图像反演。</li>
+  <li><strong>误解 E：SDE 是物理学家的玩具、和深度学习无关</strong>。事实是 Stable Diffusion、Sora、Veo、Stable Video Diffusion 的采样核心全部依赖 PF-ODE，每一次抽出一张图都是在解一个高维 ODE。</li>
+  <li><strong>误解 F：score 模型学的是"噪声"</strong>。它学的是 $\nabla_x \log p_t(x)$，即对数密度的梯度方向；"噪声"只是它在 VP-SDE 下的一种 parameterize 变体。</li>
+</ul>
+</div>
+
+<p>讲师对误解 A 给出了一个非常生动的物理画面，我们下面就先沿着他的路线走。先用物理直觉把"反向 SDE 为什么可能存在"这件事吃透，再去看公式才不会觉得突兀。讲师把这一段定义为整门课"最有趣"的一讲（chunk #386），因为它把物理学三百年的积累一次性变成了机器学习的"反向魔法"。</p>
+
+<h2>三、物理直觉：一滴红色染料的故事</h2>
+
+<p>Dr. Rajat 不直接写 SDE，他先讲一杯水（chunks #389–#391）。这种"先把物理图像吃透、再去翻译成数学"的讲法在物理系是标准操作，但在 ML 教程里非常少见——这也正是这一讲值得反复看的原因。</p>
+
+<div class="callout-quote">
+"I will use the word <em>spreading</em> when I intend to say diffusion—because to explain diffusion I cannot use the same word diffusion. Initially the shape of the dye was maybe spherical. When you put it on the surface of the liquid, the drop slowly goes down and the liquid gets filled. Initially the liquid is white and slowly the color changes to red. So the structure of the dye which was spherical to begin with is completely destroyed. It becomes uniform."
+</div>
+
+<p>这是 diffusion 的<strong>第一性观察</strong>：<em>结构 → 均匀</em>。注意讲师强调"spread"这个动词来代替"diffuse"——为了避免用要解释的术语来解释它。这种讲法上的细节体现了他想让你<em>真的看到</em>染料在水里散开的那张画面，而不是听一个抽象名词。等画面建立好了，他立刻抛出本讲（也是整本书）反复出现的提问：</p>
+
+<blockquote><strong>"Can we reverse this process?"</strong></blockquote>
+
+<p>常识告诉我们不行。讲师演了一段反例：</p>
+
+<div class="callout-quote">
+"Imagine you're sitting and see this glass filled with red liquid, and someone tells you what was the original structure of this dye when it was poured. You are thinking like, okay this is very difficult—I cannot reverse time. If I had a time machine, I could go back. But we live in a world where we cannot reverse time."
+</div>
+
+<p>关键转折在 chunk #391：<strong>"But let us take a lens and zoom in on the dye."</strong>——讲师把显微镜对准红色染料，进入<em>微观尺度</em>。这是整门课<em>叙事张力最强的一刻</em>：宏观看，过程像热力学第二定律一样不可逆；放大视野，居然又冒出了一条逃生通道。下面这一节就把这条逃生通道讲清楚。</p>
+
+<h2>四、关键洞察：微观运动是时间可逆的</h2>
+
+<p>放大到原子尺度，染料分子在做<strong>无规则的、抖动式的运动</strong>（chunks #391–#392）：</p>
+
+<div class="callout-quote">
+"I see tiny particles moving around and wobbling around here and there. It's almost like the motion is unpredictable, very random. It's not moving in a specific direction, but they're moving up and down. It's like a zigzag motion. All of us have seen how the price of a stock varies—it's up and down, very zigzag. This is almost very similar. A more technical word for this motion is also called <strong>Brownian motion</strong>."
+</div>
+
+<p>讲师顺势抛了一个非常关键的问题（chunk #392）：</p>
+
+<blockquote>"Just by looking at this motion, can you tell whether it's the forward motion or the backward motion?"</blockquote>
+
+<p>答案是<em>分不出</em>。这就是整个 diffusion 文献的物理基石——讲师在 chunk #394 把它讲到几乎是「论点级别」的高度：</p>
+
+<div class="callout-quote">
+"Even though macroscopic motions are <strong>not</strong> time reversible (we cannot just reverse time and unspread the dye), at the microscopic level if you look at these individual tiny particles, it turns out these motions are <strong>exactly reversible</strong>. ... This is the <em>only theme</em> which is used in the entire diffusion literature in all the different approaches. This is the common arc which you will find in many of these papers. Something will be reversed in the paper and you'll be wondering how this magically work—and at the heart of it, it turns out that it is because of this property of microscopic motions being time reversible."
+</div>
+
+<div class="callout callout-tip">
+💡 <strong>把这一段背下来</strong>：每次后面看到任何 paper 神奇地"反向"什么过程，它最终都回到这个物理事实——Brownian motion 在适当的分布条件下是 time-reversible 的。Anderson 1982 把这个事实写成了可计算的反向 SDE 公式。
+</div>
+
+<svg viewBox="0 0 600 200" role="img" aria-label="一滴染料从结构到均匀的扩散过程">
+  <g font-family="ui-sans-serif" font-size="11">
+    <text x="100" y="20" text-anchor="middle" font-weight="600">t=0：结构清晰</text>
+    <text x="300" y="20" text-anchor="middle" font-weight="600">t=T/2：正在扩散</text>
+    <text x="500" y="20" text-anchor="middle" font-weight="600">t=T：完全均匀（噪声）</text>
+
+    <rect x="40" y="40" width="120" height="120" rx="6" fill="#f6f4ee" stroke="#888"/>
+    <circle cx="100" cy="100" r="22" fill="#c43" opacity="0.9"/>
+
+    <rect x="240" y="40" width="120" height="120" rx="6" fill="#f6f4ee" stroke="#888"/>
+    <g fill="#c43" opacity="0.55">
+      <circle class="particle" cx="280" cy="80" r="4"/>
+      <circle class="particle" cx="320" cy="95" r="4" style="animation-delay:.3s"/>
+      <circle class="particle" cx="300" cy="120" r="4" style="animation-delay:.6s"/>
+      <circle class="particle" cx="340" cy="130" r="4" style="animation-delay:.9s"/>
+      <circle class="particle" cx="270" cy="110" r="4" style="animation-delay:.2s"/>
+      <circle class="particle" cx="310" cy="70" r="4" style="animation-delay:.5s"/>
+    </g>
+
+    <rect x="440" y="40" width="120" height="120" rx="6" fill="#f6f4ee" stroke="#888"/>
+    <rect x="440" y="40" width="120" height="120" rx="6" fill="#c43" opacity="0.32"/>
+
+    <path d="M 170 100 L 230 100" stroke="#888" stroke-width="1.5" marker-end="url(#arr)"/>
+    <path d="M 370 100 L 430 100" stroke="#888" stroke-width="1.5" marker-end="url(#arr)"/>
+    <defs>
+      <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+        <path d="M 0 0 L 10 5 L 0 10 z" fill="#888"/>
+      </marker>
+    </defs>
+    <text x="200" y="185" text-anchor="middle" font-size="10" fill="#666">宏观不可逆</text>
+    <text x="400" y="185" text-anchor="middle" font-size="10" fill="#666">微观可逆</text>
+  </g>
+</svg>
+
+<h2>五、从「染料」切换到「数据」：用数据点替换分子</h2>
+
+<p>这一节做的事是讲师 Dr. Rajat 全讲<em>叙事斜坡的最陡处</em>。物理画面建立好了，接下来要把它<strong>翻译</strong>成机器学习的语言——不然染料的故事只是科普，没法落到代码上。</p>
+
+<p>讲师从 chunk #395 起做<strong>本讲最关键的概念替换</strong>。物理直觉听完了，可是我们要生成的是图像、不是染料分子。怎么连接？</p>
+
+<div class="callout-quote">
+"But remember here we are dealing with data. We do not have liquids which we can so readily imagine the movement of. We have data, we have pixels, we have numbers. So how do we even connect it to the process of diffusion? ... We will view our data as one of these <strong>particles</strong>."
+</div>
+
+<p>这一句替换是<strong>本章最重要的一句话</strong>。把它具象化（chunk #396）：</p>
+
+<ul>
+  <li>给你一堆猫的图片（讲师举的例子是 8 张，但也可以 80、800、8 万张）；</li>
+  <li>每张图被看成<strong>高维空间里的一个点</strong>（一张 64×64×3 的彩图就是一个 12 288 维空间里的点）；</li>
+  <li>所有训练图组成的<strong>数据分布</strong>就是这个空间里的"染料初始形状"。它有结构（猫的图像聚成一团或几团）；</li>
+  <li>对每个数据点加噪 = 让每个点像染料分子一样做 Brownian motion；</li>
+  <li>时间足够长之后，这团"染料"散得到处都是——也就是 isotropic Gaussian。整张高维空间变成了纯噪声。</li>
+</ul>
+
+<p>反向过程要做的就是：<strong>给我高维空间里的一个随机噪声点，把它沿着"反向 Brownian"轨迹拉回到训练数据所在的区域</strong>。</p>
+
+<div class="callout callout-note">
+🧭 <strong>记住这个心象</strong>：之后所有 SDE 公式里的"$x$"、"染料分子"、"数据点"、"图像 latent"，都是同一个东西在不同语境下的名字。一旦把它们打通，公式就不再陌生。
+</div>
+
+<h2>六、写下 SDE：把 Brownian motion 形式化</h2>
+
+<p>上面的物理画面到此终于可以变成方程。注意我们到目前为止<em>只用了三个事实</em>就建立了反向 SDE 的物理动机：(1) 染料宏观扩散看上去不可逆；(2) 微观放大后每个分子在做无规则抖动；(3) 这个抖动在足够大的样本上是时间可逆的。下面用 Itô 微分写下来。一个一般的 Itô SDE 长这样：</p>
+
+$$\boxed{\;dx = f(x, t)\, dt \;+\; g(t)\, dW_t\;}$$
+
+<ul>
+  <li><strong>$f(x, t)$（drift / 漂移项）</strong>：确定性的"风"。它代表 $x$ 在不计算随机扰动情况下，下一刻往哪儿移。</li>
+  <li><strong>$g(t)$（diffusion coefficient / 扩散系数）</strong>：随机扰动的强度。</li>
+  <li><strong>$dW_t$（Wiener process / Brownian motion increment）</strong>：标准 Brownian motion 的微元。直观上 $dW_t \sim \mathcal{N}(0, dt \cdot I)$——在长度 $dt$ 的时间里加一团方差为 $dt$ 的高斯噪声。</li>
+</ul>
+
+<p>把 $dt$ 和 $dW_t$ 都看成"无限小的真实小数"，可以记忆为：</p>
+
+$$x(t + dt) \approx x(t) + f(x, t)\, dt + g(t)\, \sqrt{dt}\, \epsilon, \quad \epsilon \sim \mathcal{N}(0, I)$$
+
+<div class="callout callout-tip">
+💡 <strong>为什么 noise 项是 $\sqrt{dt}$ 而不是 $dt$？</strong>因为 Brownian motion 的方差线性增长 $\mathrm{Var}[W_{t+dt} - W_t] = dt$，所以它的<em>标准差</em>（也就是真正叠加到 $x$ 上的尺度）是 $\sqrt{dt}$。这个 $\sqrt{dt}$ 在离散化时变成 $\sqrt{\Delta t}$，正是 DDPM 公式里 $\sqrt{\beta_t}$ 的来源。
+</div>
+
+<h2>七、SDE 的两种主流形式：VP 与 VE</h2>
+
+<p>Song 等人在论文里给了两种<em>具体</em>的 SDE，它们分别对应已经学过的两条路线。</p>
+
+<h3>7.1 VP-SDE（Variance Preserving，对应 DDPM）</h3>
+
+$$dx = -\tfrac{1}{2}\, \beta(t)\, x\, dt + \sqrt{\beta(t)}\, dW_t$$
+
+<p>对照 $f$ 和 $g$：</p>
+<ul>
+  <li>$f(x, t) = -\tfrac{1}{2} \beta(t) x$——一个把 $x$ <em>拉向原点</em>的力（drift 指向原点）。这一项让数据点不会无限"漂走"，最终落在原点附近。物理上类似一个胡克定律弹簧把粒子拉回零点。</li>
+  <li>$g(t) = \sqrt{\beta(t)}$——按 $\beta(t)$ 大小注入噪声。$\beta(t)$ 一般取线性或 cosine schedule，控制每个时刻噪声注入的速度。</li>
+</ul>
+
+<p>这套设计的好处：<strong>方差守恒</strong>。如果起点 $x_0$ 的方差是 1，那么任意 $t$ 时刻 $x_t$ 的方差仍然约等于 1（中间数学留作练习——靠 $-\frac{1}{2}\beta(t) x\, dt$ 把扩张回拉、$\sqrt{\beta(t)}\, dW$ 把方差注进来，两边精确平衡）。从工程角度，这件事极其重要：网络在所有时间尺度上看到的输入都<em>大致同量级</em>，不会出现 $t$ 大时输入幅值爆炸的问题，BatchNorm / LayerNorm 等模块都可以正常工作。</p>
+
+<h3>7.2 VE-SDE（Variance Exploding，对应 NCSN）</h3>
+
+$$dx = \sqrt{\frac{d \sigma^2(t)}{dt}}\, dW_t$$
+
+<p>这里 $f = 0$，$g(t) = \sqrt{d\sigma^2/dt}$。完全<em>没有漂移</em>——纯粹堆噪声。</p>
+
+<ul>
+  <li>这正好就是 NCSN 用的"在不同噪声尺度上扰动"的连续时间版本；</li>
+  <li>方差并不守恒——它<em>持续爆炸式增长</em>到 $\sigma_{\max}^2$；</li>
+  <li>$\sigma_{\max}$ 必须取得足够大（比如 50–80），让最终分布在所有数据点上都<em>看起来像噪声</em>，否则反向 SDE 起点偏离 $\mathcal{N}(0, \sigma_{\max}^2 I)$，会产生明显偏置；</li>
+  <li>因为方差不守恒，VE-SDE 的网络输入需要按 $\sigma_t$ 做<strong>归一化预处理</strong>（EDM 论文中的 $c_\text{in}, c_\text{out}, c_\text{skip}$ 三件套就是干这事的）。</li>
+</ul>
+
+<div class="callout callout-note">
+📝 <strong>命名约定</strong>：<br>
+• "VP" = <em>Variance Preserving</em>，方差守恒。Ho 2020 的 DDPM 就是它的离散化。<br>
+• "VE" = <em>Variance Exploding</em>，方差爆炸。Song 2019 的 NCSN 就是它的离散化。<br>
+• Song 2021 论文还提了第三种 sub-VP SDE（似然估计性能更好），但工程上 VP 与 VE 已覆盖几乎所有主流模型。
+</div>
+
+<h3>7.3 DDPM 就是 VP-SDE 的 Euler-Maruyama 离散</h3>
+
+<p>把 VP-SDE 用最朴素的数值方法（Euler-Maruyama）离散到 $\Delta t = 1/T$：</p>
+
+<div class="deriv-step">
+<strong>步骤 1：写下 Euler 步</strong>
+$$x_{t+\Delta t} - x_t = -\tfrac{1}{2} \beta(t)\, x_t\, \Delta t + \sqrt{\beta(t)}\, \sqrt{\Delta t}\, \epsilon$$
+<em>Why</em>：直接套上面的离散化公式。
+</div>
+
+<div class="deriv-step">
+<strong>步骤 2：让 $\beta(t)\, \Delta t \to \beta_t$（离散版的 noise schedule）</strong>
+$$x_{t+1} = (1 - \tfrac{1}{2} \beta_t)\, x_t + \sqrt{\beta_t}\, \epsilon$$
+注意 $1 - \tfrac{1}{2}\beta_t \approx \sqrt{1 - \beta_t}$（小 $\beta_t$ 一阶 Taylor）。
+<em>Why</em>：把连续时间的 $\beta(t)\, \Delta t$ 收进一个单步的 $\beta_t$。
+</div>
+
+<div class="deriv-step">
+<strong>步骤 3：得到 DDPM 的 forward 更新式</strong>
+$$x_{t+1} = \sqrt{1 - \beta_t}\, x_t + \sqrt{\beta_t}\, \epsilon$$
+<em>Why</em>：这就是 <a href="/video-to-notebook/textbook/5/">第 5 章 DDPM 的标准 forward</a> 公式！<strong>SDE 视角第一次告诉我们：DDPM 不是凭空设计的——它是一个具体 SDE 的具体离散方案。</strong>
+</div>
+
+<div class="callout callout-tip">
+💡 <strong>这一步是本章的"啊哈时刻"之一</strong>：你前面背得很辛苦的 DDPM forward 公式，原来只是 VP-SDE 的 Euler-Maruyama。换一个 SDE（VE），就得到 NCSN 的 forward。换一个数值方法（Heun、RK4），就得到 DPM-Solver / EDM 论文里的那些"快速采样器"。
+</div>
+
+<h2>八、Anderson 1982：反向时间 SDE</h2>
+
+<p>正向我们写好了。但<em>怎么往回走</em>？讲师在物理直觉部分已经预告过结论——微观运动可逆。Anderson (1982) 把这条物理直觉变成了一个具体的方程。这条结果在 1982 年发表时是一篇纯随机过程论文，没有人想到它会在 39 年后变成生成式 AI 的核心引擎。</p>
+
+<div class="my-addition">
+🟡 <strong>教材外补充：</strong>讲师在视频里没有把 Anderson 公式写出来（他做的是物理 motivation），但 Song et al. 2021 论文的 Eq. (6) 引用的就是这条 50 年前的结果。我们必须把它写下来，因为 score model 训练的全部意义就在这里。Anderson 的论文标题是 <em>"Reverse-time diffusion equation models"</em>，发表在 <em>Stochastic Processes and their Applications</em>——一本在 ML 圈子里完全没人读的纯数学杂志。这也提醒我们：跨学科把旧工具搬到新问题上，常常比闭门造新工具回报更高。
+</div>
+
+<p>对任意正向 SDE $dx = f(x, t) dt + g(t) dW$，其<strong>反向时间 SDE</strong> 为：</p>
+
+$$\boxed{\;dx = \big[f(x, t) - g(t)^2\, \nabla_x \log p_t(x)\big] dt + g(t)\, d\bar W\;}$$
+
+<p>这里：</p>
+<ul>
+  <li>$d\bar W$ 是<strong>反向时间的</strong> Brownian motion（时间从 $T$ 流回 $0$）；</li>
+  <li>$\nabla_x \log p_t(x)$ 是<strong>每个时刻 $t$ 上、由 forward SDE 诱导的边际分布 $p_t$ 的 score</strong>；</li>
+  <li>所有其他符号和 forward SDE 一样。</li>
+</ul>
+
+<h3>8.1 这条方程为什么是 "diffusion = score" 的真正心脏</h3>
+
+<p>仔细看反向 SDE 的 drift 部分：</p>
+
+$$\underbrace{f(x, t)}_{\text{原 forward 漂移}} \;-\; \underbrace{g(t)^2 \nabla_x \log p_t(x)}_{\text{score 修正项}}$$
+
+<p>意思是：<strong>只要在 forward 的漂移上再加一个"沿 score 方向"的修正，反向 SDE 就能把 isotropic noise 拉回到真实数据。</strong>而 score $\nabla_x \log p_t(x)$ 恰好就是 <a href="/video-to-notebook/textbook/10/">第 10 章</a> NCSN 训练的目标！</p>
+
+<div class="callout callout-tip">
+💡 <strong>统一时刻</strong>：DDPM 训练的是 $\epsilon_\theta$（"噪声"），NCSN 训练的是 $s_\theta$（"score"）。它们其实是<em>同一个东西在尺度上的差一个系数</em>：
+$$s_\theta(x_t, t) = -\frac{\epsilon_\theta(x_t, t)}{\sigma_t}$$
+也就是说，<strong>DDPM 和 NCSN 都在学反向 SDE 里的那个 score 项</strong>。只是 parameterize 的方式不同。
+</div>
+
+<h3>8.2 训练目标：跨所有时间尺度做 score matching</h3>
+
+<p>反向 SDE 在工程上唯一未知的就是 $\nabla_x \log p_t(x)$。我们用神经网络 $s_\theta(x, t)$ 拟合它，目标函数（denoising score matching 的连续时间版本）：</p>
+
+$$\mathcal{L}(\theta) = \mathbb{E}_t\, \mathbb{E}_{x_0}\, \mathbb{E}_{x_t | x_0} \Big[\, \lambda(t)\, \big\| s_\theta(x_t, t) - \nabla_{x_t} \log p_{0t}(x_t | x_0) \big\|^2 \,\Big]$$
+
+<p>其中 $\lambda(t)$ 是各时间尺度上的权重（论文里取 $\lambda(t) = g(t)^2$ 时和原 ELBO 最严格地对齐）；条件分布 $p_{0t}(x_t | x_0)$ 在 VP / VE 下都有 closed-form Gaussian，所以梯度可解。</p>
+
+<h2>九、Probability Flow ODE（PF-ODE）：把随机轨迹换成确定轨迹</h2>
+
+<p>到这里你能用反向 SDE 采样了。但 Song et al. 2021 论文真正震撼的部分还在后面——他们证明：</p>
+
+<div class="callout callout-tip">
+💡 <strong>关键结论（Song 2021 Theorem）：</strong>对任何 forward SDE，存在一条<strong>确定性 ODE</strong>
+$$\frac{dx}{dt} = f(x, t) - \tfrac{1}{2}\, g(t)^2\, \nabla_x \log p_t(x)$$
+使得它的解轨迹在<em>每个时刻 $t$ 都和反向 SDE 有完全相同的边际分布 $p_t(x)$</em>。
+</div>
+
+<p>把它叫做 <strong>Probability Flow ODE</strong>（PF-ODE）。注意公式里没有 $dW$——<em>没有任何随机性</em>。系数比反向 SDE 的 drift 多了个 $\tfrac{1}{2}$。</p>
+
+<h3>9.1 PF-ODE 和反向 SDE 的关键差别</h3>
+
+<table style="width:100%; border-collapse:collapse; margin:1rem 0;">
+<thead>
+<tr style="background:var(--surface-soft);">
+  <th style="padding:0.5rem; text-align:left; border:1px solid var(--border);">维度</th>
+  <th style="padding:0.5rem; text-align:left; border:1px solid var(--border);">反向 SDE</th>
+  <th style="padding:0.5rem; text-align:left; border:1px solid var(--border);">PF-ODE</th>
+</tr>
+</thead>
+<tbody>
+<tr><td style="padding:0.5rem; border:1px solid var(--border);">轨迹</td><td style="padding:0.5rem; border:1px solid var(--border);">随机（每次 sample 不同）</td><td style="padding:0.5rem; border:1px solid var(--border);"><strong>确定</strong>（给定 $x_T$ 后唯一）</td></tr>
+<tr><td style="padding:0.5rem; border:1px solid var(--border);">边际分布 $p_t$</td><td style="padding:0.5rem; border:1px solid var(--border);">与 forward 一致</td><td style="padding:0.5rem; border:1px solid var(--border);"><strong>同样</strong>与 forward 一致</td></tr>
+<tr><td style="padding:0.5rem; border:1px solid var(--border);">系数</td><td style="padding:0.5rem; border:1px solid var(--border);">$f - g^2 \nabla \log p$</td><td style="padding:0.5rem; border:1px solid var(--border);">$f - \tfrac{1}{2} g^2 \nabla \log p$</td></tr>
+<tr><td style="padding:0.5rem; border:1px solid var(--border);">噪声项</td><td style="padding:0.5rem; border:1px solid var(--border);">$g(t)\, d\bar W$</td><td style="padding:0.5rem; border:1px solid var(--border);"><strong>无</strong></td></tr>
+<tr><td style="padding:0.5rem; border:1px solid var(--border);">求解</td><td style="padding:0.5rem; border:1px solid var(--border);">Euler-Maruyama 等 SDE 数值方法</td><td style="padding:0.5rem; border:1px solid var(--border);">Euler / Heun / RK4 / DPM-Solver</td></tr>
+</tbody>
+</table>
+
+<svg viewBox="0 0 600 240" role="img" aria-label="反向 SDE 的多条噪声轨迹 vs PF-ODE 的单条确定轨迹">
+  <g font-family="ui-sans-serif" font-size="11">
+    <text x="150" y="20" text-anchor="middle" font-weight="600">反向 SDE：随机轨迹（多次采样不同）</text>
+    <text x="450" y="20" text-anchor="middle" font-weight="600">PF-ODE：给定 x_T 后轨迹唯一</text>
+
+    <g>
+      <circle cx="40" cy="80" r="6" fill="#2b80c4"/>
+      <text x="40" y="65" text-anchor="middle" font-size="10">x_T</text>
+      <path d="M 40 80 Q 80 60, 110 100 T 180 90 T 260 130" fill="none" stroke="#c43" stroke-width="1.5" opacity="0.7"/>
+      <path d="M 40 80 Q 75 110, 120 75 T 200 140 T 260 130" fill="none" stroke="#c43" stroke-width="1.5" opacity="0.7"/>
+      <path d="M 40 80 Q 90 85, 130 130 T 210 75 T 260 130" fill="none" stroke="#c43" stroke-width="1.5" opacity="0.7"/>
+      <circle cx="260" cy="130" r="6" fill="#0b5"/>
+      <text x="260" y="150" text-anchor="middle" font-size="10">x_0</text>
+      <text x="150" y="200" text-anchor="middle" font-size="10" fill="#666">每次走不同的随机路径</text>
+    </g>
+
+    <g transform="translate(300, 0)">
+      <circle cx="40" cy="80" r="6" fill="#2b80c4"/>
+      <text x="40" y="65" text-anchor="middle" font-size="10">x_T</text>
+      <path class="ode-flow" d="M 40 80 C 100 60, 160 140, 260 130" fill="none" stroke="#6f4dd0" stroke-width="3"/>
+      <circle cx="260" cy="130" r="6" fill="#0b5"/>
+      <text x="260" y="150" text-anchor="middle" font-size="10">x_0</text>
+      <text x="150" y="200" text-anchor="middle" font-size="10" fill="#666">同一个 x_T 永远走同一条路径</text>
+    </g>
+
+    <text x="300" y="225" text-anchor="middle" font-size="10" fill="#888">两条路径在每个时刻 t 的边际分布 p_t(x) 完全相同</text>
+  </g>
+</svg>
+
+<h3>9.2 PF-ODE 的"魔法系数 $\tfrac{1}{2}$"是从哪来的</h3>
+
+<p>这是看 PF-ODE 公式时第一眼会冒出来的问题：为什么是 $\tfrac{1}{2}$ 而不是别的数？这个系数其实是<em>整个推导的灵魂</em>。它来自一个关于概率密度演化的恒等式重写。下面给一个不严格但能看懂的推导。</p>
+
+<p>不严格但直觉的推导：连续性方程（Fokker-Planck）告诉我们 $p_t(x)$ 怎么随时间演化。SDE $dx = f\, dt + g\, dW$ 诱导的 Fokker-Planck 是：</p>
+
+$$\frac{\partial p_t}{\partial t} = -\nabla \cdot (f\, p_t) + \tfrac{1}{2} g^2 \Delta p_t$$
+
+<p>恒等式 $\Delta p_t = \nabla \cdot (\nabla p_t) = \nabla \cdot (p_t \nabla \log p_t)$ 把右边改写：</p>
+
+$$\frac{\partial p_t}{\partial t} = -\nabla \cdot \!\left( \Big( f - \tfrac{1}{2} g^2 \nabla \log p_t \Big) p_t \right)$$
+
+<p>这是一个<strong>纯输运方程</strong>（continuity equation），对应的就是用速度场 $f - \tfrac{1}{2} g^2 \nabla \log p_t$ 流动的确定性 ODE——这就是 PF-ODE，那 $\tfrac{1}{2}$ 也来自这一步。</p>
+
+<div class="callout callout-note">
+📝 <strong>更直观的另一种理解</strong>：反向 SDE 的 drift "推" $x$ 沿 score 方向移动 $g^2$ 那么多，但里头还有一个 $g\, d\bar W$ 的随机扰动。如果我们把随机扰动"平均掉"——只保留它对边际分布产生的<em>确定性贡献</em>——那个随机项被平摊成 drift 里的 $\tfrac{1}{2} g^2 \nabla \log p$。这就是 $\tfrac{1}{2}$ 的物理来源。
+</div>
+
+<h2>十、PF-ODE 解锁的四项工程能力</h2>
+
+<h3>10.1 ① 精确 likelihood 评估（不再依赖 ELBO）</h3>
+
+<p>对任何 ODE $dx/dt = h(x, t)$，由 <em>instantaneous change of variables formula</em>（Chen et al. 2018，Neural ODE 那篇）：</p>
+
+$$\log p_0(x_0) = \log p_T(x_T) + \int_0^T \nabla \cdot h(x_t, t)\, dt$$
+
+<p>其中 $\nabla \cdot h$ 是速度场的散度（Jacobian 的 trace）。直接算高维 trace 太贵——但有 <strong>Hutchinson trace estimator</strong>：</p>
+
+$$\nabla \cdot h(x, t) = \mathbb{E}_{v \sim p_v}\!\big[\, v^\top \nabla h(x, t)\, v \,\big]$$
+
+<p>其中 $v$ 是 Rademacher 或高斯随机向量。用自动微分一次 vector-Jacobian product 就能拿到 $v^\top \nabla h\, v$，再 Monte Carlo 平均即可。VAE 给不了 likelihood（只能给 ELBO 下界），<strong>PF-ODE 第一次让 diffusion 模型可以汇报真正的 $\log p(x)$</strong>。Song 2021 论文报告 CIFAR-10 上 2.99 bits/dim，当时 SOTA。这件事在科研上的意义远比看起来大：似然评估让 diffusion 第一次能和 normalizing flow、autoregressive model 在<em>同一把尺子</em>上比较，从此 diffusion 进入"严肃 likelihood-based 模型"行列，而不仅仅是"采样质量好的黑箱"。</p>
+
+<h3>10.2 ② 确定性采样（DDIM 的雏形）</h3>
+
+<p>把 PF-ODE 做最简单的 Euler 离散：</p>
+
+$$x_{t - \Delta t} = x_t - \Delta t \cdot \Big[ f(x_t, t) - \tfrac{1}{2} g(t)^2\, s_\theta(x_t, t) \Big]$$
+
+<p>这给出一个<strong>没有随机扰动的反向采样器</strong>。<a href="/video-to-notebook/textbook/16/">第 16 章 DDIM</a> 会展开讲：DDIM 实际上就是 VP-PF-ODE 的<em>另一种特殊离散</em>（不是 Euler，而是一种"指数积分"形式），并且它在离散时间下天然继承了 PF-ODE 的"同一噪声 → 同一图像"性质。这条性质在工业上非常珍贵：它意味着<strong>噪声种子可以作为生成结果的稳定锚点</strong>。当你在 Stable Diffusion 里固定 seed、变 prompt，会看到生成图像保持类似的整体构图——正是这个 deterministic 映射在背后工作。</p>
+
+<div class="callout callout-tip">
+💡 <strong>统一关系总览（后面所有 ODE-based sampler 都源于此）</strong>：
+<ul>
+  <li>DDPM = VP-SDE Euler-Maruyama；</li>
+  <li>NCSN = VE-SDE Euler-Maruyama；</li>
+  <li>DDIM = VP-PF-ODE 的特殊离散；</li>
+  <li>DPM-Solver / EDM Heun / RK45 = PF-ODE 的高阶 ODE 求解器。</li>
+</ul>
+</div>
+
+<h3>10.3 ③ 高阶 ODE 求解器：把 1000 步压到 10 步</h3>
+
+<p>这是 Linqi (Alex) Zhou 在 CMU 客座课里抛出的 motivation（chunk #1472）：</p>
+
+<div class="callout-quote">
+"At inference time, diffusion and flow matching solve the so-called probability flow ODE. ... Even if your network predicts $u_t$ perfectly at every single point, you will still need many many steps to simulate the ODE accurately, and so naturally it suffers from <em>slow sampling</em>."
+</div>
+
+<p>用普通 Euler，1000 步左右才稳定收敛。但 PF-ODE 是<strong>普通 ODE</strong>——可以套任何成熟数值方法：</p>
+
+<ul>
+  <li><strong>Heun</strong>（2 阶 Runge-Kutta，EDM 默认）：~35 步达到 Euler 1000 步质量；</li>
+  <li><strong>DPM-Solver（Lu et al. 2022）</strong>：用 PF-ODE 的<em>半线性结构</em>设计的指数积分器，10–20 步达到极强质量；</li>
+  <li><strong>RK4 / RK45</strong>：可作 ground-truth 求解器，确认其它方法的精度。</li>
+</ul>
+
+<h3>10.4 ④ 精确反演：把一张图像变成它的"噪声编码"</h3>
+
+<p>因为 PF-ODE 是 <em>确定的</em>，给定 $x_0$ 也可以<strong>正向</strong>积分到 $T$ 得到对应的 $x_T$——然后这个 $x_T$ 反向积分回来一定会还原 $x_0$。这就是图像编辑、prompt-to-prompt、null-text inversion 等技术的数学基础。具体场景：你想把"一只穿西装的猫"改成"一只穿西装的狗"，可以先把原图反演到 $x_T$，再用"狗"的 prompt 反向积分回 $x_0'$，得到一张构图、姿态、光照几乎不变、只把猫换成狗的新图。这种"以噪声为画布"的玩法是 Stable Diffusion 时代 AI 绘图 ecosystem 的支柱。</p>
+
+<div class="callout callout-warning">
+⚠️ <strong>反演的工程坑</strong>：理论上完美可逆，但实际上由于离散误差和 score model 的非精确性，反演不能精确等于原图。一般会用 50–100 步的高阶求解器做反演以减少误差，这是 Stable Diffusion XL 默认 inversion 采样器精度的来源。生产环境里还会用 <em>null-text optimization</em>（Mokady et al. 2022）微调一个"空 prompt embedding"，把残差误差吸收掉。
+</div>
+
+<h2>十一、Worked Example：2D 高斯混合的正反向轨迹</h2>
+
+<p>把所有公式落地到一个二维玩具问题上，便于把脑子里的"染料分子"画出来。理论讲完之后<em>动手跑一遍</em>是吃透 SDE 框架最快的方式——所有公式在 2D 上都能直接 5 分钟训练完一个 score 网络、画散点图验证。</p>
+
+<p>设数据分布 $p_0(x) = \tfrac{1}{2} \mathcal{N}(\mu_1, 0.1 I) + \tfrac{1}{2} \mathcal{N}(\mu_2, 0.1 I)$，其中 $\mu_1 = (-2, 0), \mu_2 = (2, 0)$。这是一个最简单的<em>双峰</em>分布——单峰高斯太平凡（score 是线性函数），三峰以上又不便可视化，双峰恰好能把"反向 SDE 把噪声拉向哪个团"这件事画清楚。用 VP-SDE：</p>
+
+<ul>
+  <li><strong>Forward</strong>：每个数据点都按 $dx = -\tfrac{1}{2} \beta x\, dt + \sqrt{\beta}\, dW$ 演化。$T$ 取得够大时，所有点都汇聚到 $\mathcal{N}(0, I)$，<em>两个高斯团完全融化</em>。物理上这就是两滴红色染料分别滴在水里相距 4 个单位长度的两个位置，最后整杯水均匀变红。</li>
+  <li><strong>Reverse SDE</strong>：用 Anderson 公式从 $x_T \sim \mathcal{N}(0, I)$ 出发，score 项把粒子<em>朝两个数据团的方向</em>拉。每条轨迹随机，最终落在某一个团里。落到哪个团由轨迹中段的几次随机扰动决定——粒子在"分水岭"附近做随机 walk，最终偶然偏到一边。</li>
+  <li><strong>PF-ODE</strong>：同一 $x_T$ 起点，确定地沿一条曲线被送到某一团。<strong>$x_T$ 的左右二分线</strong>大致就把空间切成"归到团 1"和"归到团 2"两个域——这种 deterministic mapping 是 DDIM 中"语义连续 prior"的来源。后面 <a href="/video-to-notebook/textbook/16/">DDIM</a> 会展开：在 Stable Diffusion 里，固定噪声种子能保证不同 prompt 之间生成的图像构图结构稳定，正是这个 deterministic 性质在工业级别上的实践。</li>
+</ul>
+
+<p>下面这段 PyTorch 代码就是上面这个 worked example 的最小实现，方便你回去跑一遍画图。它故意不依赖任何 diffusion library，从 forward 噪声闭式、到 score matching loss、再到两种 sampler，全都裸 PyTorch 写出来，正好能映射到本章每一个公式。</p>
+
+<pre><code>import torch
+import torch.nn as nn
+
+# ===== 1. VP-SDE 的 β(t) 和闭式 forward =====
+def beta(t, beta_min=0.1, beta_max=20.0):
+    return beta_min + (beta_max - beta_min) * t
+
+def alpha_bar(t, beta_min=0.1, beta_max=20.0):
+    # ∫₀ᵗ β(s) ds 的解析解
+    return torch.exp(-0.5 * (beta_min * t + 0.5 * (beta_max - beta_min) * t**2))
+
+def forward_sample(x0, t):
+    # 从 q(x_t | x_0) = N(√ᾱ x_0, (1-ᾱ) I) 采样
+    a = alpha_bar(t).sqrt()
+    sigma = (1 - alpha_bar(t)).sqrt()
+    return a * x0 + sigma * torch.randn_like(x0)
+
+# ===== 2. 一个简单的 score 网络 s_θ(x, t) ≈ ∇ log p_t(x) =====
+class ScoreNet(nn.Module):
+    def __init__(self, dim=2, h=128):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(dim + 1, h), nn.SiLU(),
+            nn.Linear(h, h), nn.SiLU(),
+            nn.Linear(h, dim),
+        )
+    def forward(self, x, t):
+        return self.net(torch.cat([x, t[:, None]], dim=-1))
+
+# ===== 3. Denoising score matching loss（连续时间版）=====
+def dsm_loss(model, x0):
+    t = torch.rand(x0.size(0))
+    xt = forward_sample(x0, t)
+    sigma = (1 - alpha_bar(t)).sqrt()[:, None]
+    # ground-truth score of q(x_t | x_0)：(x0*√ᾱ - xt) / σ²
+    target_score = -((xt - alpha_bar(t).sqrt()[:, None] * x0) / sigma**2)
+    pred = model(xt, t)
+    # 论文里 λ(t)=σ² 时和 ELBO 对齐
+    return ((sigma * (pred - target_score)) ** 2).sum(-1).mean()
+
+# ===== 4. 反向 SDE 采样（Anderson）=====
+@torch.no_grad()
+def sample_reverse_sde(model, n_steps=1000, n=1024, dim=2):
+    x = torch.randn(n, dim)
+    dt = 1.0 / n_steps
+    for i in reversed(range(n_steps)):
+        t = torch.full((n,), (i + 1) * dt)
+        b = beta(t)[:, None]
+        score = model(x, t)
+        # dx = [f − g² ∇log p] dt + g d̄W
+        drift = -0.5 * b * x - b * score
+        noise = b.sqrt() * torch.randn_like(x) * dt**0.5
+        x = x - drift * dt + noise         # 注意反向时间符号
+    return x
+
+# ===== 5. PF-ODE 采样（Euler）=====
+@torch.no_grad()
+def sample_pf_ode(model, n_steps=50, n=1024, dim=2):
+    x = torch.randn(n, dim)
+    dt = 1.0 / n_steps
+    for i in reversed(range(n_steps)):
+        t = torch.full((n,), (i + 1) * dt)
+        b = beta(t)[:, None]
+        score = model(x, t)
+        # dx/dt = f − ½ g² ∇log p（确定性！）
+        drift = -0.5 * b * x - 0.5 * b * score
+        x = x - drift * dt
+    return x
+</code></pre>
+
+<div class="callout callout-note">
+🛠️ <strong>对比观察</strong>：跑完上面两个 sampler，把 1024 个采样点画散点图，会看到 reverse SDE 的样本在两个团里抖动较散；PF-ODE 用 <strong>50 步</strong>就达到 reverse SDE 1000 步的质量——这是高阶 / 确定性求解器在低 step 区间的标准红利。
+</div>
+
+<h2>十二、跨课程视角：CMU 10-799 的 Flow Map 后续</h2>
+
+<p>CMU 课程在第 10–11 讲把 PF-ODE 继续推到了"<strong>Flow Map</strong>"——下面这段不是 SDE 章本身的内容，而是它的延伸预告。讲师 Linqi (Alex) Zhou（Luma AI 嘉宾，他本人主导了 Consistency Models 的部分工作）给出了非常清爽的提法（chunk #1443）：</p>
+
+<div class="callout-quote">
+"A flow map is literally just a function to tell you to jump. If you want to jump from $x_t$ from $t$ to $s$, then your flow map literally just predicts the displacement for you so that you can jump like this."
+</div>
+
+<p>flow map $\Phi_{t \to s}(x_t)$ 就是 PF-ODE 的<strong>积分算子</strong>：</p>
+
+$$\Phi_{t \to s}(x_t) = x_t + \int_t^s \!\Big[ f(x_\tau, \tau) - \tfrac{1}{2} g(\tau)^2\, \nabla \log p_\tau(x_\tau) \Big] d\tau$$
+
+<p>Consistency Models（Song et al. 2023）、Flow Matching、Rectified Flow 这一整支"快速采样"研究都是<em>直接学 flow map $\Phi$，不再每步调用 score model</em>。这条路线的最高目标是 <strong>1 步生成</strong>——直接学一个网络把 $x_T$ 一步映到 $x_0$。<a href="/video-to-notebook/textbook/17/">第 17 章</a> 与 <a href="/video-to-notebook/textbook/19/">第 19 章</a> 会展开。本章只需要记住：<strong>flow map 是 PF-ODE 的"零步求解器"</strong>——把"积分轨迹"的所有信息预编译进一个网络。Linqi 在课上还指出（chunk #1472），即使你的 score 模型在每一点都完美，传统 sampler 仍然<em>必须</em>多步积分才能精确，这是 ODE 求解器的本质开销；flow map 是为了绕过这个开销而存在的。</p>
+
+<h2>十三、连续 vs 离散视角对照表</h2>
+
+<table style="width:100%; border-collapse:collapse;">
+<thead>
+<tr style="background:var(--surface-soft);">
+  <th style="padding:0.5rem; border:1px solid var(--border); text-align:left;">连续时间</th>
+  <th style="padding:0.5rem; border:1px solid var(--border); text-align:left;">DDPM（VP）离散</th>
+  <th style="padding:0.5rem; border:1px solid var(--border); text-align:left;">NCSN（VE）离散</th>
+</tr>
+</thead>
+<tbody>
+<tr><td style="padding:0.5rem; border:1px solid var(--border);">Forward SDE</td><td style="padding:0.5rem; border:1px solid var(--border);">$x_t = \sqrt{1-\beta_t} x_{t-1} + \sqrt{\beta_t} \epsilon$</td><td style="padding:0.5rem; border:1px solid var(--border);">$x_t = x_0 + \sigma_t \epsilon$</td></tr>
+<tr><td style="padding:0.5rem; border:1px solid var(--border);">Reverse SDE</td><td style="padding:0.5rem; border:1px solid var(--border);">DDPM ancestral sampling</td><td style="padding:0.5rem; border:1px solid var(--border);">Annealed Langevin dynamics</td></tr>
+<tr><td style="padding:0.5rem; border:1px solid var(--border);">PF-ODE</td><td style="padding:0.5rem; border:1px solid var(--border);">DDIM（$\eta = 0$）</td><td style="padding:0.5rem; border:1px solid var(--border);">EDM 的 deterministic sampler</td></tr>
+<tr><td style="padding:0.5rem; border:1px solid var(--border);">参数化目标</td><td style="padding:0.5rem; border:1px solid var(--border);">$\epsilon_\theta(x_t, t)$</td><td style="padding:0.5rem; border:1px solid var(--border);">$s_\theta(x_t, \sigma_t)$</td></tr>
+<tr><td style="padding:0.5rem; border:1px solid var(--border);">两者关系</td><td style="padding:0.5rem; border:1px solid var(--border);" colspan="2">$s_\theta = -\epsilon_\theta / \sigma_t$，二者是同一条反向 SDE 的不同 parameterize</td></tr>
+</tbody>
+</table>
+
+<h2>十四、数值求解器与 step 数：质量-速度权衡</h2>
+
+<p>本节给出后面工程章节用得到的"常识表"。所有方法都在 PF-ODE 上操作。注意度量"速度"的标准单位是 <strong>NFE (Number of Function Evaluations)</strong>——即调用 score 网络的次数。这是 diffusion 推理的<em>真正瓶颈</em>，因为每次调用都是一个完整的 U-Net 前向、占用 GPU 时间。所以"几阶方法"和"几步"不能简单换算——Heun 2 阶虽然写出来是"50 步"，但 NFE 实际是 100。</p>
+
+<ul>
+  <li><strong>Euler（1 阶）</strong>：最简单，需要 200–1000 步达到 SOTA 质量。代码 10 行。教学用首选。</li>
+  <li><strong>Heun（2 阶 RK）</strong>：每步算 2 次 score，35–50 步即可（NFE ≈ 70–100）。EDM (Karras 2022) 默认选项。教科书级别 baseline。</li>
+  <li><strong>RK4（4 阶）</strong>：每步 4 次 score。理论精度极高，但<em>不一定划算</em>——score model evaluations 太贵，常常比 Heun 50 步还慢且没明显增益。</li>
+  <li><strong>Exponential integrators / DPM-Solver-2/3</strong>：利用 PF-ODE 的半线性结构（drift 是 $x$ 的线性函数 + score 的非线性函数），把线性部分做闭式积分，只留非线性部分用数值方法。10–20 NFE 即达 Heun 50 步质量。Stable Diffusion 的 <code>DPMSolverMultistep</code> 调度器就是它的多步变种。</li>
+  <li><strong>Predictor-Corrector（Song 2021）</strong>：先用 reverse-SDE Euler 走一步（predictor），再用 Langevin MCMC 在当前噪声尺度上 refine（corrector）。质量好但步数贵，工业界少用，但在精度敏感的科研评测上仍是 gold standard。</li>
+  <li><strong>UniPC / Restart Sampling（2023+）</strong>：进一步把"高阶"和"重启动"结合，把 NFE 推到 8–10。这是 Stable Diffusion 3 / Sora 等工业级 sampler 的当前选择。</li>
+</ul>
+
+<div class="callout callout-warning">
+⚠️ <strong>常见坑</strong>：直接拿 RK4 套 VP-PF-ODE，在 $t \to 0$ 附近 $\beta(t)$ 很小、score model 数值很大、step 会爆。工程实现都会做 $t \in [\epsilon, T]$ 的截断（典型 $\epsilon = 10^{-3}$），防止数值不稳定。这是 EDM 论文里 <code>sigma_min</code> / <code>sigma_max</code> 参数的来源。
+</div>
+
+<figure class="clip-frame">
+  <iframe src="https://www.youtube.com/embed/57EFSTxL_5o?start=383" title="Vizuara L8: Brownian motion 的微观可逆性" allowfullscreen></iframe>
+  <figcaption>📺 Vizuara《Principles of Diffusion Models》Lecture 8（约 6:23 处）—— Dr. Rajat 讲微观运动可逆的物理直觉</figcaption>
+</figure>
+
+<div class="my-addition">
+🟡 <strong>教材外补充：本章在大图里的位置</strong>
+<ul>
+  <li>本章之前的 <a href="/video-to-notebook/textbook/5/">DDPM (ch5)</a>、<a href="/video-to-notebook/textbook/10/">NCSN / score matching (ch10)</a> 在 SDE 视角下是 VP / VE 两种特殊情况；</li>
+  <li>本章之后的 <a href="/video-to-notebook/textbook/16/">DDIM (ch16)</a> 是 PF-ODE 的特殊离散；<a href="/video-to-notebook/textbook/17/">DPM-Solver</a> 是 PF-ODE 的高阶求解器；<a href="/video-to-notebook/textbook/19/">Flow Matching / Rectified Flow</a> 重新设计了 $f, g$ 让 PF-ODE 的"直线"更直，从而进一步加速；</li>
+  <li>Consistency Models（Song et al. 2023）直接学 flow map，跳过 ODE 积分；EDM (Karras 2022) 用经验研究确定了 noise schedule、参数化、求解器的"最佳三件套"；</li>
+  <li>SDE 框架 = 整个 diffusion 文献的<strong>骨架公式</strong>，每一篇新论文都可以被翻译回它在 $(f, g)$ 选择 + 离散方案 + 训练目标三轴上的位置。</li>
+</ul>
+</div>
+
+<div class="takeaways" style="background:#0b5; color:#fff; padding:1.4rem; border-radius:8px; margin-top:2rem;">
+  <h3 style="margin-top:0; color:#fff;">本章要记住的（按讲师给出的锚点排序）</h3>
+  <ol>
+    <li><strong>物理心脏</strong>：染料宏观不可逆、微观（Brownian motion）可逆——这是<em>整个 diffusion 文献"反向"魔术的唯一物理依据</em>（讲师原话："this is the only theme which is used in the entire diffusion literature"）。</li>
+    <li><strong>统一方程</strong>：$dx = f(x, t) dt + g(t) dW$。VP-SDE $(f = -\tfrac{1}{2}\beta x, g = \sqrt{\beta})$ 对应 DDPM；VE-SDE $(f = 0, g = \sqrt{d\sigma^2/dt})$ 对应 NCSN。</li>
+    <li><strong>Anderson 1982 反向 SDE</strong>：$dx = [f - g^2 \nabla \log p_t]\, dt + g\, d\bar W$。所谓 score model 学的就是 $\nabla \log p_t$。DDPM 的 $\epsilon_\theta$ 和 NCSN 的 $s_\theta$ 是同一个东西的 parameterize 变形。</li>
+    <li><strong>Probability Flow ODE</strong>：$dx/dt = f - \tfrac{1}{2} g^2 \nabla \log p_t$，<em>没有随机项</em>。每个时刻边际分布与反向 SDE 完全一致——同一 $x_T$ 走一条确定的轨迹。</li>
+    <li><strong>四项工程红利</strong>：精确 likelihood（Hutchinson + change-of-variables）、确定性采样（DDIM 雏形）、高阶 ODE 求解器（DPM-Solver 10 步达到 Euler 1000 步质量）、精确反演（image editing 基础）。</li>
+    <li><strong>统一关系卡片</strong>：DDPM = VP-SDE Euler-Maruyama；NCSN = VE-SDE Euler-Maruyama；DDIM = VP-PF-ODE 特殊离散；EDM / DPM-Solver = PF-ODE 高阶求解器；Flow Matching / Consistency Models 进一步学 flow map $\Phi$。</li>
+    <li><strong>历史时序</strong>：DDPM (2020) + NCSN (2019) 先出现 → Song et al. ICLR 2021 把它们统一进 SDE → Anderson 1982 的反向 SDE 在 39 年后被 ML 社区"翻译"成 score-based diffusion 的核心引擎。把 50 年前的工具重新读一遍，永远是 ML 研究的高回报操作。</li>
+  </ol>
+</div>
+
+</article>

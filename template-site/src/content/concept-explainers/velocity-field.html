@@ -1,0 +1,286 @@
+<style>
+/* prefix: vf- */
+.vf-quickref{background:var(--surface-soft);border-left:3px solid var(--module-accent);padding:0.8rem 1rem;border-radius:0 4px 4px 0;margin:1rem 0;font-size:0.92rem;}
+.vf-quickref div{margin:0.3rem 0;}
+.vf-svg{display:block;margin:1.2rem auto;max-width:100%;height:auto;}
+.vf-pitfalls ol{padding-left:1.4rem;} .vf-pitfalls li{margin:0.55rem 0;}
+.vf-source{font-style:italic;color:var(--text-muted);border-left:2px solid var(--border);padding:0.2rem 0.8rem;margin:0.5rem 0;font-size:0.9rem;}
+.callout-quote{background:var(--surface-soft);border-left:3px solid var(--module-accent);padding:0.5rem 0.9rem;margin:0.8rem 0;font-style:italic;color:var(--text);font-size:0.93rem;}
+.my-addition{display:inline-block;background:var(--module-accent-soft);color:var(--text);border-left:3px solid var(--module-accent);padding:0.15rem 0.55rem;margin:0.3rem 0 0.1rem 0;border-radius:2px;font-size:0.85rem;font-weight:600;}
+.vf-why{background:var(--surface-soft);border-left:3px solid var(--blue);padding:0.4rem 0.8rem;margin:0.4rem 0 0.8rem 0;font-size:0.92rem;color:var(--text);}
+.vf-why strong{color:var(--blue);}
+.vf-controls{display:flex;gap:0.4rem;flex-wrap:wrap;margin:0.6rem 0;align-items:center;}
+.vf-readout{font-size:0.9rem;color:var(--text-muted);margin-top:0.4rem;font-family:ui-monospace,monospace;}
+.vf-slider{width:60%;}
+.vf-arrow{transition:transform 0.2s linear;}
+</style>
+
+<article class="concept-entry">
+  <header class="concept-header">
+    <span class="concept-eyebrow">概念</span>
+    <h1>Velocity Field</h1>
+    <p class="concept-tagline">— 时间索引的向量场 $u_t(x)$，告诉每个粒子此刻该往哪走。</p>
+  </header>
+
+  <aside class="vf-quickref">
+    <div><strong>定义</strong> · $u_t(x): \mathbb{R}^d \times [0,1] \to \mathbb{R}^d$——在空间每一点、时间每一刻给出一个速度向量，驱动 ODE $dx/dt = u_t(x)$。</div>
+    <div><strong>公式</strong> · 连续性方程 $\partial_t p_t + \nabla \cdot (p_t u_t) = 0$；Flow Matching 中 $u_t(x) = \mathbb{E}[x_1 - x_0 \mid x_t = x]$；PF-ODE 中 $u_t(x) = f(x,t) - \tfrac{1}{2}g(t)^2 \nabla \log p_t(x)$。</div>
+    <div><strong>易错</strong> · velocity field 不是"噪声方向"也不是单条粒子的轨迹切线；它是<em>整个空间</em>同时刻的瞬时速度地图——同一个 $x$ 在不同 $t$ 速度不同。</div>
+  </aside>
+
+  <section class="concept-intuition">
+    <p>很多人初接触 velocity field 会下意识把它想成"噪声方向"——"沿着这个方向走就能去噪"。这是被 score $\nabla \log p_t$ 的去噪直觉污染过的理解。<strong>velocity field 不是"噪声方向"</strong>——它是<strong>一个时间索引的向量场（TIME-INDEXED vector field），它告诉你"在时刻 $t$、位置 $x$ 上，该把粒子往哪推、推多快"</strong>。它和"去噪"无关，和"轨迹"无关，它只是一张<em>会随时间变形的速度地图</em>。粒子的轨迹是这张地图上的"被动产物"——你把一颗石子扔进河里，石子走的曲线是轨迹；河水本身在每个位置、每个时刻流动的方向和速度，才是 velocity field。</p>
+
+    <div class="callout-quote">"想象一个盒子里有非常多粒子 $P_1, P_2, P_3, \dots$。出于某种原因这些粒子在盒子里运动——这是粒子 $P_1$ 的轨迹，那是 $P_2$ 的轨迹；类似地，盒子里每一个点都有它自己的轨迹。"<br>—— Vizuara · Principles of Diffusion · L10 @00:05</div>
+
+    <p>Vizuara 的 Dr. Raj 在 Lecture 9–10 选了一个连续介质力学的入口：把数据生成当成<strong>"概率流体"被风搬运</strong>。盒子里粒子各自跑各自的轨迹，可看似杂乱，但你只要写下"每个位置每个时刻的速度" $u_t(x)$——也就是<em>速度场</em>——所有粒子的运动就被完整刻画了。这套图像借自 Euler 描述流体的视角：你不追每个粒子（Lagrangian），而盯着空间每一点看"现在水从哪流来、往哪流去"（Eulerian）。velocity field 就是 Eulerian 速度，把它放进 ODE $\dot x = u_t(x)$ 一积分，就得到任意起点出发的粒子轨迹。</p>
+
+    <div class="callout-quote">"想象风把太平洋的水搬运到东海岸——速度场告诉你每个位置的风往哪吹、吹得多快。你只要顺着它积分，水就会从西海岸流到东海岸。这就是 ODE 把噪声变成图像的方式。"<br>—— CMU 10-799 S26 · L5 @08:10（改述）</div>
+
+    <p>CMU 的 Tianqi 在 Lecture 5 用了另一个更具体的"风搬水"比喻——风把太平洋的水搬到东海岸；velocity field 就是这阵<em>会随时间变化的风</em>。两条比喻指向同一件事：<strong>velocity field 是搬运概率质量的"风"或"水流"，粒子是被动跟随的微粒</strong>。在机器学习的上下文里，这件事对应一个具体得不能再具体的目标：把 prior $z_0 \sim p_0 = \mathcal{N}(0, I)$ 当作"西海岸的水"，把数据 $x = z_1 \sim p_1 = p_{\text{data}}$ 当作"东海岸要送达的水"，神经网络 $v_\theta(x, t)$ 拟合的就是这阵风——训完之后任意噪声样本顺风一积分就变成图像。</p>
+
+    <p>注意 velocity field 与三个相邻概念的边界。它<strong>不是 score</strong>——score 是对数密度的空间梯度 $\nabla \log p_t(x)$，量纲 $1/[x]$；velocity 是位移除以时间，量纲 $[x]/[t]$；只有在高斯扩散路径下两者可以仿射互换。它<strong>不是 drift</strong>——SDE $dx = f(x,t) dt + g(t) dW$ 里的 $f$ 是"漂移项"，只是 velocity 的一部分，PF-ODE 把 drift 和 score 组合才得到完整 velocity。它<strong>不是噪声预测 $\epsilon_\theta$</strong>——$\epsilon$ 是单步残差，velocity 是连续时间瞬时变化率；前者依附于离散时间步、后者属于连续时间 ODE。把这三组概念混作一团，是初学 Flow Matching / Rectified Flow / EDM 时最常见的卡点。</p>
+
+    <p>还有一组语义陷阱值得提前打掉：velocity field 是<strong>欧拉视角（Eulerian）</strong>的，不是<strong>拉格朗日视角（Lagrangian）</strong>的。拉格朗日视角追踪每个粒子的运动 $\phi_t(z_0)$，问"$t = 0.5$ 时<em>第 $i$ 号粒子</em>跑到了哪里"——这是<em>轨迹</em>。欧拉视角则盯着空间的固定坐标，问"$t = 0.5$ 时<em>位置 $(0.3, 0.7)$</em> 上的水流向哪流"——这是<em>速度场</em>。同一物理事实有两种表达，但<em>速度场</em>这个对象天然以欧拉视角定义，因为它要回答"任意位置任意时刻该往哪推"而非"具体某粒子的命运"。这层视角差异在工程上很重要：神经网络 $v_\theta(x, t)$ 训练时<em>不知道</em>输入的 $x$ 是从哪个 $z_0$ 出发的——它只能根据当前位置 + 当前时间输出速度，所以网络架构和损失函数都必须假定欧拉视角。这也解释了为什么不能"对每个训练样本单独学一条轨迹"——你训练集里只有 $(x_t, t)$ 对，没有完整轨迹标签。</p>
+  </section>
+
+  <section class="concept-deepdive">
+    <h2>第一层定义：从 ODE 出发</h2>
+    <p>给定时间 $[0, 1]$ 上的一族向量场 $u_t: \mathbb{R}^d \to \mathbb{R}^d$，每个 $u_t(x)$ 是空间一点 $x$ 上的速度向量。把它放进常微分方程</p>
+    <p>$$\frac{dx}{dt} = u_t(x), \qquad x(0) = z_0 \sim p_0,$$</p>
+    <p>沿时间积分就得到一条<strong>flow $\phi_t(z_0)$</strong>。生成式建模要做的事情是：选一个易采样的初始分布 $p_0$（一般是 $\mathcal{N}(0, I)$），让 ODE 把 $p_0$ 推到 $t=1$ 时的目标分布 $p_1 = p_{\text{data}}$。神经网络要学的就是这个 $u_t$。Tianqi 在 L5 把它点得很清楚：</p>
+
+    <div class="callout-quote">"基本上就是 Ricky 提的 continuous normalizing flow——构造一个一般模型，把初始分布（比如 Gaussian）的样本通过一个 ODE 积分变成目标分布（比如图像分布）的样本。这个 ODE 字面上就是：数据的无穷小变化应该跟随 velocity。"<br>—— CMU 10-799 S26 · L5 @08:05</div>
+
+    <div class="vf-why"><strong>Why</strong>：为什么用 ODE 而不是 SDE？SDE 每一步都加噪声，多次采样轨迹不同——不可复现、需要随机数生成器；ODE 完全确定，给定 $z_0$ 唯一对应一个 $z_1$，可复现、可反向、可做精确密度估计（CNF 用换元公式算 likelihood）。velocity field 是把 diffusion 从 SDE 视角搬到 ODE 视角的关键桥梁——这就是 PF-ODE（Probability Flow ODE）这个名字的来历：一个 ODE，它的<em>边际分布</em>和原 SDE 完全一样，但每个样本走的是确定性轨迹。还有一层工程理由：ODE 系统允许使用 RK4、Heun、Dormand-Prince 等高阶积分器，把全局误差从 $O(\Delta t)$ 降到 $O(\Delta t^4)$，这是 DPM-Solver、UniPC 等"少步采样器"得以存在的数学根基；SDE 离散误差受随机扰动主导，高阶展开收益很小。</div>
+
+    <h2>第二层定义：连续性方程（质量守恒）</h2>
+    <p>velocity field 不是随便挑的——它必须和概率路径 $p_t$ 相容，满足<strong>连续性方程</strong>（continuity equation）</p>
+    <p>$$\frac{\partial p_t(x)}{\partial t} + \nabla \cdot \bigl(p_t(x)\, u_t(x)\bigr) = 0.$$</p>
+    <p>翻译成大白话：单位时间内某区域概率密度的下降速率 = 流出该区域的概率通量（散度）。物理上等价于"质量不会凭空出现也不会凭空消失"——所有概率质量被严格地从一处<em>搬运</em>到另一处。CMU L13 把这件事用一句话概括：</p>
+
+    <div class="callout-quote">"$Q_t$ 就是 flow——本质上就是 velocity。它告诉你从这个状态跳到那个状态的可能性有多大。所有的 flow 加起来必须为零——这就是质量守恒。"<br>—— CMU 10-799 S26 · L13 @06:09</div>
+
+    <div class="vf-why"><strong>Why</strong>：连续性方程是 velocity field 和概率路径之间的"硬约束"——给定 $p_t$，并非任意 $u_t$ 都对应这个 $p_t$；反过来，给定 $u_t$，它确定的 $p_t$ 也是唯一的（在 well-posed 条件下）。但要注意——同一个概率路径 $p_t$ 可以由<em>无数个</em> velocity field 驱动（差一个"无散度"的旋转项 $w_t$，满足 $\nabla \cdot (p_t w_t) = 0$）。Flow Matching 训练里 L2 回归隐含地挑出其中"L2 模长最小"的那一个——对应物理上的<em>最小动能传输</em>。这就是为什么实践中 Flow Matching 的轨迹"比理论上更直、更短"。</div>
+
+    <h2>第三层定义：Flow Matching 里的 marginal 速度</h2>
+    <p>在 Flow Matching 框架下，<strong>marginal velocity field</strong> $u_t(x)$ 的精确表达是</p>
+    <p>$$u_t(x) = \mathbb{E}_{x_0, x_1 \sim p(x_0, x_1 \mid x_t = x)}\bigl[x_1 - x_0\bigr],$$</p>
+    <p>即"<em>所有可能造出 $x_t = x$ 的端点对 $(x_0, x_1)$ 上的位移期望</em>"。这个期望写不出闭式——你不知道后验 $p(x_0, x_1 \mid x_t = x)$。Lipman et al. 2023 用<strong>条件 Flow Matching</strong> 绕开：固定 $x_1$ 时条件路径取直线 $x_t = (1-t) x_0 + t x_1$，条件速度</p>
+    <p>$$u_t(x \mid x_1) = \frac{d x_t}{dt} = x_1 - x_0$$</p>
+    <p>是闭式的、与 $t$ 和 $x_t$ 无关，仅依赖端点之差。Tianqi 在 L5 演示过具体推导：</p>
+
+    <div class="callout-quote">"当 $\Delta t \to 0$，你就得到这个 velocity——它告诉你无穷小步长下该往哪走。不论你在哪个 $t$，你永远是同一速度同一方向——就是 data 减 noise，$x_1 - x_0$。"<br>—— CMU 10-799 S26 · L5 @03:28</div>
+
+    <div class="vf-why"><strong>Why</strong>：L2 回归 $\|v_\theta(x,t) - (x_1 - x_0)\|^2$ 在最优解处自然收敛到上面那个条件期望——这是 CFM ≡ FM 等价定理的核心。结果是：你训练时永远在拟合"端点差"这个简单 target，但训完模型自动逼近 marginal velocity；marginal 在数据空间的轨迹交叉点会被"平均化"，因此采样轨迹略有弯曲（这就是 Rectified Flow 要再做一次 reflow 拉直的原因）。这里有一个深层观察：训练 target $x_1 - x_0$ 本身有<em>高方差</em>——对同一个 $(x_t, t)$，不同 $(x_0, x_1)$ 组合给出的速度差异极大；网络学到的只是这些速度的<strong>条件均值</strong>，方差信息被丢掉了。所以 velocity field 是"对所有可能轨迹平均"的产物，并非单条轨迹的几何切线——这一点几乎所有学生第一次看 CFM 都会卡住，不点破就一直误以为"网络在学一条具体轨迹"。</div>
+
+    <h2>第四层定义：PF-ODE 里的 velocity</h2>
+    <p>如果你从 score-based diffusion 出发——前向 SDE $dx = f(x,t) dt + g(t) dW$——则其对应的 <strong>Probability Flow ODE</strong>（Song et al. 2021）使用的 velocity field 是</p>
+    <p>$$u_t(x) = f(x, t) - \tfrac{1}{2}\, g(t)^2\, \nabla \log p_t(x).$$</p>
+    <p>它是"漂移 drift" 和"分数 score" 的线性组合。从这个公式可以看出：<strong>velocity 在高斯扩散路径下确实是 score 的仿射函数</strong>——所以你才能在 DDPM 训好之后直接换 ODE 采样器（DDIM、DPM-Solver 都基于 PF-ODE），无需重训。但反之不成立：换成线性插值路径或 optimal transport coupling，PF-ODE 公式就不再有效，velocity 不再能写成 score 的仿射函数；这正是 Flow Matching 比 score matching"路径自由度更大"的根源。</p>
+
+    <div class="vf-why"><strong>Why</strong>：PF-ODE 这个组合 $f - \tfrac{1}{2} g^2 \nabla \log p_t$ 看似复杂，物理直觉其实很简单——SDE 的 drift $f$ 是确定性"推力"、扩散项 $g \, dW$ 是随机"抖动"；把随机抖动用"score 指向高密度区"的等价漂移代替（这是 Fokker-Planck 方程的恒等变形），就把 SDE 改写成等价边际分布的 ODE。score 在此扮演的角色是"用确定性漂移替代随机扩散的等价物"。这件事的奇妙之处在于：原 SDE 单条样本的轨迹是布朗运动（处处不可微），PF-ODE 单条样本的轨迹是光滑曲线——但<em>两者的边际分布 $p_t$ 完全相同</em>。这是 velocity field 视角与 score 视角能互译的根本原因，也是为什么 EDM（Karras et al. 2022）能用 ODE 采样器拿到和 SDE 采样器一样的 FID 但少一个数量级的步数。</div>
+
+    <svg class="vf-svg" viewBox="0 0 600 320" role="img" aria-label="velocity field 示意：左侧空间网格上每个点有一个速度箭头，箭头方向随时间变化，把先验高斯搬向数据 MoG">
+      <defs>
+        <marker id="vf-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+          <path d="M0,0 L10,5 L0,10 z" fill="var(--module-accent)"/>
+        </marker>
+        <radialGradient id="vf-prior" cx="50%" cy="50%" r="50%">
+          <stop offset="0%" stop-color="var(--blue-soft)" stop-opacity="0.9"/>
+          <stop offset="100%" stop-color="var(--blue-soft)" stop-opacity="0"/>
+        </radialGradient>
+        <radialGradient id="vf-data" cx="50%" cy="50%" r="50%">
+          <stop offset="0%" stop-color="var(--module-accent)" stop-opacity="0.7"/>
+          <stop offset="100%" stop-color="var(--module-accent)" stop-opacity="0"/>
+        </radialGradient>
+      </defs>
+      <g font-family="ui-sans-serif" font-size="11" fill="var(--text)">
+        <text x="100" y="22" text-anchor="middle" fill="var(--text-muted)">$t=0$ · 先验 $p_0$ (Gaussian)</text>
+        <text x="300" y="22" text-anchor="middle" fill="var(--text-muted)">$t=0.5$ · 中间路径 $p_{0.5}$</text>
+        <text x="500" y="22" text-anchor="middle" fill="var(--text-muted)">$t=1$ · 数据 $p_1$ (MoG)</text>
+
+        <ellipse cx="100" cy="160" rx="55" ry="55" fill="url(#vf-prior)"/>
+        <ellipse cx="300" cy="120" rx="35" ry="35" fill="url(#vf-prior)" opacity="0.55"/>
+        <ellipse cx="300" cy="200" rx="35" ry="35" fill="url(#vf-data)" opacity="0.55"/>
+        <ellipse cx="475" cy="100" rx="28" ry="28" fill="url(#vf-data)"/>
+        <ellipse cx="500" cy="170" rx="28" ry="28" fill="url(#vf-data)"/>
+        <ellipse cx="525" cy="230" rx="28" ry="28" fill="url(#vf-data)"/>
+
+        <g stroke="var(--module-accent)" stroke-width="1.3" marker-end="url(#vf-arrow)" fill="none" opacity="0.75">
+          <path d="M 70 130 L 95 122"/>
+          <path d="M 70 160 L 95 158"/>
+          <path d="M 70 190 L 95 196"/>
+          <path d="M 130 130 L 158 122"/>
+          <path d="M 130 160 L 158 160"/>
+          <path d="M 130 190 L 158 198"/>
+
+          <path d="M 230 110 L 260 105"/>
+          <path d="M 230 160 L 260 145"/>
+          <path d="M 230 210 L 260 215"/>
+          <path d="M 320 105 L 350 95"/>
+          <path d="M 320 160 L 350 175"/>
+          <path d="M 320 210 L 350 220"/>
+
+          <path d="M 420 100 L 450 98"/>
+          <path d="M 420 160 L 450 165"/>
+          <path d="M 420 220 L 450 225"/>
+        </g>
+
+        <text x="300" y="280" text-anchor="middle" font-size="10" fill="var(--text-muted)">空间每一点的箭头 = $u_t(x)$；箭头随 $t$ 变化（左到右）</text>
+        <text x="300" y="298" text-anchor="middle" font-size="10" fill="var(--text-muted)">$t=0$ 时箭头几乎平行向右；中段开始分叉指向不同 mode；$t=1$ 时局部收敛到 MoG 中心</text>
+      </g>
+    </svg>
+
+    <p>这张图传达的核心信号：<strong>velocity field 是一张"会变形的箭头地图"</strong>。$t = 0$ 时它把所有粒子大致向右推（因为先验是各向同性 Gaussian，没有方向偏好）；$t$ 增大时箭头逐渐"分叉"——靠上半空间的箭头指向上方的 mode、靠下半空间的箭头指向下方的 mode；$t \to 1$ 时所有箭头长度趋零、粒子收敛到数据 mode 上。这就是"velocity field 把 prior 搬向 MoG data" 在几何上的样子。</p>
+
+    <div class="my-addition">🟡 教材外补充：</div>
+    <p>实践中神经网络 $v_\theta(x, t)$ 的输入设计有几个隐藏细节，源讲师没展开但工程上重要。<strong>第一</strong>，$t$ 必须通过 sinusoidal embedding 或 Fourier features 嵌入而非直接拼接——直接拼一个 $[0, 1]$ 的标量会让网络在初期完全忽略时间信息（梯度被 $x$ 那 $\sim 10^3$ 个维度淹没）。SD3 用 16-dim Fourier features、Flux 用 256-dim sinusoidal——这是把 velocity field 训成"会随时间变形"的必要条件，否则你训出来的网络就退化成一个静态向量场。<strong>第二</strong>，$v_\theta$ 输出的<em>量纲</em>要和 $x$ 一致——常见 bug 是在 latent diffusion 里 latent 标度大约 $\pm 4$、velocity target $x_1 - x_0$ 标度也是 $\pm 5$，但如果你忘记取消 VAE 的 0.18215 缩放，速度幅度会差一个数量级，采样直接发散。<strong>第三</strong>，inference 时的 $t$ 调度可以与训练分离——训练用 $t \sim \mathcal{U}[0, 1]$ 或 logit-normal，但采样可以用 cosine spacing 或 Karras schedule，因为 velocity field 是连续的，对采样网格不挑剔。</p>
+
+    <p>把 velocity field 放到更大的概念地图上：它是<strong>连续标准化流（CNF, Chen et al. 2018）</strong>的核心对象，CNF 之前的离散标准化流（NICE、RealNVP）只能堆叠固定数量的可逆变换，CNF 用 ODE 让"层数"变成连续时间——velocity field 就是这个 ODE 的右端。Tianqi 在 L5 提到 "Ricky 提的 continuous normalizing flow" 指的就是这件事。但 CNF 原版用极大似然 + adjoint method 训练，需要在前向 + 反向各积一次 ODE，代价奇高、训不起来大模型。Flow Matching 的真正贡献是<em>跳过似然</em>：直接 L2 回归条件 velocity，把训练复杂度降到和 DDPM 一致——这是 velocity field 从"理论上漂亮的对象"变成"SD3 / Flux 工业默认骨架"的关键转折。从这个角度看，velocity field 自 2018 年起就在那里等着被正确使用，2023 年才被 Flow Matching 用对方式。</p>
+  </section>
+
+  <section class="concept-interact">
+    <p>拖动滑块改变时间 $t$。<strong>不变量</strong>：箭头<em>位置</em>不变（它们锚定在空间网格上），但箭头<em>方向和长度</em>随 $t$ 改变——$t = 0$ 附近所有箭头几乎平行（先验各向同性），$t \to 1$ 时箭头按粒子所在位置"分叉"指向不同数据 mode。这正是 "velocity field is time-indexed" 的精确视觉含义：同一个 $x$ 在不同 $t$ 上速度完全不同。</p>
+    <div class="vf-controls">
+      <label for="vf-slider">时间 $t$：</label>
+      <input type="range" id="vf-slider" min="0" max="100" step="1" value="0" class="vf-slider">
+      <span id="vf-readout" class="vf-readout">t = 0.00</span>
+    </div>
+    <svg viewBox="0 0 600 320" role="img" aria-label="velocity field 时间滑块演示" style="display:block;margin:0.6rem auto;">
+      <defs>
+        <marker id="vf-arrow2" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+          <path d="M0,0 L10,5 L0,10 z" fill="var(--module-accent)"/>
+        </marker>
+        <radialGradient id="vf-modeA" cx="50%" cy="50%" r="50%">
+          <stop offset="0%" stop-color="var(--module-accent)" stop-opacity="0.6"/>
+          <stop offset="100%" stop-color="var(--module-accent)" stop-opacity="0"/>
+        </radialGradient>
+        <radialGradient id="vf-modeB" cx="50%" cy="50%" r="50%">
+          <stop offset="0%" stop-color="var(--module-accent)" stop-opacity="0.6"/>
+          <stop offset="100%" stop-color="var(--module-accent)" stop-opacity="0"/>
+        </radialGradient>
+      </defs>
+      <g font-family="ui-sans-serif" font-size="11" fill="var(--text)">
+        <rect x="40" y="40" width="520" height="240" fill="none" stroke="var(--border)" stroke-dasharray="2 4"/>
+
+        <circle id="vf-prior-blob" cx="300" cy="160" r="100" fill="url(#vf-modeA)" opacity="0.5"/>
+        <circle id="vf-modeA-circle" cx="430" cy="100" r="0" fill="url(#vf-modeA)"/>
+        <circle id="vf-modeB-circle" cx="430" cy="220" r="0" fill="url(#vf-modeB)"/>
+
+        <text x="100" y="32" text-anchor="middle" fill="var(--text-muted)" font-size="10">prior $p_0$</text>
+        <text x="500" y="32" text-anchor="middle" fill="var(--text-muted)" font-size="10">data $p_1$ (MoG, 2 modes)</text>
+
+        <g id="vf-arrows" stroke="var(--module-accent)" stroke-width="1.4" marker-end="url(#vf-arrow2)" fill="none"></g>
+
+        <text x="300" y="305" text-anchor="middle" font-size="10" fill="var(--text-muted)">每个箭头 = 该点 $u_t(x)$；同位置在不同 $t$ 速度不同</text>
+      </g>
+    </svg>
+    <script>
+      (function () {
+        var s = document.getElementById('vf-slider');
+        var r = document.getElementById('vf-readout');
+        var modeA = document.getElementById('vf-modeA-circle');
+        var modeB = document.getElementById('vf-modeB-circle');
+        var priorBlob = document.getElementById('vf-prior-blob');
+        var arrowsG = document.getElementById('vf-arrows');
+
+        // build grid of anchor points once
+        var anchors = [];
+        for (var gx = 90; gx <= 510; gx += 60) {
+          for (var gy = 70; gy <= 250; gy += 45) {
+            anchors.push({x: gx, y: gy});
+          }
+        }
+        // pre-create arrow elements
+        anchors.forEach(function (a, i) {
+          var line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+          line.setAttribute('class', 'vf-arrow');
+          arrowsG.appendChild(line);
+          a.el = line;
+        });
+
+        // two data modes for MoG
+        var modeAxy = {x: 430, y: 100};
+        var modeBxy = {x: 430, y: 220};
+
+        function render() {
+          var t = (+s.value) / 100;
+          r.textContent = 't = ' + t.toFixed(2);
+
+          // prior blob shrinks; mode blobs grow
+          priorBlob.setAttribute('r', String(100 * (1 - t * 0.85)));
+          priorBlob.setAttribute('opacity', String(0.5 * (1 - t * 0.9)));
+          modeA.setAttribute('r', String(45 * Math.pow(t, 1.2)));
+          modeB.setAttribute('r', String(45 * Math.pow(t, 1.2)));
+
+          // each anchor's velocity = (1-t) * uniform-right-push + t * mode-attraction
+          anchors.forEach(function (a) {
+            var dxUniform = 1.0, dyUniform = 0.0; // uniform push right when t=0
+            // pick nearer mode
+            var dA = Math.hypot(a.x - modeAxy.x, a.y - modeAxy.y);
+            var dB = Math.hypot(a.x - modeBxy.x, a.y - modeBxy.y);
+            var target = (dA < dB) ? modeAxy : modeBxy;
+            var vx = target.x - a.x;
+            var vy = target.y - a.y;
+            var nrm = Math.hypot(vx, vy) + 1e-6;
+            vx /= nrm; vy /= nrm;
+
+            // blend: small t -> uniform; large t -> mode-pointed
+            var ux = (1 - t) * dxUniform + t * vx;
+            var uy = (1 - t) * dyUniform + t * vy;
+            var unrm = Math.hypot(ux, uy) + 1e-6;
+            ux /= unrm; uy /= unrm;
+
+            // length shrinks as t -> 1 (粒子靠近终点速度减小)
+            var len = 22 * (1 - 0.55 * t);
+            a.el.setAttribute('x1', a.x);
+            a.el.setAttribute('y1', a.y);
+            a.el.setAttribute('x2', a.x + ux * len);
+            a.el.setAttribute('y2', a.y + uy * len);
+          });
+        }
+        s.addEventListener('input', render);
+        render();
+      })();
+    </script>
+  </section>
+
+  <section class="concept-example">
+    <h2>手算：从 velocity 到一步采样</h2>
+    <p>设 $x_0 = -1$（噪声样本），$x_1 = 4$（数据样本），路径取线性插值。条件 velocity</p>
+    <p>$$u_t(x_t \mid x_1) = \frac{d}{dt}\bigl[(1-t)\cdot(-1) + t \cdot 4\bigr] = -(-1) + 4 = 5.$$</p>
+    <p>注意它<em>不依赖</em> $t$ 也不依赖 $x_t$——线性插值下整条轨迹速度恒为 5。验证插值点：$t = 0.3$ 时 $x_t = 0.7 \cdot (-1) + 0.3 \cdot 4 = -0.7 + 1.2 = 0.5$；$t = 0.6$ 时 $x_t = 0.4 \cdot (-1) + 0.6 \cdot 4 = -0.4 + 2.4 = 2.0$。两点差 $2.0 - 0.5 = 1.5$，时间差 $0.6 - 0.3 = 0.3$，平均速度 $1.5 / 0.3 = 5$——和 $u_t = 5$ 一致。Euler 5 步采样（$\Delta t = 0.2$）从 $x_0 = -1$ 出发：$-1 \to 0 \to 1 \to 2 \to 3 \to 4$，恰好命中 $x_1 = 4$。</p>
+    <p>对比 PF-ODE 视角：若用 variance-preserving 路径 $\alpha_t = \cos(\pi t / 2),\, \sigma_t = \sin(\pi t / 2)$，则 $\dot \alpha_t = -\tfrac{\pi}{2}\sin(\pi t / 2),\, \dot \sigma_t = \tfrac{\pi}{2}\cos(\pi t / 2)$，$t = 0.3$ 时 $\alpha = 0.891,\, \sigma = 0.454,\, \dot \alpha = -0.713,\, \dot \sigma = 1.399$，velocity $u_t(x \mid x_1) = \dot \alpha_t x_1 + \dot \sigma_t x_0 = -0.713 \cdot 4 + 1.399 \cdot (-1) = -2.85 - 1.40 = -4.25$——和线性路径的 $5$ 完全不同！这正是"velocity 依赖路径设计"的具体体现。</p>
+  </section>
+
+  <section class="concept-pitfalls">
+    <h2>常见误区</h2>
+    <ol>
+      <li><strong>"velocity field 就是去噪方向 / 噪声的负梯度"。</strong>反例：在线性插值路径下 $u_t(x_t \mid x_1) = x_1 - x_0$，与"去噪"无关——它是从<em>噪声</em>指向<em>数据</em>的向量（升级方向，不是降级）；而 DDPM 里 $\epsilon_\theta$ 预测的"噪声"是从<em>数据</em>指向<em>噪声</em>（要被减掉的）。两者方向相反、量纲不同——velocity 量纲是 $[x]/[t]$（位移除时间），$\epsilon$ 量纲是 $[x]$（位移）；把它们混作"去噪方向"是 Flow Matching 初学者最常见的错。</li>
+      <li><strong>"velocity field 是一条粒子的轨迹切线"。</strong>反例：velocity field 是<em>整个空间</em>每一点的速度向量构成的<strong>地图</strong>，不是某条特定轨迹的属性。同一时刻 $t = 0.5$，位置 $x = (0.5, 0.5)$ 的速度 $u_{0.5}(0.5, 0.5) = (3, 2)$，位置 $x = (2, 2)$ 的速度 $u_{0.5}(2, 2) = (-1, 4)$——这俩同时存在、互不相干，是<em>场</em>的两个采样点。Vizuara 的盒子粒子图（L10 @00:05）就是这个意思："每一个点都有它自己的轨迹"——即每一点都对应一个速度向量，整体是场而非曲线。</li>
+      <li><strong>"velocity field 在不同时刻不变（stationary）"。</strong>反例：取 MoG 数据分布（两个 mode 在 $(1, 0)$ 和 $(-1, 0)$）、Gaussian 先验。$t = 0$ 时 $u_0(0, 0) \approx (0, 0)$（原点是先验中心、整体没偏好）；$t = 0.5$ 时 $u_{0.5}(0.01, 0) \approx (2, 0)$（轻微偏右就被右 mode 吸引）；$t = 0.5$ 时 $u_{0.5}(-0.01, 0) \approx (-2, 0)$（轻微偏左就被左 mode 吸引）；$t = 0.99$ 时 $u_{0.99}(1, 0) \approx (0, 0)$（已到达 mode 中心）。<em>同一空间点</em>在不同 $t$ 速度截然不同——所以 $u_t$ 必须显式带 $t$ 索引，神经网络必须输入 time embedding。把 velocity field 当作静态场是 Helmholtz 力学遗留下来的偏见，在概率传输里不成立。</li>
+    </ol>
+  </section>
+
+  <section class="concept-seealso">
+    <h2>相关概念</h2>
+    <ul>
+      <li><a href="/video-to-notebook/concepts/flow-matching/">Flow Matching</a></li>
+      <li><a href="/video-to-notebook/concepts/continuous-normalizing-flow/">Continuous Normalizing Flow</a></li>
+      <li><a href="/video-to-notebook/concepts/latent-diffusion/">Latent Diffusion</a></li>
+      <li><a href="/video-to-notebook/concepts/video-diffusion/">Video Diffusion</a></li>
+    </ul>
+  </section>
+
+  <section class="concept-sources">
+    <h2>来源</h2>
+    <ol>
+      <li><a href="https://www.youtube.com/watch?v=_OOITDB2VCY&t=2s" target="_blank" rel="noopener">cmu-10799-diffusion-flow · L5 · 从 SDE 到 ODE 与 velocity 的引入 · (0:02)</a></li>
+      <li><a href="https://www.youtube.com/watch?v=_OOITDB2VCY&t=208s" target="_blank" rel="noopener">cmu-10799-diffusion-flow · L5 · "$\Delta t \to 0$ 得到 velocity" · (3:28)</a></li>
+      <li><a href="https://www.youtube.com/watch?v=_OOITDB2VCY&t=430s" target="_blank" rel="noopener">cmu-10799-diffusion-flow · L5 · Continuous Normalizing Flow / Ricky 提出 velocity 视角 · (7:10)</a></li>
+      <li><a href="https://www.youtube.com/watch?v=_OOITDB2VCY&t=485s" target="_blank" rel="noopener">cmu-10799-diffusion-flow · L5 · "风把太平洋的水搬到东海岸" 比喻 · (8:05)</a></li>
+      <li><a href="https://www.youtube.com/watch?v=JyblttMM9-c&t=4s" target="_blank" rel="noopener">diffusion-principles-vizuara · L10 · 盒子粒子轨迹引入 velocity field · (0:05)</a></li>
+    </ol>
+  </section>
+</article>

@@ -1,0 +1,200 @@
+<style>
+/* prefix: rf- */
+.rf-quickref{background:var(--surface-soft);border-left:3px solid var(--module-accent);padding:0.8rem 1rem;border-radius:0 4px 4px 0;margin:1rem 0;font-size:0.92rem;}
+.rf-quickref div{margin:0.3rem 0;}
+.rf-svg{display:block;margin:1.2rem auto;max-width:100%;height:auto;}
+.rf-callout-quote{border-left:3px solid var(--module-accent);background:var(--module-accent-soft);padding:0.6rem 0.9rem;margin:0.8rem 0;font-style:italic;color:var(--text);border-radius:0 4px 4px 0;}
+.rf-source-tag{display:block;font-style:normal;font-size:0.8rem;color:var(--text-muted);margin-top:0.3rem;}
+.rf-my-addition{background:var(--accent-soft);border-left:3px solid var(--accent);padding:0.5rem 0.8rem;margin:0.8rem 0;font-size:0.9rem;border-radius:0 4px 4px 0;}
+.rf-why{display:inline-block;font-weight:600;color:var(--module-accent);margin-top:0.4rem;}
+.rf-pitfalls ol{padding-left:1.4rem;} .rf-pitfalls li{margin:0.7rem 0;}
+.rf-source{font-style:italic;color:var(--text-muted);border-left:2px solid var(--border);padding:0.2rem 0.8rem;margin:0.5rem 0;font-size:0.9rem;}
+.rf-controls{display:flex;gap:0.4rem;flex-wrap:wrap;margin:0.6rem 0;}
+.rf-controls button{padding:0.35rem 0.7rem;border:1px solid var(--border);background:var(--surface);color:var(--text);border-radius:4px;cursor:pointer;font-size:0.85rem;}
+.rf-controls button.active{background:var(--module-accent);color:var(--surface);border-color:var(--module-accent);}
+.rf-readout{background:var(--surface-soft);border-radius:4px;padding:0.6rem 0.9rem;margin-top:0.5rem;font-size:0.9rem;color:var(--text-muted);}
+@keyframes rf-flow-curved{0%{stroke-dashoffset:300;}100%{stroke-dashoffset:0;}}
+@keyframes rf-flow-straight{0%{stroke-dashoffset:200;}100%{stroke-dashoffset:0;}}
+.rf-traj-curved{stroke-dasharray:6 4;animation:rf-flow-curved 4s linear infinite;}
+.rf-traj-straight{stroke-dasharray:6 4;animation:rf-flow-straight 2s linear infinite;}
+</style>
+
+<article class="concept-entry">
+  <header class="concept-header">
+    <span class="concept-eyebrow">概念</span>
+    <h1>Rectified Flow</h1>
+    <p class="concept-tagline">— 不是新模型，是把任何 flow 的轨迹「拉直」的训练 trick。</p>
+  </header>
+
+  <aside class="rf-quickref">
+    <div><strong>定义</strong> · 用直线插值 $x_t = (1-t)x_0 + t x_1$ 训练 flow，再通过 reflow 反复重耦合，让 ODE 轨迹越来越接近直线。</div>
+    <div><strong>公式</strong> · 速度场 $u_t(x) = \mathbb{E}[x_1 - x_0 \mid x_t = x]$；训练目标 $\min_\theta \mathbb{E}\|v_\theta(x_t, t) - (x_1 - x_0)\|^2$。</div>
+    <div><strong>易错</strong> · "rectified" 不是说一次训练就直了——单次训练的轨迹仍然会拐弯；只有 reflow 之后才真正接近直线。</div>
+  </aside>
+
+  <section class="concept-intuition">
+    <p>很多人第一次听到 Rectified Flow 会把它理解成"另一种生成模型"，跟 DDPM、Score Matching、Flow Matching 并列起来记。<strong>这是误读</strong>。Rectified Flow 本身不是一个新模型族，也没有新的网络架构，更没有改动损失函数的形式——它是一个针对<em>已有 flow</em> 的训练技巧，目的只有一个：把生成时的 ODE 轨迹从弯曲变直。轨迹一旦变直，1 步 Euler 就足以从噪声跳到数据，这才有了 Stable Diffusion 3、FLUX 等少步数生成器，也才有了 SDXL Turbo、SDXL Lightning 等"实时出图"产品的工程基础。</p>
+
+    <p>它出现的动机直接来自 CMU 10799 Lecture 10 的开场提问。讲师先回顾完 DDIM、各种 ODE solver 之后抛出一个问题：</p>
+    <div class="rf-callout-quote">
+      「我们已经讲了快速采样的方法，比如 DDIM，还可以换不同的 ODE solver。<strong>但除此之外，还有别的办法加速推理吗？</strong>」
+      <span class="rf-source-tag">— CMU 10799 L10 @00:04</span>
+    </div>
+    <p>讲师接着引导出两条路径：第一条是 distillation——把一个慢的、多步的预训练模型蒸馏成一个快的、少步的学生模型，例如把"一步学生 = 两步老师"层层套娃，得到 progressive distillation；第二条则是 Rectified Flow，思路完全不同——<strong>不是事后蒸馏，而是从源头改训练目标</strong>，让模型一开始就学一个轨迹接近直线的 flow，少步数采样自然就稳。本页讲后者，但理解时不妨把它放在加速采样的整张技术地图上看：Rectified Flow 与 distillation 是互补关系而非竞争关系。</p>
+
+    <p>在训练里，这件事对应 Liu et al. 2022 提出的<em>直线条件路径 + reflow 迭代</em>。它不引入新损失、不改网络结构，只换一个采样路径和一个数据重耦合循环。代码层面的改动可能只有十几行，但概念层面的跨度很大——它揭示了"训练成本"和"推理成本"之间可以做时间换空间式的转移。</p>
+  </section>
+
+  <section class="concept-deepdive">
+    <h2>1. 直线插值路径：所有玄机的起点</h2>
+    <p>标准 Flow Matching 允许任意条件路径 $x_t = \alpha_t x_0 + \sigma_t x_1$（高斯调度、cosine 调度、variance-preserving 调度都行）。Rectified Flow 把路径锁死成最简单的形式：</p>
+    <p>$$x_t = (1-t)\,x_0 + t\,x_1, \quad t \in [0, 1]$$</p>
+    <p>其中 $(x_0, x_1) \sim \pi$ 是一对耦合样本：$x_0$ 来自噪声分布（典型为标准高斯 $\mathcal{N}(0, I)$），$x_1$ 来自数据分布。注意 $x_t$ 是 $x_0$ 与 $x_1$ 的<strong>线性插值</strong>——画在二维平面上就是一条连接两端的直线段。两端时间分别取 $x_0 = x_t|_{t=0}$、$x_1 = x_t|_{t=1}$，速度 $\dot x_t = x_1 - x_0$ 是一个<em>与 $t$ 无关</em>的常向量。这一点跟 DDPM 的方差爆炸调度、Karras EDM 的对数 sigma 调度完全不同——后两者都有时间相关的非线性项。</p>
+    <p><span class="rf-why">Why 直线</span>：如果训练得到的速度场 $v_\theta$ 真的能完美匹配这个线性路径的速度 $x_1 - x_0$，那么积分这条 ODE 时，路径本身也是直线，1 步 Euler 就够：$\hat x_1 \approx x_0 + v_\theta(x_0, 0)$。直线是 ODE 数值积分的"圣杯"——任意步长都零截断误差，因为 Euler 法的误差项正比于二阶导数 $\ddot x_t$，而直线的二阶导数恒为零。这就是为什么 Rectified Flow 一直瞄准"轨迹直度"这个不变量打。</p>
+
+    <h2>2. 条件速度的取期望：$u_t(x)$ 的来源</h2>
+    <p>问题是：给定一个具体的中间状态 $x_t = x$，可能对应<em>很多</em>不同的 $(x_0, x_1)$ 对——多条直线穿过同一点 $x$。比如平面上点 $(1, 0.5)$ 可以是直线 $(0, 0) \to (4, 2)$ 上 $t = 0.25$ 处的点，也可以是直线 $(2, 1) \to (-2, -1)$ 上 $t = 0.25$ 处的点。所以"在 $x$ 这点的速度"不能直接读取，而是要对所有穿过该点的轨迹取条件期望：</p>
+    <p>$$u_t(x) = \mathbb{E}_{(x_0, x_1) \sim \pi}\bigl[\,x_1 - x_0 \,\big|\, x_t = x\bigr]$$</p>
+    <p><span class="rf-why">Why 期望</span>：这是 marginal velocity field（边缘速度场）——把所有穿过 $x$ 的"小直线"在该点的方向做加权平均，得到的才是边缘分布意义下的瞬时速度。神经网络 $v_\theta(x, t)$ 学的就是这个 $u_t(x)$。这里要警觉一个微妙的事实：尽管<em>每一条</em>条件路径都是直线，但<em>边缘速度场</em> $u_t(x)$ 的积分曲线却可以是弯的——因为不同轨迹在同一点 $x$ 的方向不一致，期望出来的方向是它们的某种"中间值"，这条平均方向线本身就不再是直线了。这正是单次 Rectified Flow 训练之后轨迹依然会弯的根本原因，也是后面 reflow 要解决的问题。</p>
+
+    <h2>3. Conditional Flow Matching 损失</h2>
+    <p>训练 $v_\theta$ 不需要显式算 $u_t(x)$ 的条件期望（那是一个内嵌的积分，没法直接评估）。利用 Conditional Flow Matching 的简化技巧——本质上跟 Tweedie 公式同一精神——目标可以等价改写成在条件路径上做回归：</p>
+    <p>$$\mathcal{L}_{\text{RF}}(\theta) = \mathbb{E}_{t \sim U[0,1],\,(x_0, x_1) \sim \pi}\Bigl\|\,v_\theta\bigl((1-t)x_0 + t x_1,\,t\bigr) - (x_1 - x_0)\,\Bigr\|^2$$</p>
+    <p><span class="rf-why">Why 等价</span>：对一个 MSE 损失，最优解就是条件期望——$v_\theta^*(x_t, t) = \mathbb{E}[x_1 - x_0 \mid x_t]$。所以训练这个看似简单的"目标速度 = $x_1 - x_0$"，最终学到的就是 $u_t(x)$。这一招让训练完全 simulation-free：每个 step 只需要采 $(x_0, x_1, t)$，算插值点 $x_t$，前向一次，反传一次，结束。完全不需要在训练时跑 ODE 求解器，比 distillation 类方法（每一训练步都得跑 4~8 步 ODE 老师推理）便宜一个数量级。</p>
+    <p>实现上还有几个细节值得知道。第一，$t$ 通常从 $U[0, 1]$ 均匀采，但 SD3 论文用 logit-normal 偏向中段时间步——因为中间 $t$ 的样本更接近真实"扩散途中"的状态，对最终生成质量影响最大。第二，损失对所有像素求和或求均值都行，但要跟下游 reflow 阶段保持一致；通常用 mean。第三，由于条件路径是直线，在 $t = 0$ 和 $t = 1$ 附近网络的输入分布会退化——前者全是噪声、后者全是干净数据——所以实务里会把 $t$ 限制在 $[\epsilon, 1 - \epsilon]$。</p>
+
+    <h2>4. Reflow：本概念的真正灵魂</h2>
+    <p>第一次训练用的耦合是 $\pi_0 = p_\text{noise} \times p_\text{data}$（独立采样，完全随机配对）。此时虽然每条<em>条件路径</em>都是直线，但 $u_t(x)$ 这条边缘速度场<strong>不是常向量场</strong>——多条直线在 $x$ 处方向不同，期望出来的轨迹依然弯曲。直观上：随机配对让"猫的图像"可能跟某团噪声配在一起，但跟"另一团相似噪声"配的可能是狗，两条路径在某点几乎相交时速度方向却南辕北辙，平均出来就是弯的。</p>
+
+    <p>Liu et al. 2022 的关键观察：训完 $v^{(1)}$ 后，可以用它定义<em>新的耦合</em>：</p>
+    <ol>
+      <li>采一个 $x_0 \sim p_\text{noise}$。</li>
+      <li>求解 ODE $\dot z_t = v^{(1)}(z_t, t)$ 从 $t = 0$ 积到 $t = 1$，得到终点 $x_1 = z_1$。</li>
+      <li>记录这对 $(x_0, x_1)$，把它们当作新的耦合 $\pi_1$ 的一个样本。</li>
+      <li>重复采足够多次，得到完整的 $\pi_1$ 分布。</li>
+    </ol>
+
+    <p>然后用同样的 $\mathcal{L}_{\text{RF}}$ 在 $\pi_1$ 上重训一遍，得到 $v^{(2)}$。这一步叫 <strong>reflow</strong>。</p>
+    <p><span class="rf-why">Why reflow 让轨迹变直</span>：在 $\pi_1$ 下，每个 $x_0$ 都<em>只对应一个</em>它经 ODE 走到的 $x_1$——耦合已经被前一轮 ODE "整理"过。同一点 $x$ 上多条直线交叉的情况大幅减少，期望出来的 $u_t^{(2)}$ 更接近常向量场，对应的 ODE 轨迹也就更直。可以继续 $\pi_2, \pi_3, \dots$，每次都更直。从最优运输的角度看，reflow 在逼近 Monge 最优运输方案——即"每个 $x_0$ 走最短路径到达对应的 $x_1$"，而最短路径就是直线。</p>
+
+    <p>论文里证明了两条关键性质：第一，reflow 操作<em>单调降低 transport cost</em>，即每轮迭代后 $\mathbb{E}\|x_1 - x_0\|^2$ 不增；第二，<strong>边缘分布严格不变</strong>——即 $v^{(k)}$ 仍把噪声映成数据，只是路径更"经济"。这两条性质保证了 reflow 是"白吃的午餐"——质量不退、速度提升。</p>
+
+    <svg class="rf-svg" viewBox="0 0 600 280" role="img" aria-label="弯曲扩散轨迹 vs 拉直 Rectified Flow 轨迹">
+      <defs>
+        <marker id="rf-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--text-muted)"/>
+        </marker>
+      </defs>
+      <g font-family="ui-sans-serif" font-size="11" fill="var(--text)">
+        <text x="20" y="20" font-weight="600">(a) 标准 diffusion：弯曲轨迹</text>
+        <circle cx="60" cy="80" r="6" fill="var(--blue)"/>
+        <text x="60" y="65" text-anchor="middle" font-size="10">x₀</text>
+        <circle cx="260" cy="80" r="6" fill="var(--module-accent)"/>
+        <text x="260" y="65" text-anchor="middle" font-size="10">x₁</text>
+        <path d="M 60 80 Q 100 30 160 110 T 260 80" fill="none" stroke="var(--blue)" stroke-width="2" class="rf-traj-curved" marker-end="url(#rf-arrow)"/>
+        <path d="M 60 80 Q 130 140 200 50 T 260 80" fill="none" stroke="var(--text-muted)" stroke-width="1.5" class="rf-traj-curved" opacity="0.6"/>
+        <text x="160" y="170" text-anchor="middle" font-size="10" fill="var(--text-muted)">需要 50~1000 步 ODE solver</text>
+
+        <text x="320" y="20" font-weight="600">(b) Rectified Flow：拉直轨迹</text>
+        <circle cx="360" cy="80" r="6" fill="var(--blue)"/>
+        <text x="360" y="65" text-anchor="middle" font-size="10">x₀</text>
+        <circle cx="560" cy="80" r="6" fill="var(--module-accent)"/>
+        <text x="560" y="65" text-anchor="middle" font-size="10">x₁</text>
+        <path d="M 360 80 L 560 80" fill="none" stroke="var(--module-accent)" stroke-width="2" class="rf-traj-straight" marker-end="url(#rf-arrow)"/>
+        <path d="M 360 100 L 560 100" fill="none" stroke="var(--module-accent)" stroke-width="1.5" class="rf-traj-straight" opacity="0.6"/>
+        <text x="460" y="170" text-anchor="middle" font-size="10" fill="var(--text-muted)">1~4 步 Euler 即可</text>
+
+        <text x="20" y="220" font-weight="600">Reflow 迭代效果：</text>
+        <path d="M 60 250 Q 100 220 160 270 T 260 250" fill="none" stroke="var(--text-muted)" stroke-width="1.5" opacity="0.8"/>
+        <text x="160" y="265" text-anchor="middle" font-size="9" fill="var(--text-muted)">k=1（弯）</text>
+        <path d="M 280 250 Q 320 235 380 260 T 460 250" fill="none" stroke="var(--module-accent)" stroke-width="1.5" opacity="0.7"/>
+        <text x="370" y="265" text-anchor="middle" font-size="9" fill="var(--text-muted)">k=2（更直）</text>
+        <line x1="480" y1="250" x2="580" y2="250" stroke="var(--module-accent)" stroke-width="2"/>
+        <text x="530" y="265" text-anchor="middle" font-size="9" fill="var(--text-muted)">k=3（近乎直线）</text>
+      </g>
+    </svg>
+
+    <div class="rf-my-addition">🟡 教材外补充：CMU L10 把 Rectified Flow 放在"distillation 之后"讲是有道理的——progressive distillation 也是为了少步数采样，但它<em>把一个慢模型蒸馏成一个快模型</em>；Rectified Flow 则是<em>把一个慢路径重新参数化成一个快路径</em>，再单次训练就够。两条路径互相补——SD3 用 Rectified Flow 做基础，FLUX 在其上再叠 distillation/LCM 风格 trick。课堂里还讨论了一个相关问题：为什么不直接训练"一步到位"的模型？讲师的回答是<em>训练时跑多步采样太贵</em>，而且最终任务从高斯映到复杂数据分布这件事本身就是病态的。Rectified Flow 巧妙绕开了这个困境——它依然是多步训练目标（每个 $t$ 都有监督信号），只是让最终学到的轨迹结构使得推理时一步就够。</div>
+
+    <h2>5. 工程上的几个真实数字</h2>
+    <p>原论文在 CIFAR-10 上的数字很有说服力：随机耦合训出来的 $v^{(1)}$ 用 1 步 Euler 采样 FID 高达 378（基本是随机噪声）；用 100 步 RK45 solver 才能降到 2.58。一轮 reflow 之后的 $v^{(2)}$，1 步 FID 直接降到 12.21——下降了 30 倍。再做一轮 reflow 加上 distillation，1 步 FID 可以达到 4.85，已经接近多步采样的基线。这组数字说明两件事：（1）reflow 的收益巨大但有边际递减；（2）reflow 后再做一层 distillation 是现行最佳实践，SD3、FLUX Schnell 都采用这种"reflow + distill"双阶段流水线。</p>
+
+    <h2>6. 与其他加速路线的对比</h2>
+    <p>把 Rectified Flow 放在整张加速地图上，能更清楚看到它的定位。DDIM 是<em>采样器层面</em>的改进——预训练模型不变，只换 ODE 离散化策略；它能从 1000 步压到约 50 步，但更少就会掉质量。Progressive distillation 是<em>训练层面</em>的层级压缩——每次砍一半步数、训一个新学生，能压到 4~8 步。Consistency Models 直接学"从任何 $t$ 跳到 $t = 0$ 的函数"——理论一步到位，但训练目标更复杂、需要 EMA teacher 稳定性技巧。Rectified Flow 则是<em>路径层面</em>的重参数化——它改的是 $x_t$ 怎么生成、$\pi$ 怎么定义，目标函数本身没换。这种"低侵入性"使得 Rectified Flow 能很容易跟其它任何加速技术叠加。</p>
+    <p>实务里，SD3 选择 Rectified Flow 作为底座，主要是看中两点：训练稳定性（loss 是简单的 MSE，没有 EMA、teacher-student 等技巧）、以及无须 simulation（不像 distillation 类方法每 step 都要前向多次）。而它的"代价"在于：reflow 阶段需要先用 $v^{(1)}$ 跑大量 ODE 离线生成 $\pi_1$——这是一次性的数据准备成本，但相比每步训练都跑 ODE 还是便宜得多。</p>
+
+    <h2>7. 从最优运输的角度再看一遍</h2>
+    <p>Rectified Flow 的几何画面在最优运输里更清晰。给定两个分布 $p_\text{noise}$ 与 $p_\text{data}$，理论上存在无穷多种"运输方案"——每种方案就是一个耦合 $\pi$。其中代价最低的那个叫 Monge 最优运输，它的特点是：每个 $x_0$ 都沿着<em>直线</em>走到对应的 $x_1$，且不同轨迹互不交叉。reflow 的每一步迭代都让当前耦合更接近这个最优运输——单次 reflow 严格降低 $\mathbb{E}\|x_1 - x_0\|^2$，但通常不会一步到达最优。这也解释了为什么实务里两到三次 reflow 就够了：每次都把"代价"砍掉一大块，但完全收敛要无限多次，性价比断崖式下降。从这个角度看，Rectified Flow 与最优运输文献里的 Schrödinger Bridge、IDFM 等方法属于同一家族，只是切入点更工程化、可以直接套在已有的 diffusion 训练框架上。</p>
+
+    <h2>8. 与 score / 噪声预测的等价转换</h2>
+    <p>最后值得记住的一点：尽管 Rectified Flow 学的是速度场 $v_\theta$，但它在数学上跟 DDPM 类模型的 score $\nabla_x \log p_t$ 和噪声预测 $\epsilon_\theta$ 是<em>同一族量的不同参数化</em>。在线性路径 $x_t = (1-t)x_0 + t x_1$ 下三者可以互相换算：知道 $v_\theta$ 与当前的 $x_t$，就能反推 $x_0$ 和 $x_1$ 的预测，进而得到等价的 noise/score 估计。这意味着已有 DDPM 预训练权重在概念上能"翻译"到 Rectified Flow 框架——SD3 实际上就利用了这一点做权重初始化，而不是从零训练。理解了这条等价性，你就能把扩散模型领域看似分裂的多个学派（score-based、noise-prediction、flow-matching、rectified flow）放在同一个底座上比较，而不是把它们当成相互替代的方案。换句话说，模型架构和优化器都不变，只是<em>预测目标</em>和<em>采样路径</em>换了一套坐标系；这种"语言切换"在扩散文献里反复发生，Rectified Flow 不过是最近的一次。</p>
+  </section>
+
+  <section class="concept-interact">
+    <p>点按钮依次推进 reflow 轮次。<strong>不变量</strong>：每一轮 $v^{(k)}$ 仍把 $p_\text{noise}$ 映到 $p_\text{data}$（边缘分布不变），变化的只是轨迹的直度。</p>
+    <div class="rf-controls">
+      <button data-step="0" class="active">① 初始耦合 π₀（独立采样）</button>
+      <button data-step="1">② 训练 v⁽¹⁾</button>
+      <button data-step="2">③ 用 v⁽¹⁾ 求 ODE，得到新耦合 π₁</button>
+      <button data-step="3">④ 重训 v⁽²⁾</button>
+      <button data-step="4">⑤ 多轮 reflow 后：1 步 Euler 即可</button>
+    </div>
+    <div class="rf-readout" id="rf-readout">
+      <div class="rf-line" data-line="0">$\pi_0 = p_\text{noise} \times p_\text{data}$：每个噪声 $x_0$ 跟数据点 $x_1$ 随机配对。条件路径直，但边缘速度场弯。</div>
+      <div class="rf-line" data-line="1" style="display:none;">$\min_\theta \mathbb{E}\|v_\theta - (x_1 - x_0)\|^2$ over $\pi_0$。学到 $v^{(1)} \approx u_t^{(0)}$，对应一个 ODE。</div>
+      <div class="rf-line" data-line="2" style="display:none;">对每个 $x_0$ 跑 ODE 拿到终点 $\tilde x_1 = \int_0^1 v^{(1)} dt + x_0$。新耦合 $\pi_1 = \{(x_0, \tilde x_1)\}$ 比 $\pi_0$ 更"协调"。</div>
+      <div class="rf-line" data-line="3" style="display:none;">在 $\pi_1$ 上重训。$v^{(2)}$ 学到的速度场更接近常向量场——同一 $x$ 处的速度分散度变小。</div>
+      <div class="rf-line" data-line="4" style="display:none;">轨迹近似直线 ⇒ $x_1 \approx x_0 + v^{(k)}(x_0, 0)$。SD3 / FLUX Schnell 的"1~4 step generation"就靠这一步。</div>
+    </div>
+    <script>
+      (function () {
+        const btns = document.querySelectorAll('.rf-controls button');
+        const lines = document.querySelectorAll('#rf-readout .rf-line');
+        function show(step) {
+          btns.forEach(b => b.classList.toggle('active', +b.dataset.step === step));
+          lines.forEach(l => l.style.display = (+l.dataset.line === step) ? 'block' : 'none');
+        }
+        btns.forEach(b => b.addEventListener('click', () => show(+b.dataset.step)));
+        show(0);
+      })();
+    </script>
+  </section>
+
+  <section class="concept-example">
+    <h2>手算：2D 玩具例子</h2>
+    <p>设 $x_0 = (0, 0)$，$x_1 = (4, 2)$，$t = 0.25$。则线性插值点：</p>
+    <p>$$x_t = (1 - 0.25)(0,0) + 0.25 \cdot (4, 2) = (0.75 \cdot 0 + 0.25 \cdot 4,\ 0.75 \cdot 0 + 0.25 \cdot 2) = (1, 0.5)$$</p>
+    <p>目标速度 $x_1 - x_0 = (4, 2) - (0, 0) = (4, 2)$。损失（假设此时 $v_\theta(x_t, t) = (3.5, 2.1)$）：</p>
+    <p>$$\|v_\theta - (x_1 - x_0)\|^2 = (3.5 - 4)^2 + (2.1 - 2)^2 = 0.25 + 0.01 = 0.26$$</p>
+    <p>训练完后 1 步 Euler 复原：$\hat x_1 = x_0 + 1 \cdot v_\theta(x_0, 0) \approx (3.5, 2.1)$。距离真实 $x_1 = (4, 2)$ 的误差约为 $\sqrt{0.25 + 0.01} \approx 0.51$；reflow 之后这个误差会持续下降到接近 0。</p>
+    <p>再看一个交叉的例子说明"为什么 reflow 重要"。考虑两对配对：$(x_0^A, x_1^A) = ((0,0), (4,0))$ 和 $(x_0^B, x_1^B) = ((0,2), (4,2))$。在 $t = 0.5$ 时两条路径分别经过 $(2, 0)$ 和 $(2, 1)$，互不相交，速度均为 $(4, 0)$。但若换成"对角配对" $(x_0^A, x_1^B) = ((0,0), (4,2))$ 和 $(x_0^B, x_1^A) = ((0,2), (4,0))$，两条路径在 $(2, 1)$ 处<em>相交</em>，但速度分别是 $(4, 2)$ 和 $(4, -2)$，取平均得到 $(4, 0)$——一个不指向任何真实终点的方向。这正是随机耦合的病态。reflow 后的耦合自动倾向于第一种"平行配对"，避免交叉。</p>
+  </section>
+
+  <section class="concept-pitfalls">
+    <h2>常见误区</h2>
+    <ol>
+      <li><strong>"Rectified Flow 是新模型，跟 Flow Matching 并列"。</strong>反例：训练损失就是 Conditional Flow Matching 的形式，只是把条件路径固定成线性、再叠加 reflow 迭代。SD3 技术报告里直接写的是 "Conditional Flow Matching with linear interpolation path"——Rectified Flow 是它的一个<em>特例加上后处理流程</em>，不是平行的新分支。</li>
+      <li><strong>"训一次就能 1 步采样"。</strong>反例：Liu et al. 报告 CIFAR-10 上 $v^{(1)}$ 单步 FID 高达 378，几乎是噪声水平；$v^{(2)}$ 降到 12.21，$v^{(3)}$ 才接近多步 baseline 的水平。"直" 是 reflow 多轮迭代的产物，不是初次训练的产物。如果你只跑一次训练就期待 1 步采样能用，你会得到一堆灰雾。</li>
+      <li><strong>"reflow 改变了生成分布"。</strong>反例：reflow 的数学保证就是 $\pi_k$ 的两个边缘 $\int \pi_k(x_0, x_1) dx_0 = p_\text{data}$ 与 $\int \pi_k(x_0, x_1) dx_1 = p_\text{noise}$ 始终成立——它只重新分配 $x_0$ 与 $x_1$ 的<em>配对方式</em>，不动两端各自的分布。实测里生成质量不退化、有时还会略升，这是 SD3 选择它作为底座的核心理由。</li>
+    </ol>
+  </section>
+
+  <section class="concept-seealso">
+    <h2>相关概念</h2>
+    <ul>
+      <li><a href="/video-to-notebook/concepts/flow-matching/">Flow Matching</a> — Rectified Flow 是其线性路径特例。</li>
+      <li><a href="/video-to-notebook/concepts/consistency-models">Consistency Models</a> — 另一条少步数路线，对比理解。</li>
+      <li><a href="/video-to-notebook/concepts/probability-flow-ode/">Probability Flow ODE</a> — 弯曲轨迹的代表，反衬"拉直"动机。</li>
+      <li><a href="/video-to-notebook/concepts/ddim/">DDIM</a> — 同样面向加速采样的早期方案。</li>
+    </ul>
+  </section>
+
+  <section class="concept-sources">
+    <h2>来源</h2>
+    <ol>
+      <li><a href="https://www.youtube.com/watch?v=L9nsCHHMv-c&t=4s" target="_blank" rel="noopener">cmu-10799-diffusion-flow · L10 · Distillation, Consistency Models &amp; Flow Maps · (0:04) — 加速推理动机</a></li>
+      <li><a href="https://www.youtube.com/watch?v=L9nsCHHMv-c&t=359s" target="_blank" rel="noopener">cmu-10799-diffusion-flow · L10 · 直接学 t-step 的可行性讨论 · (5:59)</a></li>
+      <li><a href="https://www.youtube.com/watch?v=L9nsCHHMv-c&t=497s" target="_blank" rel="noopener">cmu-10799-diffusion-flow · L10 · t 步训练的计算可行性瓶颈 · (8:17)</a></li>
+    </ol>
+  </section>
+</article>

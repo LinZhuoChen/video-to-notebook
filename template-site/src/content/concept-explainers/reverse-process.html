@@ -1,0 +1,216 @@
+<style>
+/* prefix: rev- */
+.rev-quickref{background:var(--surface-soft);border-left:3px solid var(--module-accent);padding:0.8rem 1rem;border-radius:0 4px 4px 0;margin:1rem 0;font-size:0.92rem;}
+.rev-quickref div{margin:0.3rem 0;}
+.rev-svg{display:block;margin:1.2rem auto;max-width:100%;height:auto;}
+.rev-pitfalls ol{padding-left:1.4rem;} .rev-pitfalls li{margin:0.55rem 0;}
+.rev-source{font-style:italic;color:var(--text-muted);border-left:2px solid var(--border);padding:0.2rem 0.8rem;margin:0.5rem 0;font-size:0.9rem;}
+.rev-callout{background:var(--module-accent-soft);border-left:3px solid var(--module-accent);padding:0.6rem 0.9rem;border-radius:0 4px 4px 0;margin:0.8rem 0;font-size:0.93rem;}
+.rev-why{color:var(--module-accent);font-weight:600;}
+.my-addition{background:var(--accent-soft);border-left:3px solid var(--accent);padding:0.4rem 0.8rem;margin:0.6rem 0;border-radius:0 4px 4px 0;font-size:0.9rem;}
+.rev-controls{display:flex;flex-wrap:wrap;gap:0.4rem;margin:0.8rem 0;}
+.rev-controls button{background:var(--surface-soft);border:1px solid var(--border);color:var(--text);padding:0.35rem 0.7rem;border-radius:4px;cursor:pointer;font-size:0.85rem;font-family:inherit;}
+.rev-controls button.active{background:var(--module-accent);color:var(--surface);border-color:var(--module-accent);}
+#rev-readout{background:var(--surface-soft);border:1px solid var(--border);padding:0.8rem 1rem;border-radius:4px;min-height:80px;font-size:0.9rem;}
+.rev-line{display:none;line-height:1.7;}
+.rev-line.cd-active-line{display:block;}
+.rev-param-table{width:100%;border-collapse:collapse;margin:0.8rem 0;font-size:0.88rem;}
+.rev-param-table th,.rev-param-table td{border:1px solid var(--border);padding:0.4rem 0.6rem;text-align:left;}
+.rev-param-table th{background:var(--surface-soft);color:var(--text);}
+@keyframes rev-flow{0%{stroke-dashoffset:60;}100%{stroke-dashoffset:0;}}
+.rev-arrow{stroke-dasharray:6 4;animation:rev-flow 2.4s linear infinite;}
+</style>
+
+<article class="concept-entry">
+  <header class="concept-header">
+    <span class="concept-eyebrow">概念</span>
+    <h1>Reverse Diffusion Process</h1>
+    <p class="concept-tagline">— 从纯噪声开始，沿马尔可夫链一步步把高斯期望"猜回去"。</p>
+  </header>
+
+  <aside class="rev-quickref">
+    <div><strong>定义</strong> · $p_\theta(x_{t-1}|x_t) = \mathcal{N}(x_{t-1};\,\mu_\theta(x_t,t),\,\Sigma_\theta(x_t,t))$——一条<em>学习得到的</em>高斯马尔可夫链。</div>
+    <div><strong>目标</strong> · $\mu_\theta$ 拟合贝叶斯后验 $q(x_{t-1}|x_t,x_0) = \mathcal{N}(\tilde\mu_t,\tilde\beta_t I)$ 的均值。</div>
+    <div><strong>易错</strong> · 不是"图像减噪声"——是<em>给定 $x_t$ 猜下一个高斯的均值</em>；噪声项 $\sigma_t z$ 必须保留，否则模式坍缩。</div>
+  </aside>
+
+  <section class="concept-intuition">
+    <h2>反偏见开场：它不是"减噪声"，它是一条被贝叶斯钉死的学习链</h2>
+    <p>很多人第一次看 DDPM 的反向过程都会犯同一个错：把它想成"前向加噪、反向减噪"，仿佛是一个可以代数地倒回去的算术运算。这种"加减对称"的图像很顺口，也容易让人在白板上画两个对称的箭头就以为讲清楚了，但<strong>错得彻底</strong>。反向过程不是把 $x_t$ 减掉一段噪声向量得到 $x_{t-1}$；它是<em>从一个学习出来的高斯里采样</em>——这个高斯的均值和方差，都是神经网络 $\theta$ 根据当前带噪样本 $x_t$ 和时间步 $t$ 算出来的：$p_\theta(x_{t-1}|x_t) = \mathcal{N}(x_{t-1};\,\mu_\theta(x_t,t),\,\Sigma_\theta(x_t,t))$。<em>"学习"和"高斯"这两个词同样关键</em>：学习意味着 $\mu_\theta$ 是一个需要训练的函数、不是闭式；高斯意味着即使你拿到了完美的 $\mu_\theta$，每一步反向也仍然是随机的，要从这个高斯里采一个新样本，而不是确定性地得到一个值。</p>
+    <p>Vizuara 的 Dr. Raj 在第三讲一开头就把这件事讲得很直白——他先花了三分钟复习 VAE，再过渡到 diffusion，反复强调"扩散模型的真正目的是<strong>找到底层概率分布</strong>"。他给的画面是：你想生成一只熊猫，熊猫的图像住在某片高维空间里的高概率区域；你从随机噪声出发——也就是站在概率地图上随便一个角落——沿着学到的链一步步"走回"那片高密度区。讲师强调，<em>"走"是随机的</em>，每一步你都站在当前位置 $x_t$，抬头看看周围概率密度往哪个方向涨得最快，然后跨一步，但具体跨到哪个点是带随机性的。</p>
+    <div class="rev-source">「The way diffusion models work is that they start out with noise. So they may start out at some random location in the probability distribution space.」—— Vizuara, Lecture 4 of <em>Diffusion LM</em> series @00:02</div>
+    <p>CMU 10-799 的讲师在第二讲也用类似口径切入：扩散就是"沿前向的反方向走"，但他<em>立刻补充</em>——反方向不是确定的，它是一条<strong>概率链</strong>，每步都从条件高斯采样。这是 lecturer 反复强调的关键："you cannot just invert the forward Markov chain — you have to <em>learn</em> the reverse one, because the reverse transition $q(x_{t-1}|x_t)$ alone is intractable."（无法直接反转前向链，必须学习反向链，因为不带条件的反向转移本身不可解析。）这一句话浓缩了反向过程的整个数学动机：前向 $q$ 是设计好的高斯，反向 $q(x_{t-1}|x_t)$ 在数学上存在却没有闭式表达——所以才需要一个神经网络去近似它的"可解析变种" $q(x_{t-1}|x_t,x_0)$。</p>
+    <p><strong>讲师比喻汇总</strong>（保留双课程视角，不合并、不平均化）：</p>
+    <ul>
+      <li><strong>Vizuara · Dr. Raj</strong>：把反向过程比作"在<em>概率地图</em>上从随机点走回熊猫所在的高密度区"——空间导航式直觉；强调"起点是随机的、目的地是高密度区、路径是逐步收敛的"。他在 Diffusion LM L4 里画了一个二维概率密度图，把熊猫和卡车分别放在两个高斯峰里，让你看到反向过程怎么"流"向其中一个峰。</li>
+      <li><strong>CMU 10-799</strong>：强调反向链是"forward chain 的<em>学习版镜像</em>"，每一步都对应一个 tractable 后验，但需要网络拟合——更偏推导式直觉，少比喻、多公式。讲师在板书上把前向链和反向链画成上下两条平行的箭头流，上面标 $q$、下面标 $p_\theta$，并强调"$q$ 已知不需要学，$p_\theta$ 要学"。</li>
+    </ul>
+    <div class="my-addition">🟡 教材外补充：这两种直觉<em>不矛盾</em>——Vizuara 偏几何（你在概率地图上走），CMU 偏代数（你在拟合一条 Markov 链）。一个高质量的心智模型应当同时持有两者：每一次采样都是"在概率地图上沿着学到的方向跨一步带噪声的随机步"。读 Karras 2022 的 EDM 论文时，你会发现这两种直觉分别对应"score field 几何视角"和"SDE 解算器视角"。</div>
+    <p>在训练里，这件事对应：网络只需在每个时间步 $t$ 学一件事——给定带噪样本 $x_t$，预测条件高斯的均值（或等价地预测噪声 $\epsilon$、或预测原图 $x_0$，三者代数互换）。生成时把这件事重复 $T$ 次（$T$ 通常是 1000，DDIM 可以压到 50 甚至 10）。整个 DDPM 的"复杂数学"——VLB 推导、ELBO 化简、loss 简化——最终都是为了把这一句话坐实：让神经网络<em>每一步只猜一个高斯均值</em>。这种"把一个困难的密度估计问题切成 $T$ 个简单回归问题"的拆解，是反向过程在工程上能跑通的核心原因——也解释了为什么 diffusion 在大模型时代比 GAN/VAE 更鲁棒：每一步监督信号都明确、训练目标稳定，没有 mode collapse、没有 posterior collapse。</p>
+  </section>
+
+  <section class="concept-deepdive">
+    <h2>从前向定义出发：为什么反向也是高斯</h2>
+    <p>前向过程是<em>给定的、不学的</em>——它由人工设计的 $\beta$ 调度完全决定，每一步都加一点高斯噪声：$q(x_t|x_{t-1}) = \mathcal{N}(x_t;\sqrt{1-\beta_t}x_{t-1},\beta_t I)$。这条链有一个常被忽略却极重要的"奇迹"：<em>当 $\beta_t$ 足够小时，反向条件 $q(x_{t-1}|x_t)$ 也近似是高斯</em>。这是 Sohl-Dickstein 2015 那篇原始论文（"Deep Unsupervised Learning using Nonequilibrium Thermodynamics"）的核心数学事实，DDPM 完全建立在这个事实之上。如果这个性质不成立，反向网络就必须输出比高斯更复杂的分布族（例如混合高斯、normalizing flow），整个 DDPM 框架会复杂数倍。</p>
+    <p class="rev-why"><strong>Why 它是高斯</strong>：单步加噪是线性高斯变换，逆过程在<em>小步长极限</em>下保持高斯族；如果你一步从 $x_0$ 直接跳到 $x_T$（即 $\beta$ 取得很大、只用一两步），逆过程就不再是高斯——会变成多峰、长尾的复杂分布。所以反向用高斯参数化的<em>前提</em>是前向 $\beta_t$ 的"小步长"假设。这也是为什么 DDPM 通常用 $T=1000$ 步：步数越多，每步 $\beta$ 越小，反向高斯近似越精确。DDIM 之所以能压到 50 步而不掉质量，是因为它换了非马尔可夫的视角、不再依赖这个小步长假设。</p>
+
+    <h2>关键武器：以 $x_0$ 为条件的<em>可解析</em>后验</h2>
+    <p>无条件的 $q(x_{t-1}|x_t)$ 在数学上完全确定，但<em>不可解析</em>——它要求对所有可能的 $x_0$ 做边缘化积分 $\int q(x_{t-1}|x_t,x_0)q(x_0|x_t)dx_0$，而 $q(x_0|x_t)$ 涉及整个数据分布，没有闭式。这是反向过程"必须学习"的根本原因。但只要你<strong>额外条件在 $x_0$ 上</strong>，后验就有干净的闭式：</p>
+    <p>$$q(x_{t-1}|x_t,x_0) = \mathcal{N}\big(x_{t-1};\,\tilde\mu_t(x_t,x_0),\,\tilde\beta_t I\big)$$</p>
+    <p>其中：</p>
+    <p>$$\tilde\mu_t(x_t,x_0) = \frac{\sqrt{\bar\alpha_{t-1}}\beta_t}{1-\bar\alpha_t}x_0 + \frac{\sqrt{\alpha_t}(1-\bar\alpha_{t-1})}{1-\bar\alpha_t}x_t,\qquad \tilde\beta_t = \frac{1-\bar\alpha_{t-1}}{1-\bar\alpha_t}\beta_t$$</p>
+    <p>这里 $\alpha_t = 1-\beta_t$、$\bar\alpha_t = \prod_{s\le t}\alpha_s$ 是常见的缩写记号，几乎所有 diffusion 论文都沿用。<strong>这是反向过程的"地面真值"</strong>：训练目标就是让网络输出的 $\mu_\theta(x_t,t)$ 接近 $\tilde\mu_t(x_t,x_0)$；而 VLB 推导出来的 KL 项 $\mathrm{KL}(q(x_{t-1}|x_t,x_0)\|p_\theta(x_{t-1}|x_t))$ 在两个高斯之间就退化为简单的均值差平方——这就是 DDPM 的"simple loss" 最终长得像 $\|\hat\epsilon - \epsilon\|^2$ 的源头。</p>
+    <p class="rev-why"><strong>Why 要引入 $x_0$ 这个"作弊条件"</strong>：训练时我们手里有真实 $x_0$（数据集里直接取），所以可以用 Bayes 把 $q(x_{t-1}|x_t,x_0)$ 推成可解析的高斯；推断时没有 $x_0$，于是用 $x_0 \approx x_{0,\theta}(x_t)$ 替换，等价于让网络<em>隐式</em>预测 $x_0$。这个"训练时有 $x_0$、推断时网络猜 $x_0$"的不对称，是 diffusion 区别于 flow matching 的关键设计——FM 在两端都不需要这种作弊。</p>
+
+    <div class="rev-callout">🔑 <strong>Bayes 推导骨架</strong>：$q(x_{t-1}|x_t,x_0) \propto q(x_t|x_{t-1})\,q(x_{t-1}|x_0)$（注意分母 $q(x_t|x_0)$ 与 $x_{t-1}$ 无关，被吸进比例常数）。右边两项都是已知高斯：$q(x_t|x_{t-1}) = \mathcal{N}(\sqrt{\alpha_t}x_{t-1},\beta_t I)$，$q(x_{t-1}|x_0) = \mathcal{N}(\sqrt{\bar\alpha_{t-1}}x_0,(1-\bar\alpha_{t-1})I)$。乘起来后把指数项展开、对 $x_{t-1}$ 配方（complete the square），就得到上面的 $\tilde\mu_t,\tilde\beta_t$。两个高斯之积仍是高斯——这是为什么反向链"恰好"也是高斯，纯粹由前向的线性高斯结构推出来，不是巧合。整套推导大约 5 行代数，建议读者亲手做一次。</div>
+
+    <h2>三种等价参数化：$\mu_\theta \leftrightarrow \epsilon_\theta \leftrightarrow x_{0,\theta}$</h2>
+    <p>DDPM (Ho 2020) 的关键观察：直接让网络输出 $\mu_\theta$ 训练不稳——因为 $\mu_\theta$ 的尺度依赖于 $t$、$\bar\alpha_t$，不同时间步的预测目标尺度差异巨大。但因为前向有闭式 $x_t = \sqrt{\bar\alpha_t}x_0 + \sqrt{1-\bar\alpha_t}\epsilon$，可以把 $\mu_\theta$ 重写成只依赖噪声预测 $\epsilon_\theta(x_t,t)$ 的形式：</p>
+    <p>$$\mu_\theta(x_t,t) = \frac{1}{\sqrt{\alpha_t}}\Big(x_t - \frac{\beta_t}{\sqrt{1-\bar\alpha_t}}\epsilon_\theta(x_t,t)\Big)$$</p>
+    <p>同样可以让网络直接预测 $x_{0,\theta}$，三者之间的转换关系：</p>
+    <table class="rev-param-table">
+      <thead><tr><th>参数化</th><th>网络输出</th><th>从 $x_t$ 反推</th><th>实践偏好</th></tr></thead>
+      <tbody>
+        <tr><td>$\mu$-pred</td><td>$\mu_\theta(x_t,t)$</td><td>直接得到 $x_{t-1}$ 的均值</td><td>原始 VLB，少用</td></tr>
+        <tr><td>$\epsilon$-pred</td><td>$\epsilon_\theta(x_t,t)$</td><td>$x_{0,\theta} = (x_t - \sqrt{1-\bar\alpha_t}\epsilon_\theta)/\sqrt{\bar\alpha_t}$</td><td>DDPM 默认</td></tr>
+        <tr><td>$x_0$-pred</td><td>$x_{0,\theta}(x_t,t)$</td><td>$\epsilon_\theta = (x_t - \sqrt{\bar\alpha_t}x_{0,\theta})/\sqrt{1-\bar\alpha_t}$</td><td>低 SNR 时更稳</td></tr>
+      </tbody>
+    </table>
+    <p class="rev-why"><strong>Why 等价</strong>：因为前向公式 $x_t = \sqrt{\bar\alpha_t}x_0 + \sqrt{1-\bar\alpha_t}\epsilon$ 是确定性可逆的——只要知道任一者，就可以代数地推出另两者。三种 loss 在期望意义下等价，但<em>梯度尺度</em>不同，所以训练表现差异很大（见 v-prediction、SNR-weighted loss 的讨论）。</p>
+
+    <div class="my-addition">🟡 教材外补充：Salimans & Ho 2022 又提出第四种 $v$-prediction：$v = \sqrt{\bar\alpha_t}\epsilon - \sqrt{1-\bar\alpha_t}x_0$。它在 $t \to 0$ 时退化为 $\epsilon$、$t \to T$ 时退化为 $-x_0$，把整条链的信噪比"均化"。Stable Diffusion 3、PixArt-α 都用它。</div>
+
+    <h2>方差：固定 vs 学习</h2>
+    <p>DDPM 把 $\Sigma_\theta$ 直接<strong>固定</strong>为 $\sigma_t^2 I$，两种常见选择：$\sigma_t^2 = \beta_t$（对应 $x_0 \sim \mathcal{N}(0,I)$ 的上界）或 $\sigma_t^2 = \tilde\beta_t$（对应 $x_0$ 是确定值的下界）。Ho 在论文里实验过两者，差别很小——这是个相当"宽容"的设计选择。Improved DDPM (Nichol & Dhariwal 2021) 把方差也学出来：让网络多输出一个插值系数 $v \in [0,1]$，构造 $\Sigma_\theta = \exp(v\log\beta_t + (1-v)\log\tilde\beta_t)$——log 空间插值是为了数值稳定。这能让 NLL 显著下降（约 0.1–0.2 bits/dim），但样本视觉质量提升很小，所以工程上很多 codebase 仍保留固定方差的简洁性。</p>
+    <div class="my-addition">🟡 教材外补充：Karras 2022 (EDM) 完全抛弃了"学方差"这条线，转而提出统一的 $\sigma$ 参数化——把扩散过程改写成连续 SDE，用 $\sigma$（噪声水平）而非离散 $t$ 作为时间轴，反向方差直接由解算器（Euler、Heun）的局部步长决定。这是当前 SOTA 图像生成（如 Imagen 2、SD3）的事实标准。</div>
+
+    <h2>网络架构：U-Net + 正弦时间嵌入</h2>
+    <p>反向网络几乎都用 U-Net：encoder 下采样、bottleneck、decoder 上采样 + skip connection。这种"沙漏"结构特别适合 dense prediction 任务——而反向过程的每一步本质上就是个 dense prediction（输入一张图、输出同尺寸的噪声预测或均值预测）。<em>关键不同点</em>（这是 diffusion U-Net 区别于分割 U-Net 的地方）：每个 ResBlock 里都注入<strong>时间嵌入</strong> $\tau(t)$。$\tau$ 用正弦位置编码（和 Transformer 一样）再过两层 MLP，得到一个 $d$ 维向量，然后通过 AdaGN 或简单的 channel-wise 加法注入每一层：</p>
+    <p>$$\tau(t) = \mathrm{MLP}\big([\sin(\omega_1 t),\cos(\omega_1 t),\ldots,\sin(\omega_d t),\cos(\omega_d t)]\big),\quad \omega_k = 10000^{-2k/d}$$</p>
+    <p class="rev-why"><strong>Why 时间嵌入必要</strong>：同一个 U-Net 要在 $T=1000$ 个不同噪声尺度上都能"猜对"——$t=1$ 时输入几乎是干净图、$t=T$ 时输入几乎是纯噪声，两个任务在统计上差异巨大。没有 $\tau(t)$ 网络就不知道当前噪声多重，等于让同一个去噪器闭眼处理 1000 种不同噪声强度的输入却必须共享所有权重。文献里有人尝试每个 $t$ 训一个独立网络（multi-network DDPM），代价是参数量乘 1000 倍且每个网络数据稀疏，效果远不如 single-net + time embedding 这种"用条件输入<em>软共享</em>权重"的方案。</p>
+    <h2>采样算法：迭代 T 步反向链</h2>
+    <p>训练完成后，生成图像的算法非常简洁——这是 Ho 2020 Algorithm 2 的全部内容：</p>
+    <ol>
+      <li>初始化：$x_T \sim \mathcal{N}(0, I)$，<em>从标准高斯采一张"纯噪声图"作为起点</em>。</li>
+      <li>循环 $t = T, T-1, \ldots, 1$：
+        <ul>
+          <li>用网络算 $\hat\epsilon = \epsilon_\theta(x_t, t)$；</li>
+          <li>由此构造 $\mu_\theta(x_t, t) = \frac{1}{\sqrt{\alpha_t}}(x_t - \frac{\beta_t}{\sqrt{1-\bar\alpha_t}}\hat\epsilon)$；</li>
+          <li>若 $t > 1$，采 $z \sim \mathcal{N}(0, I)$，否则 $z = 0$；</li>
+          <li>$x_{t-1} = \mu_\theta(x_t, t) + \sigma_t z$。</li>
+        </ul>
+      </li>
+      <li>返回 $x_0$ —— 这就是生成的图像。</li>
+    </ol>
+    <p>整个过程<strong>无任何梯度计算</strong>，只是 $T$ 次前向 inference。对 $T=1000$、512×512 的图像，单卡 A100 大约要 30 秒——这就是 diffusion 慢的根本原因，也是 DDIM、Consistency Models、distillation 这一系列后续工作的动机。值得强调：训练和推断这两端的计算结构完全不同——训练时随机选 $t$、单步 forward + backward、不需要采样链；推断时则要把所有 $t$ 串成一条采样链、纯 forward、无 backward。这种"训练单步、推断多步"的不对称，是 diffusion 区别于 GAN/VAE 的最大工程特征，也直接决定了它的部署成本曲线。</p>
+
+    <svg class="rev-svg" viewBox="0 0 600 220" role="img" aria-label="反向扩散马尔可夫链：从 x_T 到 x_0 的箭头流">
+      <defs>
+        <marker id="rev-arrowhead" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--module-accent)"/>
+        </marker>
+      </defs>
+      <g font-family="ui-sans-serif" font-size="11" fill="var(--text)">
+        <!-- forward arrows (top, faint) -->
+        <text x="20" y="30" fill="var(--text-muted)" font-size="10">前向 q（已知、加噪）</text>
+        <path d="M 90 50 L 165 50" stroke="var(--text-faint)" stroke-width="1.2" fill="none" marker-end="url(#rev-arrowhead)"/>
+        <path d="M 195 50 L 270 50" stroke="var(--text-faint)" stroke-width="1.2" fill="none" marker-end="url(#rev-arrowhead)"/>
+        <text x="320" y="55" fill="var(--text-faint)" font-size="14">···</text>
+        <path d="M 350 50 L 425 50" stroke="var(--text-faint)" stroke-width="1.2" fill="none" marker-end="url(#rev-arrowhead)"/>
+        <path d="M 455 50 L 530 50" stroke="var(--text-faint)" stroke-width="1.2" fill="none" marker-end="url(#rev-arrowhead)"/>
+
+        <!-- chain dots -->
+        <circle cx="75" cy="110" r="22" fill="var(--module-accent-soft)" stroke="var(--module-accent)"/>
+        <text x="75" y="115" text-anchor="middle" font-weight="600">x₀</text>
+        <text x="75" y="150" text-anchor="middle" font-size="10" fill="var(--text-muted)">真实图像</text>
+
+        <circle cx="180" cy="110" r="22" fill="var(--surface-soft)" stroke="var(--border)"/>
+        <text x="180" y="115" text-anchor="middle">x₁</text>
+
+        <circle cx="285" cy="110" r="22" fill="var(--surface-soft)" stroke="var(--border)"/>
+        <text x="285" y="115" text-anchor="middle">x₂</text>
+
+        <text x="370" y="115" font-size="18" fill="var(--text-muted)">···</text>
+
+        <circle cx="440" cy="110" r="22" fill="var(--surface-soft)" stroke="var(--border)"/>
+        <text x="440" y="115" text-anchor="middle">x_{T-1}</text>
+
+        <circle cx="545" cy="110" r="22" fill="var(--module-accent-soft)" stroke="var(--module-accent)"/>
+        <text x="545" y="115" text-anchor="middle" font-weight="600">x_T</text>
+        <text x="545" y="150" text-anchor="middle" font-size="10" fill="var(--text-muted)">N(0, I)</text>
+
+        <!-- reverse arrows (bottom, animated, prominent) -->
+        <path d="M 525 175 L 460 175" stroke="var(--module-accent)" stroke-width="2" fill="none" marker-end="url(#rev-arrowhead)" class="rev-arrow"/>
+        <path d="M 420 175 L 350 175" stroke="var(--module-accent)" stroke-width="2" fill="none" marker-end="url(#rev-arrowhead)" class="rev-arrow"/>
+        <text x="320" y="180" font-size="14" fill="var(--module-accent)">···</text>
+        <path d="M 305 175 L 200 175" stroke="var(--module-accent)" stroke-width="2" fill="none" marker-end="url(#rev-arrowhead)" class="rev-arrow"/>
+        <path d="M 160 175 L 95 175" stroke="var(--module-accent)" stroke-width="2" fill="none" marker-end="url(#rev-arrowhead)" class="rev-arrow"/>
+        <text x="310" y="205" text-anchor="middle" fill="var(--module-accent)" font-size="11" font-weight="600">反向 p_θ（学习、去噪）：x_T → x_0</text>
+      </g>
+    </svg>
+  </section>
+
+  <section class="concept-interact">
+    <p>下方按钮把反向链的<strong>单步采样</strong>展开成等式链。<strong>不变量</strong>：无论用哪种参数化，最终都给出同一个 $\mu_\theta$；噪声项 $\sigma_t z$ 在 $t>1$ 时保留、$t=1$ 时设 0。</p>
+    <div class="rev-controls">
+      <button data-step="0" class="active">① 网络预测 $\epsilon_\theta$</button>
+      <button data-step="1">② 推 $x_{0,\theta}$</button>
+      <button data-step="2">③ 算 $\mu_\theta$</button>
+      <button data-step="3">④ 加噪声采 $x_{t-1}$</button>
+    </div>
+    <div id="rev-readout">
+      <div class="rev-line cd-active-line" data-line="0">输入：$(x_t, t)$，U-Net 输出 $\hat\epsilon = \epsilon_\theta(x_t, t)$。这是<em>唯一</em>需要学习的量。</div>
+      <div class="rev-line" data-line="1">$x_{0,\theta} = \dfrac{x_t - \sqrt{1-\bar\alpha_t}\,\hat\epsilon}{\sqrt{\bar\alpha_t}}$ —— 用前向公式反推"网络认为的原图"。</div>
+      <div class="rev-line" data-line="2">$\mu_\theta = \dfrac{\sqrt{\bar\alpha_{t-1}}\beta_t}{1-\bar\alpha_t}x_{0,\theta} + \dfrac{\sqrt{\alpha_t}(1-\bar\alpha_{t-1})}{1-\bar\alpha_t}x_t$ —— 代入贝叶斯后验均值公式。</div>
+      <div class="rev-line" data-line="3">$x_{t-1} = \mu_\theta + \sigma_t z,\ z\sim\mathcal{N}(0,I)$。<strong>$t=1$ 时 $z = 0$</strong>，否则会污染最终图。</div>
+    </div>
+    <script>
+    (function () {
+      const btns = document.querySelectorAll('.rev-controls button');
+      const lines = document.querySelectorAll('#rev-readout .rev-line');
+      function show(step) {
+        btns.forEach(b => b.classList.toggle('active', +b.dataset.step === step));
+        lines.forEach(l => l.classList.toggle('cd-active-line', +l.dataset.line === step));
+      }
+      btns.forEach(b => b.addEventListener('click', () => show(+b.dataset.step)));
+      show(0);
+    })();
+    </script>
+  </section>
+
+  <section class="concept-example">
+    <h2>手算一步反向采样（$T=4$ 玩具例子）</h2>
+    <p>为了让读者真正能拿笔跟着算，下面用一个极简的 $T=4$ 玩具例子走一步完整的反向采样。用线性 $\beta$ 调度：$\beta_1=0.1, \beta_2=0.2, \beta_3=0.3, \beta_4=0.4$。则 $\alpha = (0.9, 0.8, 0.7, 0.6)$，$\bar\alpha = (0.9,\,0.9\cdot 0.8,\,0.9\cdot 0.8\cdot 0.7,\,\ldots) = (0.9, 0.72, 0.504, 0.3024)$。现在我们从 $t=2$ 反向走一步到 $t=1$。设当前 $x_2 = 1.0$（一维标量代替图像，便于手算），网络预测 $\hat\epsilon = 0.5$。</p>
+    <p>第 1 步（从 $\hat\epsilon$ 推 $x_{0,\theta}$）：$x_{0,\theta} = (x_t - \sqrt{1-\bar\alpha_t}\,\hat\epsilon)/\sqrt{\bar\alpha_t} = (1.0 - \sqrt{1-0.72}\cdot 0.5)/\sqrt{0.72} = (1.0 - \sqrt{0.28}\cdot 0.5)/0.8485 = (1.0 - 0.5292\cdot 0.5)/0.8485 = (1.0 - 0.2646)/0.8485 = 0.866$。</p>
+    <p>第 2 步（代入贝叶斯后验均值）：$\mu_\theta = \dfrac{\sqrt{\bar\alpha_{t-1}}\beta_t}{1-\bar\alpha_t}x_{0,\theta} + \dfrac{\sqrt{\alpha_t}(1-\bar\alpha_{t-1})}{1-\bar\alpha_t}x_t = \dfrac{\sqrt{0.9}\cdot 0.2}{1-0.72}\cdot 0.866 + \dfrac{\sqrt{0.8}\cdot(1-0.9)}{1-0.72}\cdot 1.0$</p>
+    <p>$= \dfrac{0.9487\cdot 0.2}{0.28}\cdot 0.866 + \dfrac{0.8944\cdot 0.1}{0.28}\cdot 1.0 = 0.6776\cdot 0.866 + 0.3194\cdot 1.0 = 0.5868 + 0.3194 = 0.9062$。</p>
+    <p>第 3 步（采样得到 $x_1$）：$\tilde\beta_2 = \dfrac{1-\bar\alpha_{t-1}}{1-\bar\alpha_t}\beta_t = \dfrac{1-0.9}{1-0.72}\cdot 0.2 = \dfrac{0.1}{0.28}\cdot 0.2 = 0.0714$，$\sigma_2 = \sqrt{0.0714} = 0.267$。取一个随机抽样 $z = 0.3$（标准正态采样），则 $x_1 = \mu_\theta + \sigma_2 z = 0.9062 + 0.267\cdot 0.3 = 0.986$。</p>
+    <p>注意几个有教学意义的细节：（1）$x_1$ 比 $x_2$ 略低，因为 $\mu_\theta$ 把 $x_t$ 往"网络猜的 $x_0$"方向轻微拉；（2）方差 $\tilde\beta_2 = 0.0714$ 比前向 $\beta_2 = 0.2$ 小很多——反向后验比前向边缘<em>窄</em>，这就是"链越靠近 $x_0$，越确定"的体现；（3）下一步如果继续走到 $t=0$（即从 $t=1$ 走到 $x_0$），按 DDPM 规定 $z = 0$，不再加噪声项，所以 $x_0 = \mu_\theta(x_1, 1)$ 是确定的。整个 $T=4$ 反向链走完，你就得到一张"生成的"标量"图"。</p>
+  </section>
+
+  <section class="concept-pitfalls">
+    <h2>常见误区</h2>
+    <ol>
+      <li><strong>"反向过程就是把前向加的噪声减回去"。</strong>反例：前向公式是 $x_t = \sqrt{\alpha_t}x_{t-1} + \sqrt{\beta_t}\epsilon$，"减回去"听上去意味着 $x_{t-1} = (x_t - \sqrt{\beta_t}\epsilon)/\sqrt{\alpha_t}$——但你<em>不知道前向当时采的那个具体 $\epsilon$</em>；训练时被采的噪声样本早就在 forward pass 里"用完"了，推断时拿到的只是 $x_t$。所以你只能从学到的高斯 $p_\theta$ 里采样。具体地，DDPM 的 $\mu_\theta$ 还乘了 $\beta_t/(1-\bar\alpha_t)$ 这个修正因子，不是简单代数地"除回去"，对应 $t=2$ 玩具例子里的 0.6776 系数。</li>
+      <li><strong>"最后一步也要加噪声 $\sigma_t z$"。</strong>反例：取 $t=1, \sigma_1 \approx 0.316$（用 $\beta_1=0.1$ 的玩具值），如果末步不把 $z$ 强制设为 0，最终输出 $x_0$ 会有显著高斯抖动——在 CIFAR-10 上做实验，FID 会差 2-3 个点；视觉上能看到背景区域出现"沙粒"。Ho 2020 Algorithm 2 第 4 行明确写 <code>z = 0 if t == 1</code>，这是常被新手实现 DDPM 时忘掉的一行。</li>
+      <li><strong>"$\epsilon$-prediction 和 $x_0$-prediction 在所有 $t$ 都同样好"。</strong>反例：$t \to T$（$\bar\alpha_t \to 0$）时，$x_t$ 几乎是纯高斯噪声，$\epsilon$-pred 的目标几乎就是输入本身（trivial 任务），但 $x_0$-pred 要从近乎随机的输入里猜出干净的真图——loss 方差极大、训练困难。$t \to 0$ 时则完全相反：$\epsilon$-pred 要从近乎干净的图里抽出微小噪声、信噪比反而难，$x_0$-pred 退化为近乎恒等映射、几乎免费学。这就是 Salimans & Ho 的 $v$-prediction 被发明的根本原因——把 SNR 在整条链上"均化"。</li>
+    </ol>
+  </section>
+
+  <section class="concept-seealso">
+    <h2>相关概念</h2>
+    <ul>
+      <li><a href="/video-to-notebook/concepts/ddpm/">DDPM</a></li>
+      <li><a href="/video-to-notebook/concepts/forward-process/">Forward Diffusion Process</a></li>
+    </ul>
+  </section>
+
+  <section class="concept-sources">
+    <h2>来源</h2>
+    <ol>
+      <li><a href="https://www.youtube.com/watch?v=Dx-1agEjlJs&t=5s" target="_blank" rel="noopener">diffusion-principles-vizuara · L3 · Introduction to Diffusion Models (DDPM) · (0:05)</a></li>
+      <li><a href="https://www.youtube.com/watch?v=H-RbhdiWzto&t=3s" target="_blank" rel="noopener">cmu-10799-diffusion-flow · L2 · Denoising Diffusion Models · (0:03)</a></li>
+      <li><a href="https://www.youtube.com/watch?v=rngYBa46AXY&t=2s" target="_blank" rel="noopener">diffusion-lm-vizuara · L4 · How Diffusion Models Work for Image Generation · (0:02)</a></li>
+    </ol>
+  </section>
+</article>

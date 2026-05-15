@@ -1,0 +1,237 @@
+<style>
+/* prefix: vd- */
+.vd-quickref{background:var(--surface-soft);border-left:3px solid var(--module-accent);padding:0.8rem 1rem;border-radius:0 4px 4px 0;margin:1rem 0;font-size:0.92rem;}
+.vd-quickref div{margin:0.3rem 0;}
+.vd-svg{display:block;margin:1.2rem auto;max-width:100%;height:auto;}
+.vd-pitfalls ol{padding-left:1.4rem;} .vd-pitfalls li{margin:0.5rem 0;}
+.vd-source{font-style:italic;color:var(--text-muted);border-left:2px solid var(--border);padding:0.2rem 0.8rem;margin:0.5rem 0;font-size:0.9rem;}
+.vd-callout-quote{background:var(--module-accent-soft);border-left:3px solid var(--module-accent);padding:0.6rem 1rem;margin:0.8rem 0;border-radius:0 4px 4px 0;font-size:0.93rem;}
+.my-addition{background:var(--surface-soft);border-left:3px solid var(--accent);padding:0.4rem 0.8rem;margin:0.8rem 0;font-size:0.92rem;border-radius:0 4px 4px 0;}
+.vd-recipe-table{width:100%;border-collapse:collapse;margin:1rem 0;font-size:0.9rem;}
+.vd-recipe-table th,.vd-recipe-table td{padding:0.4rem 0.6rem;border:1px solid var(--border);text-align:left;vertical-align:top;}
+.vd-recipe-table th{background:var(--surface-soft);}
+.vd-controls{display:flex;gap:0.4rem;flex-wrap:wrap;margin:0.6rem 0;}
+.vd-controls button{padding:0.4rem 0.8rem;border:1px solid var(--border);background:var(--surface);color:var(--text);border-radius:4px;cursor:pointer;font-size:0.88rem;}
+.vd-controls button.active{background:var(--module-accent);color:var(--surface);border-color:var(--module-accent);}
+#vd-readout{min-height:80px;padding:0.6rem 0.8rem;background:var(--surface-soft);border-radius:4px;margin-top:0.6rem;font-size:0.9rem;}
+.vd-line{display:none;}
+.vd-line.vd-active-line{display:block;}
+</style>
+
+<article class="concept-entry">
+  <header class="concept-header">
+    <span class="concept-eyebrow">概念</span>
+    <h1>Video Diffusion</h1>
+    <p class="concept-tagline">— 不是「图像扩散乘 T 帧」；时间一致性需要结构性改造。</p>
+  </header>
+
+  <aside class="vd-quickref">
+    <div><strong>定义</strong> · 用扩散/流匹配生成视频的模型——在去噪网络里加入时间维度的处理（temporal attention / 3D conv / spacetime patches）。</div>
+    <div><strong>公式</strong> · 与图像扩散同构：$\mathcal{L} = \mathbb{E}_{t, x_0, \epsilon}\|u_\theta(x_t, t) - u_t\|^2$，只是 $x \in \mathbb{R}^{T \times H \times W \times C}$ 多了时间维。</div>
+    <div><strong>易错</strong> · 不是「每帧独立跑一遍图像扩散」——独立采样的相邻帧不连贯，必须建模时间相关性。</div>
+  </aside>
+
+  <section class="concept-intuition">
+    <p>很多人以为 video diffusion 就是「把图像扩散重复 T 次、每帧生成一张图、再拼起来」。<strong>这是错的</strong>。如果真的逐帧独立采样，相邻帧之间的角色五官、衣服颜色、背景树叶位置都会随机抖动——没有任何机制保证「第 t 帧的猫」和「第 t+1 帧的猫」是同一只猫。这种逐帧独立的做法在 2022 年之前确实有人尝试过，结果是视频里的物体每隔几帧就「变身」一次，连最基本的物理直觉都没有。<em>时间一致性（temporal coherence）需要结构性改造</em>：让网络在去噪时同时看到所有帧，并在帧之间传递信息——本质上是把生成的随机变量从「一张图」升级为「一段时空体」。</p>
+
+    <p>第二个常见误解是「视频扩散应该有完全不同的损失函数」。这也是错的。CMU 10799 第 11 讲请来了 Luma AI 的 Linqi (Alex) Zhou 做客座讲座。他在开场就肯定了一个事实：今天市面上几乎所有 text-to-video 模型背后的核心技术，都是你们已经学过的 diffusion + flow matching——只是数据维度升了一档。</p>
+
+    <div class="vd-callout-quote">「过去五年里，diffusion models 和 flow matching 主导了视觉生成 AI——既出现了 GPT-4o image、Nano Banana、Midjourney、Flux 这样强大的 text-to-image 模型，也出现了我们 Luma 在做的、专攻真实感（realism）的 text-to-video 模型。<strong>当下市面上几乎所有 text-to-video 模型，背后都是你们学过的这些技术。</strong>」<br>—— Linqi Zhou, CMU 10799 L11 @01:36</div>
+
+    <p>他播放 Luma 最新视频模型 R3 的样片时，还自嘲了一下「视频好像没播放好，有点 jitter」——但即便如此，从样片里依然能看到流畅的人物动作和角色动画（character animation）。这正好暗示了 video diffusion 的两个评价维度：<strong>motion 是否真实、character 是否一致</strong>。前者要求模型懂物理；后者要求模型懂「同一性」（identity）。</p>
+
+    <p>Alex 紧接着强调了「问题」：扩散模型在推理时要解一条概率流 ODE，需要许多步才能采样准确——他原话是 you will still need many many steps to simulate the OD accurately。视频比图像更大、更慢——一段几秒钟的 720p 视频，潜空间维度可能是图像的几十倍，单步前向就比图像贵几十倍。这就把 video diffusion 的真正难题摆了出来：<strong>不仅要建模时间，还要算得起、跑得动</strong>。这也是为什么 Luma 整个研究路线（inductive moment matching、terminal velocity matching）都在追求「one or few step sampling」——视频场景下，把 50 步压到 4 步意味着用户体验从「等一分钟」变成「等几秒」。</p>
+
+    <p>在训练里，video diffusion 对应这件事：把训练数据从 $(H, W, C)$ 的图像换成 $(T, H, W, C)$ 的视频张量，把去噪网络从 2D U-Net 改造成能处理时间维的网络，把损失函数原封不动地用 L2。架构的差异不在「学什么」，而在「网络如何在张量内部传播时间信息」。</p>
+  </section>
+
+  <section class="concept-deepdive">
+    <h2>三种主流架构配方</h2>
+
+    <p>把「图像扩散」推广到「视频扩散」，工程上有三条主流路径。三者解决的本质问题相同（如何让网络看到时间维），但归纳偏置、训练成本和能力上限差别很大。下面这张表给出结构对比，下文逐一拆解。</p>
+
+    <div class="my-addition">🟡 教材外补充：CMU L11 的客座讲座聚焦于 Luma 在推理加速（inductive moment matching、terminal velocity matching）上的研究，并未系统讲解 video diffusion 的三种架构。下面三种 recipe（Ho 2022、AnimateDiff、Sora）是为了让你对 video diffusion 这个概念有完整的图景所做的补充——三个工作分别代表了 2022、2023、2024 三个阶段的主流设计思路，理解它们的演化能帮你判断「下一步会怎么走」。</div>
+
+    <table class="vd-recipe-table">
+      <thead><tr><th>配方</th><th>代表工作</th><th>核心做法</th><th>代价 / 限制</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><strong>3D U-Net + temporal attention</strong></td>
+          <td>Video Diffusion Models (Ho 2022)<br>Stable Video Diffusion (2023)<br>Gen-2 (Runway)</td>
+          <td>2D 空间卷积 + 时间注意力层；直接在 $(T, H, W, C)$ 张量上去噪</td>
+          <td>compute 随 $T$ 线性甚至更高阶上升；短片（&lt; 4s）效果最佳</td>
+        </tr>
+        <tr>
+          <td><strong>Image-as-frame + motion module</strong></td>
+          <td>AnimateDiff (2023)<br>EmuVideo (Meta)</td>
+          <td>冻结预训练 image diffusion，在其上新加一个 motion module 学时间相关性</td>
+          <td>训练便宜；时间一致性中等；可复用 LoRA / DreamBooth 等图像生态</td>
+        </tr>
+        <tr>
+          <td><strong>Joint spacetime latent</strong></td>
+          <td>Sora (OpenAI 2024)<br>Veo (Google)<br>Luma Dream Machine / R3</td>
+          <td>3D VAE 把 $(T, H, W, C)$ 压成 $(T', H', W', C')$ 的 spacetime patches；diffusion 在 4D 潜空间</td>
+          <td>VAE 训练昂贵；但 patch 化后可生成长视频、变分辨率</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h3>配方 1：3D U-Net with temporal attention</h3>
+    <p>Ho 等人 2022 年的 <em>Video Diffusion Models</em> 是开山之作，随后 Stable Video Diffusion (Stability AI 2023)、Gen-2 (Runway) 都沿用了这条路线。U-Net 里的 2D 空间卷积块照旧，但在每个 block 后新增一层「时间注意力（temporal attention）」——它把张量 reshape 成 $(B \cdot H \cdot W, T, C)$，让每个空间位置上的不同帧互相 attend。换句话说：网络在同一个像素坐标 $(h, w)$ 上，跨时间维度做 self-attention，从而知道「这个位置在第 5 帧应该和第 4、6 帧保持什么样的关系」。<strong>Why</strong>：空间卷积负责「这一帧长什么样」，时间注意力负责「这一帧和别的帧的对应位置怎么关联」——两种归纳偏置正交分工。损失函数依然是 L2，训练目标依然是预测噪声或速度场——Alex 在讲座里特别强调过这点：</p>
+
+    <div class="vd-callout-quote">「最终的 loss 就归结为一个简单的 L2 loss——它非常稳定，扩展到很大参数量也没问题。」<br>—— Linqi Zhou, CMU 10799 L11 @04:13</div>
+
+    <p>工程上的常见做法还包括：先用图像数据预训练空间块，再加入时间块做联合微调；时间维上插入 1D temporal conv 与时间 attention 交替；在条件化阶段把 video FPS 也作为一个额外输入，让模型能生成不同速度的视频。代价是：训练时一个 batch 必须装下整段视频，显存占用随 $T$ 线性上升；推理时单步前向也比图像贵 $T$ 倍。对短片（4 秒、24 帧）效果最好，超过 16 秒就开始捉襟见肘。</p>
+
+    <h3>配方 2：Image-as-frame + motion module</h3>
+    <p>AnimateDiff 的洞察是：既然 Stable Diffusion 这种 image diffusion 已经被训得很好了，为什么要从头训练一个视频模型？做法是<strong>冻结 image diffusion 的权重</strong>，只在每个 transformer block 之间插入一个「motion module」——本质上是一个时间维的 self-attention 层。训练只更新这个 motion module，输入是真实视频；Stable Diffusion 的图像先验完全保留不变。<strong>Why</strong>：图像生成能力来自冻结的 base model；时间一致性来自新加的 motion module——把两种知识解耦后，单独训练后者只需要少量视频数据。</p>
+
+    <p>这样设计的另一个好处是 image diffusion 的所有生态（LoRA、ControlNet、个性化模型）都能直接复用——给某个角色训了 LoRA，AnimateDiff 直接就能让这个角色「动起来」，不需要重新收集这个角色的视频数据。代价是：因为底层 image diffusion 从未见过视频，motion module 必须在「不破坏图像质量」的约束下学会时间一致性，最终的视频在快速运动、复杂物理交互场景下会出现飘移和闪烁。Meta 的 EmuVideo 走的也是类似思路，只是先用 image diffusion 生成一张「关键帧」，再让视频模型从这张关键帧扩展出整段视频。</p>
+
+    <h3>配方 3：Joint spacetime latent（Sora 的路线）</h3>
+    <p>Sora 在 2024 年带火了「spacetime patches」这个说法，Google 的 Veo、Luma 的 Dream Machine / R3 都属于这一路线。流程是：先训一个 <strong>3D VAE</strong>，把 $(T, H, W, C)$ 的原始视频压成 $(T', H', W', C')$ 的低维潜张量（典型压缩比：时间 4×、空间 8×8——一段 16 帧 $512 \times 512$ 的视频可能被压成 $4 \times 64 \times 64$ 的潜张量）；然后把这个 4D 潜张量切成小 patch（例如 $2 \times 2 \times 2$ 的立方体），把所有 patch 展平成一个 token 序列，喂给 diffusion transformer（DiT 风格）。</p>
+
+    <p><strong>Why</strong>：把时间维当成「另一个空间维」处理，让 VAE 在编码阶段就吸收掉帧间冗余（相邻帧本来就很像，压缩比可以很高），diffusion 不再需要专门的「时间注意力」——所有注意力都是统一的 spacetime self-attention，每个 token 都能跨时间和空间任意 attend。这种设计的最大好处是 patch 数量可以根据视频长度和分辨率灵活变化：想生成 10 秒视频就多几个 token，想生成 60 秒就再多几个，网络结构完全不变。这是 Sora 能生成长视频、不同长宽比的根本原因——也是为什么 Sora 报告里强调 spacetime patches 是「OpenAI 的核心贡献」。</p>
+
+    <p>缺点是 3D VAE 的训练昂贵且不稳定：要在重建质量和压缩比之间反复调参，时间维的压缩不当会导致快速运动的视频被「糊掉」。但一旦 VAE 训好，后续 diffusion 阶段的工作量就比配方 1 小得多。</p>
+
+    <h2>训练目标的扩展</h2>
+    <p>从图像到视频，损失函数本身几乎不变。Alex 在 L11 中讲了 flow matching 的通用形式：在 prior 分布 $\pi$ 和数据分布之间存在一个 ground-truth 速度场 $u_t$（slides 里画成红色矢量），ODE 轨迹（蓝线）从噪声出发沿速度场积分到数据；这个 ground truth velocity field 通常没有 closed form，神经网络的任务就是用 L2 回归把它学出来。<strong>视频扩散只是把这个 ODE 搬到更高维空间</strong>：</p>
+
+    $$\mathcal{L}_{\mathrm{video}} = \mathbb{E}_{t, x_0, \epsilon} \big\| u_\theta(x_t, t) - u_t(x_t) \big\|^2, \quad x \in \mathbb{R}^{T \times H \times W \times C}$$
+
+    <p><strong>Why</strong>：高维不改变 L2 loss 的形式，只改变神经网络的参数量和数据吞吐量；速度场仍然是切向量，仍然可以通过 DDIM/Euler sampler 在推理时积分出来。Alex 也指出，扩散模型在推理时间扩展性上「scale very poorly with inference compute」——你给它的 number of steps 少，性能就差；多了才能接近最优。视频场景下这个问题被放大数十倍：因为单步前向就比图像贵几十倍，视频用户不可能像图像那样接受 50 步采样，这才有了 Luma 在 IMM、TVM 这些工作上的努力——他们想把视频生成压到一两步完成，同时保持质量。</p>
+
+    <svg class="vd-svg" viewBox="0 0 600 280" role="img" aria-label="三种视频扩散架构对比：3D U-Net、image-as-frame motion module、spacetime latent">
+      <g font-family="ui-sans-serif" font-size="11" fill="var(--text)">
+        <text x="300" y="18" text-anchor="middle" font-size="13" font-weight="600">三种 video diffusion 配方</text>
+
+        <!-- Recipe 1: 3D U-Net -->
+        <g transform="translate(20, 40)">
+          <text x="80" y="0" text-anchor="middle" font-size="11" font-weight="600">① 3D U-Net + temporal attn</text>
+          <rect x="10" y="20" width="140" height="80" rx="4" fill="var(--module-accent-soft)" stroke="var(--module-accent)"/>
+          <text x="80" y="40" text-anchor="middle" font-size="10">输入: (T, H, W, C)</text>
+          <rect x="20" y="50" width="50" height="20" fill="var(--surface)" stroke="var(--border)"/>
+          <text x="45" y="64" text-anchor="middle" font-size="9">2D conv</text>
+          <rect x="80" y="50" width="60" height="20" fill="var(--accent-soft)" stroke="var(--accent)"/>
+          <text x="110" y="64" text-anchor="middle" font-size="9">temp attn</text>
+          <text x="80" y="90" text-anchor="middle" font-size="9" fill="var(--text-muted)">联合去噪所有帧</text>
+          <text x="80" y="120" text-anchor="middle" font-size="9" fill="var(--red)">代价: T× compute</text>
+        </g>
+
+        <!-- Recipe 2: AnimateDiff -->
+        <g transform="translate(220, 40)">
+          <text x="80" y="0" text-anchor="middle" font-size="11" font-weight="600">② image+motion module</text>
+          <rect x="10" y="20" width="140" height="80" rx="4" fill="var(--module-accent-soft)" stroke="var(--module-accent)"/>
+          <text x="80" y="40" text-anchor="middle" font-size="10">冻结 SD + 插入新模块</text>
+          <rect x="20" y="50" width="50" height="20" fill="var(--text-faint)" stroke="var(--border)" stroke-dasharray="3,2"/>
+          <text x="45" y="64" text-anchor="middle" font-size="9">SD (冻)</text>
+          <rect x="80" y="50" width="60" height="20" fill="var(--accent-soft)" stroke="var(--accent)"/>
+          <text x="110" y="64" text-anchor="middle" font-size="9">motion</text>
+          <text x="80" y="90" text-anchor="middle" font-size="9" fill="var(--text-muted)">仅训 motion 模块</text>
+          <text x="80" y="120" text-anchor="middle" font-size="9" fill="var(--blue)">代价: 时间一致性中等</text>
+        </g>
+
+        <!-- Recipe 3: Sora -->
+        <g transform="translate(420, 40)">
+          <text x="80" y="0" text-anchor="middle" font-size="11" font-weight="600">③ spacetime latent</text>
+          <rect x="10" y="20" width="140" height="80" rx="4" fill="var(--module-accent-soft)" stroke="var(--module-accent)"/>
+          <text x="80" y="40" text-anchor="middle" font-size="10">3D VAE → 4D patches</text>
+          <rect x="20" y="50" width="50" height="20" fill="var(--surface)" stroke="var(--border)"/>
+          <text x="45" y="64" text-anchor="middle" font-size="9">3D VAE</text>
+          <rect x="80" y="50" width="60" height="20" fill="var(--accent-soft)" stroke="var(--accent)"/>
+          <text x="110" y="64" text-anchor="middle" font-size="9">DiT</text>
+          <text x="80" y="90" text-anchor="middle" font-size="9" fill="var(--text-muted)">空时统一 patch</text>
+          <text x="80" y="120" text-anchor="middle" font-size="9" fill="var(--blue)">优势: 长视频可行</text>
+        </g>
+
+        <!-- Common bottom -->
+        <g transform="translate(0, 200)">
+          <line x1="60" y1="0" x2="540" y2="0" stroke="var(--border)" stroke-dasharray="3,3"/>
+          <text x="300" y="20" text-anchor="middle" font-size="11" fill="var(--text-muted)">共同损失：$\mathcal{L} = \|u_\theta - u_t\|^2$（CMU L11 @04:13: 「simple L2 loss」）</text>
+          <text x="300" y="45" text-anchor="middle" font-size="11" fill="var(--text-muted)">条件化方式：text → cross-attn ｜ image-to-video → 首帧 concat ｜ camera → 额外 embedding</text>
+        </g>
+      </g>
+    </svg>
+
+    <h2>条件化（conditioning）</h2>
+    <p>视频扩散的条件化方式继承自图像扩散，但多了几种新形式：</p>
+    <ul>
+      <li><strong>Text → video</strong>：和 Stable Diffusion 一样，文本编码器（CLIP 或 T5）输出的 embedding 通过 cross-attention 注入 U-Net / DiT。每个 token 都能 attend 到文本，所有帧共享同一份文本条件——这是为什么用 prompt 控制视频「主题」很容易，但控制「时间顺序」（先 A 再 B）依然困难。</li>
+      <li><strong>Image-to-video</strong>：首帧（image）通过 concat 或 cross-attention 喂入网络，让模型「从这张静态图开始动起来」。Stable Video Diffusion 就是这条路线，用户给一张图，模型生成接下来的 25 帧。在训练时把视频第一帧拿来作为条件就好——本质上是给模型一个「初值」。</li>
+      <li><strong>Camera-motion conditioning</strong>：把相机的位姿轨迹（pose sequence）编码后注入网络——Stable Video 3D、MotionCtrl 都属于此类。它让用户能指定「镜头向左横移」「环绕物体一周」这种导演意图。技术上是把每一帧对应的 camera pose（外参矩阵）展平成向量，通过 AdaIN 或 cross-attention 注入。</li>
+      <li><strong>Motion conditioning</strong>：除了相机，还可以条件化「场景里物体的运动轨迹」——画一条曲线说「让这个鸟沿这条路径飞」。代表工作是 DragNUWA 和 MotionCtrl 的物体控制部分。</li>
+    </ul>
+
+    <h2>评价指标的难题</h2>
+    <p>video diffusion 比 image diffusion 多了一个评价维度——时间维。常用指标是 <strong>FVD（Fréchet Video Distance）</strong>，它把 I3D 视频分类网络的特征拿出来，计算生成视频和真实视频特征分布的 Fréchet 距离——是 FID 的视频版。但 FVD 对「快速运动 + 闪烁」非常不敏感（因为 I3D 主要看动作类别，不看物理一致性），所有大公司在做产品时都会同时做大规模 <strong>human study</strong>——让人类标注员看 A/B 视频判断哪个更好。Alex 在讲座里也提到 Luma 训练时会引入 RL 和 preference fine-tuning，本质上就是把 human preference 注入训练 loop。</p>
+
+    <h2>与图像扩散的连接</h2>
+    <p>把上面三种配方放在一起看，会发现一条共同的演化线索：<strong>时间维总要被某种方式「吸收」</strong>。在 3D U-Net 路线里，时间维由专门的 temporal attention 层显式处理；在 AnimateDiff 路线里，时间维交给后挂的 motion module；在 Sora 路线里，时间维直接被 3D VAE 折叠进潜空间——之后的 DiT 根本不再「区分」时间和空间。从工程趋势看，越往后走，越倾向于让 VAE 承担时间相关性的压缩，把 diffusion 留在一个更平等的「时空 token」域里。这也意味着，理解了 image diffusion 之后，理解 video diffusion 的额外门槛主要在于「数据张量怎么压、怎么 patch」，而不是「损失函数怎么写」。</p>
+  </section>
+
+  <section class="concept-interact">
+    <p>下面四步对应「video diffusion 一个 forward pass 在做什么」。点击按钮按顺序展开等式链。<strong>不变量</strong>：每一步的 loss 形式始终是 L2（CMU L11 @04:13），只有输入张量的形状从 $(H, W, C)$ 变成了 $(T, H, W, C)$。</p>
+
+    <div class="vd-controls">
+      <button data-step="0" class="active">① 采样</button>
+      <button data-step="1">② 加噪</button>
+      <button data-step="2">③ 预测</button>
+      <button data-step="3">④ L2</button>
+    </div>
+    <div id="vd-readout">
+      <div class="vd-line vd-active-line" data-line="0">$x_0 \sim p_{\text{data}}$，shape $= (T, H, W, C)$，例如 $(16, 64, 64, 4)$ 的潜视频。</div>
+      <div class="vd-line" data-line="1">$x_t = \alpha_t x_0 + \sigma_t \epsilon$，$\epsilon \sim \mathcal{N}(0, I)$。整个 4D 张量统一加噪。</div>
+      <div class="vd-line" data-line="2">$\hat{u} = u_\theta(x_t, t, \text{text}, \text{cam})$。3D U-Net / DiT 跨时间联合处理。</div>
+      <div class="vd-line" data-line="3">$\mathcal{L} = \|\hat{u} - u_t\|^2$。「a simple L2 loss」，与图像扩散同构。</div>
+    </div>
+
+    <script>
+      (function () {
+        const btns = document.querySelectorAll('.vd-controls button');
+        const lines = document.querySelectorAll('#vd-readout .vd-line');
+        function show(step) {
+          btns.forEach(b => b.classList.toggle('active', +b.dataset.step === step));
+          lines.forEach(l => l.classList.toggle('vd-active-line', +l.dataset.line === step));
+        }
+        btns.forEach(b => b.addEventListener('click', () => show(+b.dataset.step)));
+        show(0);
+      })();
+    </script>
+  </section>
+
+  <section class="concept-example">
+    <h2>算一算：3D U-Net 一个 forward pass 的代价</h2>
+    <p>设潜视频形状 $(T, H, W, C) = (16, 64, 64, 4)$。temporal attention 把张量 reshape 成 $(H \cdot W, T, C) = (4096, 16, 4)$，每个空间位置做一次 attention：</p>
+    <p>单次 attention FLOPs $\approx 2 \cdot T^2 \cdot C = 2 \cdot 16^2 \cdot 4 = 2048$ FLOPs/位置。总计 $4096 \cdot 2048 \approx 8.4 \times 10^6$ FLOPs 仅 attention 一项。</p>
+    <p>对比同尺寸 image diffusion（$T=1$）：没有这一项，单层 attention FLOPs 为零。所以仅这一层就把 compute 相对图像版本提升了约 16×；再叠加 U-Net 的多个层级、多个 block，整体「T× compute」的代价就这样累积起来。如果再考虑采样步数（diffusion 通常 25–50 步），生成一段 16 帧潜视频比生成 16 张独立图像贵 16 倍以上——这就是为什么 Luma 要把推理压到一两步、为什么 Sora 要先用 3D VAE 把 $T$ 从 16 压到 4。</p>
+  </section>
+
+  <section class="concept-pitfalls">
+    <h2>常见误区</h2>
+    <ol>
+      <li><strong>「video diffusion = image diffusion × T 次」。</strong>反例：取 Stable Diffusion 对同一个 prompt「a cat walking in a garden」固定种子跑 16 次，把 16 张图拼成视频——你会得到 16 个不同角度、不同光线、甚至不同品种的「猫」。即使把种子固定、噪声步数固定，prompt 描述里没有约束的所有自由度都会随机变动。temporal coherence 必须由网络架构在 forward pass 中显式建模，不可能靠外部采样技巧补救。</li>
+      <li><strong>「时间一致性 = 帧间像素差小」。</strong>反例：让镜头快速横扫，每一对相邻帧像素差可能大到 50%——但视频依然是 coherent 的，因为<em>语义</em>一致（同一只猫，只是位置在变）。反过来，一个抖动严重的静止镜头帧间像素差很小，但人眼立刻能看出「闪烁」。FVD 等指标试图衡量这种语义级时间一致性，而不是 L1/L2 像素差——这也是为什么所有产品级评估都依赖 human study。</li>
+      <li><strong>「Sora 是全新算法的发明」。</strong>反例：Sora 的训练目标依然是 diffusion + L2 loss——Alex 在 CMU L11 的原话「behind pretty much all of these text-to-video models on the market right now are diffusion models and flow matching」。Sora 的创新主要在 spacetime patches 的<em>表示方式</em>（让 patch 数量随视频长度变化）和大规模训练 scale 上，损失函数和你在第一节课学的 image diffusion 是同一个 L2。把它当成全新算法去读论文会找不到「新的损失」——因为根本没有。</li>
+    </ol>
+  </section>
+
+  <section class="concept-seealso">
+    <h2>相关概念</h2>
+    <ul>
+      <li><a href="/video-to-notebook/concepts/latent-diffusion/">Latent Diffusion</a> —— Sora 路线的基础：先 VAE 压缩，再潜空间扩散</li>
+      <li><a href="/video-to-notebook/concepts/velocity-field/">Velocity Field</a> —— flow matching 的训练目标，视频版只是张量更高维</li>
+      <li><a href="/video-to-notebook/concepts/classifier-free-guidance/">Classifier-Free Guidance</a> —— 控制 text-to-video 文本条件强度的标准技巧</li>
+      <li><a href="/video-to-notebook/concepts/probability-flow-ode/">Probability Flow ODE</a> —— 视频推理慢的根源：高维 ODE 需要更多步</li>
+    </ul>
+  </section>
+
+  <section class="concept-sources">
+    <h2>来源</h2>
+    <ol>
+      <li><a href="https://www.youtube.com/watch?v=H7MxR3XDt30&t=44s" target="_blank" rel="noopener">cmu-10799-diffusion-flow · L11 · Linqi Zhou (Luma AI): 「diffusion + flow matching 主导视觉生成 AI」 · (00:44)</a></li>
+      <li><a href="https://www.youtube.com/watch?v=H7MxR3XDt30&t=96s" target="_blank" rel="noopener">cmu-10799-diffusion-flow · L11 · Luma R3 视频样本与 motion / character animation · (01:36)</a></li>
+      <li><a href="https://www.youtube.com/watch?v=H7MxR3XDt30&t=253s" target="_blank" rel="noopener">cmu-10799-diffusion-flow · L11 · 「simple L2 loss、extremely stable、scalable」 · (04:13)</a></li>
+    </ol>
+  </section>
+</article>

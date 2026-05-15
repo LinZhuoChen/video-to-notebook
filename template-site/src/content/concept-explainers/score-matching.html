@@ -1,0 +1,196 @@
+<style>
+/* prefix: sm- */
+.sm-quickref{background:var(--surface-soft);border-left:3px solid var(--module-accent);padding:0.8rem 1rem;border-radius:0 4px 4px 0;margin:1rem 0;font-size:0.92rem;}
+.sm-quickref div{margin:0.3rem 0;}
+.sm-svg{display:block;margin:1.2rem auto;max-width:100%;height:auto;}
+.sm-pitfalls ol{padding-left:1.4rem;} .sm-pitfalls li{margin:0.5rem 0;}
+.sm-source{font-style:italic;color:var(--text-muted);border-left:2px solid var(--border);padding:0.2rem 0.8rem;margin:0.5rem 0;font-size:0.9rem;}
+.sm-callout{background:var(--module-accent-soft);border-left:3px solid var(--module-accent);padding:0.6rem 0.9rem;margin:0.8rem 0;border-radius:0 4px 4px 0;}
+.sm-tier{background:var(--surface-soft);border:1px solid var(--border);border-radius:6px;padding:0.8rem 1rem;margin:0.8rem 0;}
+.sm-tier h3{margin:0 0 0.4rem 0;color:var(--module-accent);font-size:1.05rem;}
+.sm-tier .sm-tag{display:inline-block;font-size:0.75rem;padding:0.1rem 0.5rem;border:1px solid var(--border-strong);border-radius:10px;color:var(--text-muted);margin-left:0.4rem;}
+.my-addition{background:var(--surface-soft);border-left:3px solid var(--module-accent);padding:0.5rem 0.9rem;margin:0.7rem 0;font-size:0.92rem;color:var(--text);}
+.sm-controls{display:flex;gap:0.4rem;flex-wrap:wrap;margin:0.6rem 0;}
+.sm-controls button{background:var(--surface-soft);border:1px solid var(--border);color:var(--text);padding:0.3rem 0.7rem;border-radius:4px;cursor:pointer;font-size:0.85rem;}
+.sm-controls button.active{background:var(--module-accent);color:var(--surface);border-color:var(--module-accent);}
+.sm-readout{background:var(--surface-soft);border:1px solid var(--border);border-radius:4px;padding:0.6rem 0.9rem;font-size:0.9rem;margin-top:0.4rem;}
+.sm-line{opacity:0.35;transition:opacity 0.2s;margin:0.25rem 0;}
+.sm-line.cd-active-line{opacity:1;font-weight:600;}
+@keyframes sm-pull{0%{transform:translate(0,0);}50%{transform:translate(-18px,-12px);}100%{transform:translate(0,0);}}
+.sm-noisy-pt{animation:sm-pull 3s ease-in-out infinite;transform-origin:center;transform-box:fill-box;}
+</style>
+
+<article class="concept-entry">
+  <header class="concept-header">
+    <span class="concept-eyebrow">概念 · Module 3: Score 视角</span>
+    <h1>Score Matching</h1>
+    <p class="concept-tagline">— 把"训练 score 网络"变成可计算的回归问题。</p>
+  </header>
+
+  <aside class="sm-quickref">
+    <div><strong>定义</strong> · 不需要知道归一化常数 $Z$，直接学习 $s_\theta(x) \approx \nabla_x \log p_\text{data}(x)$ 的训练目标族（ESM → ISM → DSM）。</div>
+    <div><strong>核心公式（DSM）</strong> · $J_{DSM} = \mathbb{E}_{x, \epsilon}\big[\|s_\theta(\tilde x) + \epsilon / \sigma^2\|^2\big]$，其中 $\tilde x = x + \sigma\epsilon$。</div>
+    <div><strong>易错</strong> · 看起来像普通回归——但回归目标 $\nabla_x \log p_\text{data}(x)$ 是<em>未知</em>的；DSM 的精妙在于"用一个我们能写出的目标 $-\epsilon/\sigma^2$ 替换它，且期望意义下答案不变"。</div>
+  </aside>
+
+  <section class="concept-intuition">
+    <p>很多人第一眼看到 score matching 会想：「不就是个 MSE 回归吗？把 $s_\theta(x)$ 拟合到 $\nabla_x \log p_\text{data}(x)$ 上就完事。」这个直觉的 <strong>致命错误</strong> 是：<em>回归的目标本身是未知的</em>——$p_\text{data}$ 我们只能从数据集里看到样本，写不出解析式；它的归一化常数 $Z$ 在高维下是天文级积分；$\nabla_x \log p_\text{data}(x)$ 自然也拿不到。所以 score matching 的精髓不在"回归"两个字上，而在于<em>用一个数学技巧把这个无法测量的目标从损失函数里消掉</em>——这个技巧就是<strong>分部积分</strong>。当你看完整套推导会发现：训练时根本不需要碰 $p_\text{data}$ 的真实 score，只需要数据样本本身、一点高斯噪声、以及网络自己的反向传播。这是 Hyvärinen 在 2005 年的关键洞察，也是 Vincent 在 2011 年把它推到 deep learning 工程可用形态的起点。</p>
+
+    <div class="sm-source">「A score is like a compass which points towards the data. So let's say you have data lying around in space and you go in that space with a [compass]...」—— Vizuara L6 @00:03</div>
+
+    <p>Vizuara 的 Dr. Raj 在 Lecture 6 用了一个非常具体的 <strong>「磁铁桌子」</strong> 比喻——想象一张大桌子上散落着许多磁铁（每个磁铁是一个数据点），你只能看见<em>其中几个</em>，绝大多数被布盖住了。任务是：站在桌面上任意位置，<em>感受最近的磁铁把你往哪个方向拉</em>。这个"拉力方向场"就是 score $\nabla_x \log p_\text{data}(x)$；它在数据密度高的地方指得最强、指得最准，在数据稀疏区域则模糊、不稳定。问题的难点是：磁铁的真实位置（即 $p_\text{data}$ 的形状）你不知道，可你能做一件事——把某个真实磁铁<em>稍微推一下</em>，让它带上一点高斯位移，然后训练一个模型「猜出原始磁铁在哪个方向」。这就是 denoising score matching 的入口，也是 diffusion 训练的核心套路。</p>
+
+    <div class="sm-source">「Imagine there are a bunch of magnets kept on a table and you have access to only a few of those magnets. Many of the other magnets are hidden from you.」—— Vizuara L7 @00:05</div>
+
+    <p>CMU 10799 的讲师在 Lecture 4 给了另一个互补视角：扩散模型的<strong>前向过程</strong>就是不断给数据加高斯噪声，直到变成纯噪声；而<strong>反向过程</strong>需要在每个噪声水平 $t$ 上知道 $\nabla_{x_t} \log p_t(x_t)$——这正是 score。能把这个量学下来，sampling 就是"顺着 score 走 + 加点随机扰动"（Langevin dynamics 或 reverse SDE）。换句话说：<em>diffusion = forward 加噪 + 反向沿 score 去噪</em>，而 score matching 就是那把让 score 变成可学习量的钥匙。在整个 ML 训练流程里，score matching 占据着"如何把一个无归一化的密度模型变成可优化目标"的核心位置——VAE 用 ELBO 绕开归一化常数，flow 用可逆映射回避它，而 score-based / diffusion 走的是第三条路：根本不去碰密度，只学密度对数的梯度。</p>
+  </section>
+
+  <section class="concept-deepdive">
+    <h2>三层目标递进：ESM → ISM → DSM</h2>
+    <p>Score matching 不是某一个孤立公式，而是一条<strong>逐步消去未知量、逐步变成可工程实现</strong>的目标函数链。理解它最好的方式是按时间顺序看 Hyvärinen 2005 和 Vincent 2011 两篇论文的"刀法"：每一刀都在解决前一刀留下的死结。下面三个版本分别叫 ESM（Explicit Score Matching，定义级别）、ISM（Implicit Score Matching，理论可计算）、DSM（Denoising Score Matching，实际可训练）。它们在最优解处给出<em>相同</em>的网络参数 $\theta^\star$，但在"训练时是否需要未知量"这件事上差距巨大。</p>
+
+    <div class="sm-tier">
+      <h3>① ESM<span class="sm-tag">Explicit · Hyvärinen 2005</span></h3>
+      <p>最自然的写法：直接 MSE 比对网络输出和真实 score。</p>
+      <p>$$J_{ESM}(\theta) = \frac{1}{2}\,\mathbb{E}_{x \sim p_\text{data}}\big[\|s_\theta(x) - \nabla_x \log p_\text{data}(x)\|^2\big]$$</p>
+      <p><strong>Why 这样写</strong>：score 是一个向量场（每个点都对应一个向量），衡量两个向量场差异最自然的方式就是逐点取欧氏距离的平方再求期望。这本质上就是把 MSE 从"标量预测"推广到"向量场预测"。</p>
+      <p><strong>致命缺陷</strong>：右边那个 $\nabla_x \log p_\text{data}(x)$ 我们根本不知道。$p_\text{data}$ 只有样本而没有解析式；如果硬要用核密度估计（KDE）近似一下，那在低维玩具问题上还能跑通，但一进入图像维度（$d \sim 10^5$），KDE 的方差就会因为维度灾难直接爆炸——具体来说，在 $d$ 维空间里你需要的样本数大约是 $O(k^d)$（$k$ 是每维分辨率），而你只有几万张图。结果就是估计出的 score 比噪声还噪声，训练根本走不动。所以 <em>ESM 只是一个数学上的定义、一个"如果我能算就能用"的理想目标</em>，它本身不是可以拿去训练神经网络的损失。我们需要的是一个等价目标，但目标里不能出现任何未知量。Hyvärinen 在 2005 的工作就是在解决"如何把 ESM 等价改写成只含已知量的形式"这个问题。</p>
+    </div>
+
+    <div class="sm-tier">
+      <h3>② ISM<span class="sm-tag">Implicit · 分部积分</span></h3>
+      <p>Hyvärinen 的"魔术"：展开 ESM 的平方项，用分部积分把未知目标消掉。展开 $\|s_\theta - \nabla \log p_\text{data}\|^2$：</p>
+      <p>$$\|s_\theta\|^2 - 2\,s_\theta^\top \nabla \log p_\text{data} + \|\nabla \log p_\text{data}\|^2$$</p>
+      <p>最后一项与 $\theta$ 无关（常数 $C$），扔掉。关键是中间项的期望：</p>
+      <p>$$\mathbb{E}_{p_\text{data}}\big[s_\theta(x)^\top \nabla_x \log p_\text{data}(x)\big] = \int p_\text{data}(x)\, s_\theta(x)^\top \frac{\nabla p_\text{data}(x)}{p_\text{data}(x)} dx = \int s_\theta(x)^\top \nabla p_\text{data}(x)\, dx$$</p>
+      <p>对每个分量做分部积分（假设 $p_\text{data}$ 在无穷远处衰减），边界项归零，得：</p>
+      <p>$$\int s_\theta(x)^\top \nabla p_\text{data}(x)\, dx = -\int p_\text{data}(x)\, \nabla_x \cdot s_\theta(x)\, dx = -\mathbb{E}_{p_\text{data}}[\mathrm{tr}(\nabla_x s_\theta(x))]$$</p>
+      <p>合起来：</p>
+      <p>$$J_{ISM}(\theta) = \mathbb{E}_{x \sim p_\text{data}}\Big[\mathrm{tr}(\nabla_x s_\theta(x)) + \tfrac{1}{2}\|s_\theta(x)\|^2\Big] + C$$</p>
+      <p><strong>Why 这一步是突破</strong>：原本未知的 $\nabla_x \log p_\text{data}(x)$ 完全消失了，取而代之的是网络<em>自己</em>的 Jacobian 矩阵的迹 $\mathrm{tr}(\nabla_x s_\theta(x)) = \sum_i \partial s_{\theta,i} / \partial x_i$——这是一个完全确定、可以用 autograd 反向传播算出来的量。换句话说：ISM 把"需要测量真实分布的 score"问题转化为"只需要看网络在数据点上的局部几何性质"。这是一个非常聪明的偷换：未知量不见了，代价是出现了一个网络自身的二阶量。整套推导的关键步骤就是分部积分时的边界项归零，这要求 $p_\text{data}$ 在无穷远处快速衰减——对于真实图像数据集这通常自动满足。这就是 Hyvärinen 2005 的核心贡献：他证明了 score matching 这件事在<em>没有归一化常数 $Z$</em>的条件下依然可以训练，这正是 EBM 这条研究线多年没能解决的死结。</p>
+      <p><strong>新瓶颈</strong>：$\mathrm{tr}(\nabla_x s_\theta)$ 在 $d$ 维空间需要 $d$ 次反向传播——因为你要分别取每一维的偏导再加起来。在 MNIST（$d = 784$）勉强能跑，在 CIFAR（$d = 3072$）开始痛苦，在 ImageNet 256×256（$d \approx 2 \times 10^5$）则完全不可行。所以 ISM 在理论上完美、在低维玩具上能用，但<em>对深度生成模型这条路线来说仍然是死路一条</em>。Yang Song 在 2019 年提出的 Sliced Score Matching 通过随机投影把这个 $O(d)$ 开销降到 $O(1)$，是一条改良路线；但真正打通工程的，是 Vincent 2011 的 DSM。</p>
+    </div>
+
+    <div class="sm-tier">
+      <h3>③ DSM<span class="sm-tag">Denoising · Vincent 2011</span></h3>
+      <p>换思路：<strong>别去匹配干净数据的 score，去匹配加噪后的 score</strong>。定义噪声扰动分布</p>
+      <p>$$\tilde x = x + \sigma\epsilon, \quad \epsilon \sim \mathcal{N}(0, I)$$</p>
+      <p>则条件概率 $p_\sigma(\tilde x | x) = \mathcal{N}(\tilde x; x, \sigma^2 I)$，它的 score 是<strong>闭式解</strong>：</p>
+      <p>$$\nabla_{\tilde x} \log p_\sigma(\tilde x | x) = -\frac{\tilde x - x}{\sigma^2} = -\frac{\epsilon}{\sigma}$$</p>
+      <p>注意：上式分母是 $\sigma$（不是 $\sigma^2$），因为 $\tilde x - x = \sigma\epsilon$。Vincent 证明：</p>
+      <p>$$J_{DSM}(\theta) = \frac{1}{2}\,\mathbb{E}_{x, \tilde x}\Big[\big\|s_\theta(\tilde x) - \nabla_{\tilde x} \log p_\sigma(\tilde x | x)\big\|^2\Big]$$</p>
+      <p>与 ESM-on-marginal 等价（梯度相同，差一个常数）。代入闭式 score：</p>
+      <p>$$J_{DSM} = \frac{1}{2}\,\mathbb{E}_{x \sim p_\text{data}, \epsilon \sim \mathcal{N}(0,I)}\Big[\big\|s_\theta(\tilde x) + \tfrac{\epsilon}{\sigma}\big\|^2\Big]$$</p>
+      <p><strong>Why 这是终极形式</strong>：训练时只需要四步——① 从数据集采一个 $x$，② 从标准高斯采一个 $\epsilon$，③ 做加法 $\tilde x = x + \sigma\epsilon$，④ 让网络回归到 $-\epsilon/\sigma$。每个样本只需要<em>一次</em>前向 + 一次反向传播，完全没有 Jacobian 迹、没有 $d$ 次循环、没有任何对网络结构的限制（不像 normalizing flow 必须可逆）。这是 deep learning 工程师梦寐以求的形态。</p>
+      <p><strong>代价 / 妥协</strong>：你学到的并不是干净数据 $p_\text{data}$ 的 score，而是<em>被 $\sigma$ 模糊后</em>的分布 $p_\sigma(\tilde x) = \int p_\text{data}(x)\, \mathcal{N}(\tilde x; x, \sigma^2 I)\, dx$ 的 score $\nabla_{\tilde x} \log p_\sigma(\tilde x)$。这里有一个无法两全的 trade-off：当 $\sigma \to 0$ 时 $p_\sigma \to p_\text{data}$，但同时回归目标 $-\epsilon/\sigma$ 的方差爆炸为 $1/\sigma^2$，训练发散；当 $\sigma$ 太大时方差稳定，但学到的几乎是高斯本身的 score，对刻画 $p_\text{data}$ 没用。<strong>这就是为什么 NCSN/DDPM 不用单一 $\sigma$，而要用一整条 $\sigma_1 < \sigma_2 < \cdots < \sigma_T$ 的噪声梯度</strong>，让网络同时处理所有尺度——大尺度负责"从纯噪声中找到大致流形"，小尺度负责"精修细节"。</p>
+    </div>
+
+    <h2>统一时刻：DSM = DDPM 的 $\epsilon$-prediction</h2>
+    <p>把 DSM 在每个噪声尺度 $\sigma_t$ 上都做一遍，并让网络<strong>显式接收 $t$ 作为输入</strong>：</p>
+    <p>$$\mathcal{L} = \mathbb{E}_{t, x_0, \epsilon}\Big[\big\|s_\theta(x_t, t) + \tfrac{\epsilon}{\sigma_t}\big\|^2\Big]$$</p>
+    <p>令 $\epsilon_\theta(x_t, t) := -\sigma_t \cdot s_\theta(x_t, t)$，整理得：</p>
+    <p>$$\mathcal{L} = \mathbb{E}_{t, x_0, \epsilon}\Big[\tfrac{1}{\sigma_t^2}\big\|\epsilon_\theta(x_t, t) - \epsilon\big\|^2\Big]$$</p>
+
+    <div class="sm-callout">
+      <strong>核心身份（贯穿整个扩散模型理论的"罗塞塔石碑"）</strong>：DDPM 的简化损失 $L_\text{simple} = \|\epsilon_\theta(x_t, t) - \epsilon\|^2$（去掉前面的 $1/\sigma_t^2$ 权重后）与 DSM 在所有噪声尺度上求和<strong>在最优解处完全等价</strong>。这不是"看起来像"或"近似相等"，而是同一个目标在不同 parameterization 下的两种写法。所以 CMU 10799 的讲师才会在 Lecture 4 用一句非常朴素的话总结整套 DDPM 训练：「at training time you literally just do regression on the noise that you're adding to your forward process.」——他不是在简化，而是在精确地陈述事实。
+    </div>
+
+    <div class="sm-source">「at training time what you do is just literally do regression on the noise that you're adding to your in your forward process.」—— CMU 10799 L4 @03:24</div>
+
+    <p>这条身份是整个扩散模型理论的关键节点：原本看上去毫不相干的三套语言——<strong>变分推断</strong>（VAE / DDPM 视角下的 ELBO 下界）、<strong>能量模型</strong>（EBM 视角下的 score matching）、<strong>随机微分方程</strong>（Yang Song 的 SDE 反向过程）——在这里收敛到同一个训练目标上。这也是为什么 2020 年之后 score-based generative model 和 denoising diffusion probabilistic model 这两条最初彼此独立的研究线被认为是"同一件事的两种讲法"。CMU L4 在 chunk 915 解释为什么 Ho 2020 选择 $\epsilon$-prediction 而不是直接学反向 Gaussian 的均值 $\mu_\theta(x_t, t)$：「because doing this regression is much much easier to train than if you just learn this very complicated mean which like you know has like very complicated structures at different time steps.」学 $\epsilon$ 的方差和量级在所有时间步上几乎是一致的（因为 $\epsilon \sim \mathcal{N}(0, I)$ 本身就是标准化的），学 $\mu$ 则要面对每个 $t$ 截然不同的均值尺度（早期 $t$ 时 $\mu_t \approx x_0$，后期 $t$ 时 $\mu_t \approx 0$）——所以前者训练稳定、调参容易、最终性能更好。这也是为什么后来的工程文献几乎清一色用 $\epsilon$-prediction 而不是 $\mu$-prediction，即便它们在数学上等价。</p>
+
+    <p>另一个值得强调的点是 score matching 与 <strong>likelihood-based training</strong> 的关系。CMU L4 在 chunk 918 提到：autoregressive 模型用链式法则算似然「really really painful」，VAE 用 ELBO 是「surrogated loss」「kind of suboptimal」，normalizing flow 受可逆性约束。Score-based 模型走了完全不同的第三条路：<em>不再追求估计概率密度本身，只学密度的对数梯度</em>。表面看损失了概率信息，实际上对于生成任务（采样）这恰恰是充分信息——因为 Langevin 和 reverse SDE 都只需要 score。把"建模密度"换成"建模 score"是 score-based generative model 的根本范式转移，也是它能突破 likelihood-based 方法多年瓶颈的本质原因。</p>
+
+    <div class="my-addition">🟡 教材外补充（Sliced Score Matching）：DSM 不是当年唯一一条试图替代 ISM 的路。Yang Song 在 2019 年提出 <strong>Sliced Score Matching</strong>（SSM）：用一个随机方向 $v \sim \mathcal{N}(0, I)$ 把整个 Jacobian 迹问题降维成"一次方向上的 Hessian-vector product"——具体来说，把目标改为 $\mathbb{E}_{x, v}[v^\top \nabla_x s_\theta(x)\, v + \frac{1}{2}\|s_\theta(x)\|^2]$，每个样本只需要一次反向传播，开销变成 $O(1)$ 而不是 $O(d)$。SSM 对<em>干净数据</em>的 score 估计在统计意义上更准确，但在 diffusion 实际工程里被 DSM 完胜，原因有二：一是 DSM "顺手"学到的就是带噪 score，正好是反向 SDE/Langevin sampling 需要的那个量；二是 DSM 的训练循环里没有任何二阶量，对硬件友好、对网络结构无约束。这条历史脉络解释了为什么今天 score-based generative model 全部走的是 DSM 而不是 SSM。</div>
+
+    <div class="my-addition">🟡 教材外补充（EBM 与 score matching 的历史渊源）：score matching 最早根本不是为生成模型设计的，而是为 <strong>EBM</strong>（Energy-Based Model）服务的。EBM 把概率写成 $p_\theta(x) = e^{-E_\theta(x)} / Z(\theta)$，其中 $Z(\theta) = \int e^{-E_\theta(x)} dx$ 是归一化常数（配分函数）。计算对数似然 $\log p_\theta = -E_\theta - \log Z$ 需要 $\log Z$，但 $Z$ 在高维下是不可解的积分。多年来人们用 MCMC、contrastive divergence 等方法估计 $Z$，都不够好。Hyvärinen 在 2005 年的关键观察是：<em>score 关于 $\theta$ 的梯度与 $Z$ 无关</em>——因为 $\nabla_x \log p_\theta(x) = -\nabla_x E_\theta(x) - \nabla_x \log Z(\theta) = -\nabla_x E_\theta(x)$（$\log Z$ 对 $x$ 是常数）。所以只要学 score，就完全绕过了配分函数。CMU L4 chunk 917 提到这一点：「EBM is basically just saying that okay, we're just going to learn an unnormalized version of the distribution and then we're going to normalize it later on using this thing called partition function.」从这个角度看，<strong>diffusion 模型本质是 EBM 之梦的现代落地</strong>——只不过通过 DSM + 多噪声尺度，让原本不可训练的 EBM 变成了 SOTA 生成模型。</div>
+
+    <div class="my-addition">🟡 教材外补充（Tweedie's Formula 的几何解释）：DSM 的回归目标 $-\epsilon/\sigma$ 之所以指向"干净数据方向"，背后是 Tweedie's Formula（1956）。它说：对于高斯加噪 $\tilde x = x + \sigma\epsilon$，最优 MMSE 去噪器满足 $\mathbb{E}[x | \tilde x] = \tilde x + \sigma^2 \nabla_{\tilde x} \log p_\sigma(\tilde x)$。变形得 $\nabla_{\tilde x} \log p_\sigma(\tilde x) = (\mathbb{E}[x|\tilde x] - \tilde x) / \sigma^2$——<em>score 就是"从带噪点指向条件均值的向量"除以 $\sigma^2$</em>。这就是为什么 score-based sampling 的 Langevin 步骤"看起来"像是把样本往数据流形拉：因为 score 字面上就是那个拉力方向。</div>
+  </section>
+
+  <section class="concept-interact">
+    <p>下图模拟 DSM 的训练目标：橙色数据流形上分布着干净数据点 $x$，红色噪声点 $\tilde x$ 周期性地被"拉回"附近数据点 $x$ 方向。<strong>不变量</strong>：拉力向量 $-\epsilon/\sigma$ 永远指向干净数据点（即 Tweedie 几何告诉你的：score 字面上等于"指向条件均值 $\mathbb{E}[x|\tilde x]$ 的向量除以 $\sigma^2$"）。这就是为什么训练 $s_\theta$ 回归到 $-\epsilon/\sigma$ 等价于"学一个把任意点拉回流形的方向场"。点击下面四个按钮可以看 DSM 推导链如何在四个步骤里把不可训练的 ESM 一步步变成 DDPM 的 simple loss。</p>
+    <div class="sm-controls" role="tablist" aria-label="DSM 推导步骤">
+      <button data-step="0" class="active" type="button">① 噪声扰动</button>
+      <button data-step="1" type="button">② 条件 score 闭式</button>
+      <button data-step="2" type="button">③ DSM 回归目标</button>
+      <button data-step="4" type="button">④ = DDPM ε 损失</button>
+    </div>
+    <div id="sm-readout" class="sm-readout">
+      <div class="sm-line" data-line="0">① $\tilde x = x + \sigma\epsilon$，其中 $\epsilon \sim \mathcal{N}(0, I)$</div>
+      <div class="sm-line" data-line="1">② $\nabla_{\tilde x} \log p_\sigma(\tilde x | x) = -(\tilde x - x)/\sigma^2 = -\epsilon/\sigma$ <strong>（闭式！）</strong></div>
+      <div class="sm-line" data-line="2">③ $J_{DSM} = \mathbb{E}\big[\|s_\theta(\tilde x) + \epsilon/\sigma\|^2\big]$，回归到 $-\epsilon/\sigma$</div>
+      <div class="sm-line" data-line="4">④ 令 $\epsilon_\theta := -\sigma \cdot s_\theta$，得 $\|\epsilon_\theta - \epsilon\|^2$ —— 这就是 DDPM 的 simple loss</div>
+    </div>
+
+    <svg class="sm-svg" viewBox="0 0 600 260" role="img" aria-label="DSM 的 Tweedie 几何：噪声点被沿 score 方向拉向数据流形">
+      <g font-family="ui-sans-serif" font-size="11" fill="var(--text)">
+        <path d="M 60 200 Q 200 80 380 140 T 560 100" stroke="var(--module-accent)" stroke-width="2" fill="none"/>
+        <text x="540" y="90" font-size="10" fill="var(--module-accent)">data manifold</text>
+        <circle cx="200" cy="135" r="5" fill="var(--module-accent)"/>
+        <circle cx="320" cy="155" r="5" fill="var(--module-accent)"/>
+        <circle cx="450" cy="120" r="5" fill="var(--module-accent)"/>
+        <text x="200" y="125" font-size="10" fill="var(--text-muted)" text-anchor="middle">x</text>
+        <g class="sm-noisy-pt">
+          <circle cx="270" cy="80" r="6" fill="var(--red)"/>
+          <text x="280" y="75" font-size="10" fill="var(--red)">x̃ = x + σε</text>
+        </g>
+        <defs>
+          <marker id="sm-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+            <path d="M0,0 L10,5 L0,10 z" fill="var(--text)"/>
+          </marker>
+        </defs>
+        <line x1="270" y1="80" x2="210" y2="130" stroke="var(--text)" stroke-width="1.5" marker-end="url(#sm-arrow)"/>
+        <text x="240" y="100" font-size="10" fill="var(--text)">−ε/σ = score 方向</text>
+        <text x="60" y="240" font-size="10" fill="var(--text-muted)">DSM 训练：让 $s_\theta(\tilde x)$ 回归到 −ε/σ（指向干净 x 的方向）</text>
+      </g>
+    </svg>
+
+    <script>
+      (function () {
+        const btns = document.querySelectorAll('.sm-controls button');
+        const lines = document.querySelectorAll('#sm-readout .sm-line');
+        function show(step) {
+          btns.forEach(b => b.classList.toggle('active', +b.dataset.step === step));
+          lines.forEach(l => l.classList.toggle('cd-active-line', +l.dataset.line === step));
+        }
+        btns.forEach(b => b.addEventListener('click', () => show(+b.dataset.step)));
+        show(0);
+      })();
+    </script>
+  </section>
+
+  <section class="concept-example">
+    <h2>手算：σ=0.5 的一步 DSM 训练</h2>
+    <p>设数据点 $x = 2.0$（1D，方便手算），噪声尺度 $\sigma = 0.5$，从标准高斯采样 $\epsilon = 0.4$。先做加噪：$\tilde x = x + \sigma\epsilon = 2.0 + 0.5 \cdot 0.4 = 2.2$。算回归目标 $-\epsilon/\sigma = -0.4 / 0.5 = -0.8$（注意分母是 $\sigma$ 不是 $\sigma^2$，因为 $\tilde x - x = \sigma\epsilon$，所以 $(\tilde x - x)/\sigma^2 = \epsilon / \sigma$）。设此刻网络输出 $s_\theta(\tilde x) = -0.3$，则单样本 DSM 损失：$\big\|s_\theta(\tilde x) - (-\epsilon/\sigma)\big\|^2 = \big(-0.3 - (-0.8)\big)^2 = (0.5)^2 = 0.25$。这一步的梯度会把 $s_\theta(\tilde x)$ 从 $-0.3$ 往 $-0.8$ 方向推——训练结束后，网络<em>会"知道"</em>在 $\tilde x = 2.2$ 这个位置时应该输出大约 $-0.8$，几何含义就是"从 $\tilde x = 2.2$ 指回干净数据 $x = 2.0$ 的方向，强度大约是 $0.8$"。整个训练循环在 PyTorch 里只有一行核心代码：<code>loss = F.mse_loss(s_theta(x_tilde, sigma), -eps/sigma)</code>。这一行就是 Hyvärinen 2005 + Vincent 2011 + Ho 2020 三篇论文核心贡献的最终落地形式。</p>
+  </section>
+
+  <section class="concept-pitfalls">
+    <h2>常见误区</h2>
+    <ol>
+      <li><strong>「Score matching 就是把 $s_\theta$ 做 MSE 回归到真实 score」。</strong>反例：ESM 形式 $\|s_\theta(x) - \nabla_x \log p_\text{data}(x)\|^2$ 看上去确实是 MSE，但回归的目标 $\nabla_x \log p_\text{data}(x)$ <em>没人写得出来</em>——把 $p_\text{data}$ 换成 1000 张 CIFAR 图像的 KDE 估计，第一个 batch 的梯度就是 NaN（因为 KDE 在样本之间的"无人区"概率几乎为零，log 之后变成 $-\infty$）。Score matching 的精髓不在"回归"，而在<em>用分部积分（ISM）或噪声扰动（DSM）把这个未知目标从损失里彻底消掉</em>。</li>
+      <li><strong>「DSM 学到的就是干净数据 $p_\text{data}$ 的 score」。</strong>反例：DSM 学到的严格意义上是 $\nabla_{\tilde x} \log p_\sigma(\tilde x)$——即<em>带 $\sigma$ 模糊后的</em>边际分布的 score。如果取 $\sigma = 0$，回归目标 $-\epsilon/\sigma$ 方差爆炸为 $\infty$，根本没法训；如果取 $\sigma = 10$，学到的几乎是标准高斯的 score（$-\tilde x$），对刻画 $p_\text{data}$ 毫无用处。这就是为什么 NCSN（Song & Ermon 2019）和 DDPM（Ho 2020）都必须用<em>一整套噪声尺度</em> $\sigma_1 < \cdots < \sigma_T$ 并把 $t$ 作为网络输入条件——单一 $\sigma$ 永远训不出生成模型。</li>
+      <li><strong>「DSM 和 DDPM 是两个独立的训练目标，需要分别理解」。</strong>反例：DDPM 的简化损失 $L_\text{simple} = \|\epsilon_\theta(x_t, t) - \epsilon\|^2$ 通过参数化变换 $\epsilon_\theta(x_t, t) := -\sigma_t \cdot s_\theta(x_t, t)$ 与多尺度 DSM 完全等价（差一个 $1/\sigma_t^2$ 的权重，Ho 2020 经验性地把它去掉因为这样训练效果更好）。所以 Ho 2020 的 "$\epsilon$-prediction" 不是什么独立发明的新算法——它就是 score matching 在选择特定 parameterization 下的简化写法。把这两件事看成"两个目标"会让你在读 paper 时不断重复同一个推导。</li>
+    </ol>
+  </section>
+
+  <section class="concept-seealso">
+    <h2>相关概念</h2>
+    <ul>
+      <li><a href="/video-to-notebook/concepts/score-function/">Score Function</a> —— score matching 学的就是它</li>
+      <li><a href="/video-to-notebook/concepts/tweedies-formula/">Tweedie's Formula</a> —— 解释了为什么 score 指向条件均值</li>
+      <li><a href="/video-to-notebook/concepts/langevin-dynamics/">Langevin Dynamics</a> —— 拿着 score 怎么采样</li>
+      <li><a href="/video-to-notebook/concepts/ddpm/">DDPM</a> —— score matching 在每个噪声尺度的具体落地</li>
+    </ul>
+  </section>
+
+  <section class="concept-sources">
+    <h2>来源</h2>
+    <ol>
+      <li><a href="https://www.youtube.com/watch?v=6ELzfPXUqps&t=3s" target="_blank" rel="noopener">diffusion-principles-vizuara · L6 · Denoising Score Matching · 「score is a compass」 · (00:03)</a></li>
+      <li><a href="https://www.youtube.com/watch?v=ej7LfQyKXec&t=4s" target="_blank" rel="noopener">diffusion-principles-vizuara · L7 · Noise Conditional Score Networks · 「magnets on a table」 · (00:04)</a></li>
+      <li><a href="https://www.youtube.com/watch?v=UEJxHpFEb04&t=204s" target="_blank" rel="noopener">cmu-10799-diffusion-flow · L4 · Score-based Models · 「regression on the noise」 · (03:24)</a></li>
+      <li><a href="https://www.youtube.com/watch?v=UEJxHpFEb04&t=345s" target="_blank" rel="noopener">cmu-10799-diffusion-flow · L4 · EBM = 学 unnormalized 分布 · (05:45)</a></li>
+    </ol>
+  </section>
+</article>

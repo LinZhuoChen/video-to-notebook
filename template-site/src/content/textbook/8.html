@@ -1,0 +1,616 @@
+<style>
+  .score-fn { line-height: 1.7; }
+  .score-fn svg { display: block; margin: 1.2rem auto; max-width: 100%; height: auto; }
+  .score-fn .clip-frame { max-width: 720px; margin: 1.4rem auto; }
+  .score-fn .clip-frame iframe { width: 100%; aspect-ratio: 16/9; border: 0; border-radius: 6px; }
+  .score-fn .clip-frame figcaption { color: var(--text-muted); font-size: 0.85rem; margin-top: 0.4rem; text-align: center; }
+  .score-fn .tldr { background: var(--surface-soft); border-left: 4px solid var(--module-accent); padding: 1rem 1.2rem; border-radius: 0 6px 6px 0; margin: 1.4rem 0; }
+  .score-fn .tldr h2 { margin-top: 0; font-size: 1.05rem; }
+  .score-fn .callout { padding: 0.7rem 1rem; margin: 1rem 0; border-radius: 0 6px 6px 0; }
+  .score-fn .callout-info { background: #eef6fc; border-left: 4px solid #2b80c4; }
+  .score-fn .callout-note { background: #f3f0fa; border-left: 4px solid #6f4dd0; }
+  .score-fn .callout-warning { background: #fff6e0; border-left: 4px solid #d4a017; }
+  .score-fn .callout-tip { background: #e8f5e9; border-left: 4px solid #0b5; }
+  .score-fn .callout-quote { background: var(--surface-soft); border-left: 3px solid var(--border-strong); padding: 0.5rem 1rem; margin: 0.8rem 0; font-style: italic; color: var(--text-muted); }
+  .score-fn .my-addition { background: #fff7d6; border-left: 4px solid #b8860b; padding: 0.7rem 1rem; margin: 1rem 0; border-radius: 0 6px 6px 0; }
+  .score-fn pre { background: #1f1f1f; color: #f6f4ee; padding: 1rem; border-radius: 6px; font-size: 0.86rem; line-height: 1.55; overflow-x: auto; }
+  .score-fn code:not(pre code) { background: var(--surface-soft); padding: 0.1rem 0.35rem; border-radius: 3px; font-size: 0.9em; }
+  .score-fn h2 { border-bottom: 1px solid var(--border); padding-bottom: 0.3rem; margin-top: 2.4rem; }
+  .score-fn h3 { color: var(--module-accent); margin-top: 1.6rem; }
+  .score-fn .deriv-step { margin: 0.8rem 0; padding: 0.6rem 0.8rem; background: var(--surface-soft); border-radius: 4px; }
+  .score-fn .deriv-step strong { color: var(--module-accent); }
+  @keyframes score-arrow-glow { 0%, 100% { opacity: 0.55; } 50% { opacity: 1; } }
+  .score-fn .arrow-glow { animation: score-arrow-glow 2.6s ease-in-out infinite; }
+</style>
+
+<article class="score-fn">
+
+<h1>8. Score 函数：log-density 的梯度</h1>
+
+<p style="font-size:0.95rem; color:var(--text-muted);">主源：Vizuara《Principles of Diffusion Models》Lecture 5（Energy Based Models · Score Function）；副源：CMU 10799 S26 Lecture 4（Score-based Models — Diffusion &amp; Flow Matching）；以及 Vizuara Lecture 7 的「磁铁」类比开场。</p>
+
+<div class="tldr">
+  <h2>📌 TL;DR</h2>
+  <p><strong>Score 函数 = log-密度对输入 x 的梯度</strong>：</p>
+  $$s(x) \;=\; \nabla_x \log p(x)$$
+  <p>注意三件事：</p>
+  <ul>
+    <li>梯度是<strong>对输入 x</strong> 求的，<em>不是对模型参数</em>；它产出一个和 x 同维度的<strong>向量</strong>。</li>
+    <li>它指向 log-密度<strong>上升最快</strong>的方向——也就是"哪边样本更像真实数据"。所以 score 是一张<strong>向量场</strong>：空间每一点都被钉一支箭头，箭头的尾巴在该点，箭头的头指向附近"更像真实数据"的方向。</li>
+    <li><strong>归一化常数 $Z$ 在求梯度时自动消失</strong>。如果 $p(x) = \tilde p(x)/Z$，那么 $\nabla_x \log p(x) = \nabla_x \log \tilde p(x) - \nabla_x \log Z = \nabla_x \log \tilde p(x)$。$Z$ 不再是拦路虎——这是 score-based modelling 整个流派的<strong>立身之本</strong>。</li>
+  </ul>
+  <p>本章先用「磁铁拉力」和「能量谷底」两个讲师亲口给的物理直觉锚定 score 是什么，再形式化定义，最后说明 <strong>score 为什么是 diffusion 模型生成所必须</strong>——它是 Anderson 1982 反向 SDE 公式里那唯一未知的、需要神经网络去拟合的对象。</p>
+</div>
+
+<h2>一、为什么这一章如此关键？</h2>
+
+<p>到目前为止，你已经学过 VAE 和 DDPM（去噪扩散）。两条线索都把生成建模归结为：<strong>不直接写出 $p(x)$，而是用神经网络逼近它的某个"片段"</strong>——VAE 学一个变分后验，DDPM 学一个噪声预测器。本章引入第三条、也是把 diffusion 真正讲通的那条线：</p>
+
+<blockquote><strong>不学密度本身，学密度的<em>梯度</em>。</strong></blockquote>
+
+<p>Vizuara 讲师 Dr. Raj 在 Lecture 5 开篇花了大约 5 分钟做了一次完整复盘（chunk #525-533）：「我们从 deep generative models 出发，看了 VAE，又看了 diffusion。现在要引入<strong>另一个会和 diffusion 框架紧密交叉的概念</strong>，但我们先独立讲它。」</p>
+
+<div class="callout-quote">
+"having understood both variational autoencoders and diffusion models, we move to another important concept which as we will look at it will closely intersect with the diffusion framework. However, before looking at that intersection, we should first understand about the concept independently."
+</div>
+
+<p>这个"独立先讲、最后交叉"的方法论非常重要。Score-based generative modelling 是<strong>独立发展出来的一条线</strong>（Hyvärinen 2005，Yang Song &amp; Ermon 2019），后来才被 Yang Song 在 2021 的 SDE 论文里证明<strong>它和 DDPM 是同一件事</strong>。本章先按讲师的处理方式独立讲 score（从 EBM 切入），后面 第 9、10、11 章再把它和 diffusion 缝起来。</p>
+
+<p>如果你在这里就感到困惑：「为什么不直接学密度 $p(x)$？」那么你已经摸到了本章要解决的核心痛点。讲师在 chunk #525-526 做的复盘里反复念叨同一件事——"我们没有真实分布的解析形式，只有<em>来自分布的样本</em>"。从有限样本出发去学一个高维函数，本身就是一场和"组合爆炸"赛跑。直接学 $p(x)$ 要求你<strong>归一化</strong>，而归一化要求你<strong>对整个高维空间积分</strong>——这就是接下来要展开的死胡同。Score 是一条优雅的绕路。</p>
+
+<div class="callout callout-warning">
+⚠️ <strong>最容易踩的坑（也是初学者第一周问得最多的问题）</strong>：score 函数<em>不是</em>模型输出对参数的梯度（那是反向传播算的东西）。Score 是<strong>真实数据分布的 log-密度</strong>对<strong>输入 x</strong> 的梯度。换句话说，它是一个<em>关于数据空间的几何量</em>，和模型参数 $\theta$ 没关系；只是后来我们用一个神经网络 $s_\theta(x)$ 去拟合它。
+</div>
+
+<h2>二、磁铁桌面：score 的物理直觉</h2>
+
+<p>讲师在 Lecture 7（chunk #439）用了一个<strong>反复回放的核心比喻</strong>。它出现在 noise-conditional score network 那一讲，但它本质上就是 score 函数的"科学幻想"图：</p>
+
+<div class="callout-quote">
+想象一张桌子，桌面上摆了一堆磁铁。<strong>你只能看见其中几块磁铁的位置，其余的都被藏起来了。</strong>现在给定桌面上的<em>任意一个点</em>，你想知道：<strong>从这里出发，朝哪个方向走，离最近的磁铁最近？</strong>
+</div>
+
+<p>把这个比喻翻成 score 的语言：</p>
+
+<ul>
+  <li>"桌面" = 数据空间 $\mathbb{R}^d$；</li>
+  <li>"磁铁" = 真实数据样本（训练集里的点）；</li>
+  <li>"被藏起来的磁铁" = 你<em>没见过</em>但同样属于真实分布的样本（测试集、未来要生成的样本）；</li>
+  <li>"朝哪个方向走" = 你要预测的那个<strong>向量</strong>；</li>
+  <li>"离最近的磁铁更近" ≈ "log-密度增加得更快"。</li>
+</ul>
+
+<p>所以 score 函数 $s(x) = \nabla_x \log p(x)$ 就是<strong>那张"磁铁拉力地图"</strong>——空间每一点都有一支箭头，告诉你"从这里出发，向着<em>样本最稠密的地方</em>该怎么走"。</p>
+
+<div class="callout-quote">
+讲师原话："the idea or the objective is to calculate, given any point on this table, what is the direction in which the nearest magnet is pulling you. ... Now, inherently this is a very hard problem because we do not know the exact location of the magnets. If we knew that we would calculate the magnetic field for all the [points]."
+</div>
+
+<p>讲师特地强调"很难，因为我们看不到所有磁铁"——这正是为什么需要<strong>从样本中学 score</strong>（即 score matching，下一章的主题），而不是把 $p(x)$ 写出来再求导。把这句话再翻一层：</p>
+
+<ul>
+  <li>如果"所有磁铁的位置"都告诉你（也就是知道 $p_\text{data}$ 的解析式），那 score 就可以直接<strong>解析求</strong>，不需要训练；</li>
+  <li>但现实里你只看到 100 块磁铁里露出来的 5 块（也就是训练样本），剩下 95 块在桌面别处。你的网络必须<em>从这 5 块磁铁，推断出整张桌面所有位置的拉力方向</em>。这就是"泛化"问题，也是为什么 score model 像所有机器学习一样：会 overfit、需要正则化、对训练样本多寡敏感。</li>
+</ul>
+
+<svg viewBox="0 0 600 360" role="img" aria-label="磁铁桌面与 score 向量场示意图">
+  <defs>
+    <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#2b80c4"/>
+    </marker>
+    <radialGradient id="blob1" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0%" stop-color="#d4a017" stop-opacity="0.85"/>
+      <stop offset="100%" stop-color="#d4a017" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="blob2" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0%" stop-color="#d4a017" stop-opacity="0.85"/>
+      <stop offset="100%" stop-color="#d4a017" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <rect x="0" y="0" width="600" height="360" fill="#fafafa" stroke="#ddd"/>
+  <text x="300" y="22" text-anchor="middle" font-family="ui-sans-serif" font-size="13" font-weight="600">Score 向量场：双高斯混合（2D）</text>
+
+  <!-- two data clusters -->
+  <ellipse cx="180" cy="200" rx="70" ry="70" fill="url(#blob1)"/>
+  <ellipse cx="430" cy="170" rx="70" ry="70" fill="url(#blob2)"/>
+
+  <!-- "magnet" sample dots -->
+  <g fill="#8B6914">
+    <circle cx="170" cy="190" r="3"/>
+    <circle cx="190" cy="215" r="3"/>
+    <circle cx="160" cy="220" r="3"/>
+    <circle cx="200" cy="180" r="3"/>
+    <circle cx="175" cy="210" r="3"/>
+    <circle cx="420" cy="160" r="3"/>
+    <circle cx="440" cy="180" r="3"/>
+    <circle cx="430" cy="155" r="3"/>
+    <circle cx="445" cy="170" r="3"/>
+    <circle cx="415" cy="180" r="3"/>
+  </g>
+
+  <!-- score arrows pointing inward -->
+  <g stroke="#2b80c4" stroke-width="1.6" fill="none" marker-end="url(#ah)" class="arrow-glow">
+    <!-- around cluster 1 -->
+    <line x1="80" y1="120" x2="135" y2="170"/>
+    <line x1="80" y1="280" x2="135" y2="230"/>
+    <line x1="280" y1="120" x2="225" y2="170"/>
+    <line x1="280" y1="280" x2="225" y2="230"/>
+    <line x1="180" y1="90" x2="180" y2="140"/>
+    <line x1="180" y1="310" x2="180" y2="260"/>
+    <!-- around cluster 2 -->
+    <line x1="330" y1="90" x2="385" y2="140"/>
+    <line x1="530" y1="90" x2="475" y2="140"/>
+    <line x1="330" y1="260" x2="385" y2="210"/>
+    <line x1="530" y1="260" x2="475" y2="210"/>
+    <line x1="430" y1="70" x2="430" y2="120"/>
+    <line x1="430" y1="280" x2="430" y2="225"/>
+  </g>
+
+  <!-- midpoint ambiguity -->
+  <g stroke="#666" stroke-width="1" fill="none" stroke-dasharray="4 3">
+    <line x1="300" y1="185" x2="270" y2="195"/>
+    <line x1="300" y1="185" x2="330" y2="180"/>
+  </g>
+  <circle cx="300" cy="185" r="3" fill="#666"/>
+  <text x="300" y="160" text-anchor="middle" font-family="ui-sans-serif" font-size="10" fill="#666">中间地带：两边都拉</text>
+
+  <text x="180" y="320" text-anchor="middle" font-family="ui-sans-serif" font-size="11" fill="#8B6914">cluster A（"磁铁堆 1"）</text>
+  <text x="430" y="320" text-anchor="middle" font-family="ui-sans-serif" font-size="11" fill="#8B6914">cluster B（"磁铁堆 2"）</text>
+  <text x="300" y="345" text-anchor="middle" font-family="ui-sans-serif" font-size="10.5" fill="#444">蓝色箭头 = score $\nabla_x \log p(x)$，指向数据稠密处</text>
+</svg>
+
+<p>这张图就是<strong>本章最重要的一张图</strong>。请你记住它：</p>
+
+<ul>
+  <li>真实数据集中在两个高斯团（"两堆磁铁"）；</li>
+  <li>空间每一点都钉了一支箭头；</li>
+  <li><strong>箭头指向数据更稠密的方向，离数据团越远，箭头越长（log-密度的梯度更陡）</strong>；</li>
+  <li>两团之间的"中间地带"，两边都在拉，所以箭头几乎抵消（score 接近 0，但这点对应的密度也很低）。</li>
+</ul>
+
+<div class="callout callout-tip">
+💡 <strong>承前启后</strong>：第 9 章 Langevin 动力学就是「<strong>顺着这些箭头一步一步走</strong>，再加点扰动避免卡在局部极大」。这就是 score-based 模型怎么从噪声生成图像的核心机制。本章先把"箭头"是啥讲清。
+</div>
+
+<h2>三、从能量函数说起：score 真正的起源</h2>
+
+<p>讲师在 Lecture 5（chunk #534-538）<strong>不直接</strong>从 score 写起，而是绕了一段路：先讲能量函数。这条路径不是绕远——它是 score 函数的<strong>历史源头</strong>，也是物理直觉最浓的进入方式。我们按讲师的次序走。</p>
+
+<h3>3.1 能量函数的物理直觉</h3>
+
+<p>讲师举了一个非常具体的例子（chunk #535）：</p>
+
+<blockquote>
+取一维数据 $x \in [-4, 4]$。画一条曲线 $E(x)$，它在<strong>两个位置有谷底</strong>（两个极小值）。<br>
+拿一个小球往曲线上随便扔——球会<strong>自动滚到最近的谷底</strong>停下。
+</blockquote>
+
+<p>这是<strong>能量函数的第一性原理</strong>：</p>
+
+<ul>
+  <li>谷底（能量极小）= 系统最"喜欢"待的位置；</li>
+  <li>山顶（能量极大）= 系统最不愿停留的位置；</li>
+  <li>给系统一点扰动，它<strong>总是往低能方向运动</strong>。</li>
+</ul>
+
+<div class="callout-quote">
+讲师在 chunk #536-537 说："this is inspired from physics. Let's say we take an apple and I drop it. So why does the apple come down and settle on the ground? The reason is that on the ground the potential energy of the apple is minimum. We apply a very similar sort of logic here for our data points."
+</div>
+
+<p>把这套语言迁移到数据上：</p>
+
+<blockquote>
+能量低的位置 = "更像真实数据"的位置 = 概率高的位置。<br>
+能量高的位置 = "不像真实数据"的位置 = 概率低的位置。
+</blockquote>
+
+<p>所以能量函数 $E(x)$ 实际上是<strong>概率密度 $p(x)$ 的"反面"</strong>——一个低（能量）就对应一个高（概率）。讲师反复强调："the energy function becomes a proxy for us to comment about the preference or the probability of [each sample]."</p>
+
+<h3>3.2 从能量到概率：为什么是指数？</h3>
+
+<p>讲师在 chunk #539-540 给了一个非常直观的"挑函数"过程：要把 $E(x)$ 转换成 $p(x)$，这个映射必须满足三条：</p>
+
+<ol>
+  <li><strong>单调反向</strong>：$E$ 越大 $\Rightarrow$ $p$ 越小，$E$ 越小 $\Rightarrow$ $p$ 越大；</li>
+  <li><strong>非负</strong>：概率密度必须 $\geq 0$（不能是负数）；</li>
+  <li><strong>取值合理</strong>：在低能区给出大值，在高能区给出小值。</li>
+</ol>
+
+<p>什么函数同时满足这三条？讲师在 chunk #540 直接给出答案：</p>
+
+<blockquote><strong>指数函数</strong> $e^{-E(x)}$。</blockquote>
+
+<p>它：</p>
+<ul>
+  <li>恒为正（满足条件 2）；</li>
+  <li>$E$ 越大，$e^{-E}$ 越接近 0（满足条件 1）；</li>
+  <li>$E = 0$ 时是 1，$E \to -\infty$ 时趋近 $+\infty$（满足条件 3）。</li>
+</ul>
+
+<p>所以能量基模型（Energy-Based Model, EBM）的核心公式是：</p>
+
+$$p_\theta(x) \;=\; \frac{e^{-E_\theta(x)}}{Z_\theta}, \quad Z_\theta = \int e^{-E_\theta(x)}\, dx$$
+
+<p>这里：</p>
+<ul>
+  <li>$E_\theta(x)$ 是一个神经网络，输出一个标量（"这张图能量多大"）；</li>
+  <li>$Z_\theta$ 是<strong>归一化常数</strong>（partition function 配分函数），保证 $\int p_\theta(x)\, dx = 1$；</li>
+  <li>$\theta$ 是网络参数。</li>
+</ul>
+
+<div class="callout callout-note">
+📝 <strong>名词对照（不同领域不同叫法）</strong>：<br>
+• 物理：energy / partition function / Boltzmann distribution；<br>
+• 统计：unnormalised density $\tilde p(x) = e^{-E(x)}$；<br>
+• 机器学习：energy-based model / score model；<br>
+都是同一件事的不同语言。
+</div>
+
+<h3>3.3 EBM 的<em>真正</em>困难：分母 $Z$ 是积不出来的</h3>
+
+<p>讲师这里其实埋下了一个伏笔（chunk #542 末尾），后面才会引爆。我们替他把<strong>引爆点说穿</strong>：</p>
+
+<p>$Z_\theta = \int e^{-E_\theta(x)}\, dx$ 是一个<strong>对整个数据空间的积分</strong>。如果 $x$ 是 $32 \times 32$ 的 RGB 图像，$x \in \mathbb{R}^{3072}$——这是<strong>3072 维空间</strong>。在 3072 维上做积分？</p>
+
+<ul>
+  <li>解析积分：$E_\theta$ 是神经网络，没有 closed form；</li>
+  <li>数值积分：网格法就算每维只切 2 段也要 $2^{3072}$ 个格点——比可观测宇宙的原子数还多；</li>
+  <li>蒙特卡洛：你得从 $p_\theta$ 自身采样来估 $Z$，但<em>采样又需要先知道 $p_\theta$</em>……死循环。</li>
+</ul>
+
+<div class="callout callout-warning">
+⚠️ <strong>这就是 EBM 几十年没成主流的原因</strong>：训练 EBM 要算 $\log p_\theta(x) = -E_\theta(x) - \log Z_\theta$ 的梯度。$\log Z_\theta$ 是个<em>难以估计的、依赖参数 $\theta$ 的项</em>——MCMC、对比散度（contrastive divergence）、噪声对比估计（NCE）都是为绕过它发明的，但每一种都很重。
+</div>
+
+<p>这就是<strong>下一节 score 函数闪亮登场</strong>的舞台——它一个动作就把 $Z$ 干掉。</p>
+
+<h2>四、Score 函数：求一次梯度，$Z$ 就消失</h2>
+
+<h3>4.1 定义</h3>
+
+$$\boxed{\,s(x) \;\triangleq\; \nabla_x \log p(x)\,}$$
+
+<p>读作"x 的 score"。它是一个<strong>向量值函数</strong>：</p>
+
+<ul>
+  <li>输入：一个数据点 $x \in \mathbb{R}^d$；</li>
+  <li>输出：一个和 $x$ 同维度的向量 $\in \mathbb{R}^d$；</li>
+  <li>第 $i$ 个分量是 $\partial \log p(x) / \partial x_i$。</li>
+</ul>
+
+<h3>4.2 关键代数：$Z$ 在求梯度时消失</h3>
+
+<p>设 $p(x) = \tilde p(x) / Z$，其中 $\tilde p(x) = e^{-E(x)}$ 是<strong>非归一化密度</strong>，$Z$ 是和 $x$ 无关的常数。来求 score：</p>
+
+<div class="deriv-step">
+<strong>步骤 1：写出 $\log p(x)$</strong>
+$$\log p(x) \;=\; \log \tilde p(x) - \log Z$$
+<em>Why</em>：log 把除法变成减法（$\log(a/b) = \log a - \log b$）。
+</div>
+
+<div class="deriv-step">
+<strong>步骤 2：对 $x$ 求梯度</strong>
+$$\nabla_x \log p(x) \;=\; \nabla_x \log \tilde p(x) - \nabla_x \log Z$$
+<em>Why</em>：梯度是线性算子，可以拆。
+</div>
+
+<div class="deriv-step">
+<strong>步骤 3：消掉 $Z$</strong>
+$$\nabla_x \log Z \;=\; 0$$
+<em>Why</em>：$Z = \int e^{-E(x)}\, dx$ 是一个<strong>定积分</strong>，积出来是<em>常数</em>（不再依赖 $x$）。常数对 $x$ 的梯度是 0。
+</div>
+
+<div class="deriv-step">
+<strong>步骤 4：得到 score</strong>
+$$\boxed{\,\nabla_x \log p(x) \;=\; \nabla_x \log \tilde p(x) \;=\; -\nabla_x E(x)\,}$$
+<em>Why</em>：在 EBM 框架里，$\log \tilde p(x) = -E(x)$，所以 score 等于<strong>负的能量梯度</strong>。
+</div>
+
+<div class="callout callout-tip">
+💡 <strong>本章最重要的一行</strong>：<br>
+$$\nabla_x \log p(x) \;=\; \nabla_x \log \tilde p(x)$$
+<strong>归一化常数 $Z$ 完全消失了。</strong>整个 score-based modelling 的<em>立身之本</em>就在这一行——我们不需要再为 $Z$ 苦恼，可以只用<strong>非归一化密度</strong>就建模整个 $p(x)$ 的"方向信息"。
+</div>
+
+<h3>4.3 这意味着什么？（一句话懂 score 为什么"赢"）</h3>
+
+<blockquote>
+EBM 想学 $p(x)$，必须算 $Z$；<strong>Score 模型只学 $\nabla_x \log p(x)$，不必算 $Z$</strong>。<br>
+牺牲：你学到的是"方向场"，不是"密度本身"。<br>
+回报：训练可行。
+</blockquote>
+
+<p>但你立刻会问："只学方向有什么用？我要生成图像啊，你又不能给我 $p(x)$ 让我从里面采样。"——这正是 Langevin 动力学（第 9 章）要解决的问题：<strong>只要知道方向场，就能在上面"爬山采样"</strong>。本章先按下不表。</p>
+
+<p>另一个常见的反问是："那训练用什么损失？没有 $p(x)$，怎么知道我的 $s_\theta$ 算得对不对？"——直觉上的答案是：用<em>有限样本</em>巧妙地构造一个目标函数，让它的最优解恰好是真 score。这就是 Hyvärinen 2005 的 score matching loss、以及 Vincent 2011 的 denoising score matching。它们的故事留给第 10 章。这里只先种下种子：<strong>score 这个对象，可以在不知道 $p$ 的情况下学</strong>——这件事本身就是一个数学上的小奇迹。</p>
+
+<div class="my-addition">
+🟡 <strong>教材外补充：为什么这个洞察直到 2005 年才被 Hyvärinen 系统化？</strong><br>
+$\nabla \log p = -\nabla E$ 这个关系物理学家几十年前就知道——这就是"力 = 负的势能梯度"在概率版本里的写法。但<strong>从这一观察走到"我们用神经网络直接拟合 score 而不学 $p$"</strong>需要两步：(1) 想到不学 $p$ 而学它的梯度；(2) 想出怎么<em>不</em>用 $p$ 就能学梯度——也就是 score matching 损失（下一章主题）。Aapo Hyvärinen 2005 年的论文《Estimation of Non-Normalized Statistical Models by Score Matching》才把这两步打通。
+</div>
+
+<h2>五、Score 函数的几何意义：向量场</h2>
+
+<p>讲师没有在 Lecture 5 用 "vector field" 这个词，但反复强调"方向"——磁铁拉力的方向、能量下降的方向。<strong>Score 函数就是数据空间上的向量场</strong>。逐字理解：</p>
+
+<ul>
+  <li>"场"（field）：空间每一点都赋一个值；</li>
+  <li>"向量场"（vector field）：每一点赋的值是一个<em>向量</em>，不是标量；</li>
+  <li>"score 向量场"：每一点的向量是 $\nabla_x \log p(x)$。</li>
+</ul>
+
+<h3>5.1 在数据流形上 / 流形外的行为</h3>
+
+<p>真实图像分布有一个重要性质：<strong>它集中在一个低维流形（manifold）上</strong>。比如自然图像的有效自由度远低于像素总数。所以 score 向量场的几何长这样：</p>
+
+<ul>
+  <li><strong>远离流形（在噪声里）</strong>：score 强烈指向流形（"快回家"）；</li>
+  <li><strong>接近流形（数据稀疏但还在分布支撑内）</strong>：score 较温和，仍指向稠密区；</li>
+  <li><strong>在流形稠密处</strong>：score 接近 0（这里已经是局部极大值）。</li>
+</ul>
+
+<svg viewBox="0 0 600 280" role="img" aria-label="单峰高斯的 score 向量场">
+  <defs>
+    <marker id="ah2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#0b5"/>
+    </marker>
+    <radialGradient id="blobG" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0%" stop-color="#0b5" stop-opacity="0.45"/>
+      <stop offset="100%" stop-color="#0b5" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect x="0" y="0" width="600" height="280" fill="#fafafa" stroke="#ddd"/>
+  <text x="300" y="20" text-anchor="middle" font-family="ui-sans-serif" font-size="13" font-weight="600">单峰 2D 高斯：score 处处指向中心</text>
+
+  <ellipse cx="300" cy="140" rx="90" ry="90" fill="url(#blobG)"/>
+  <circle cx="300" cy="140" r="3" fill="#0b5"/>
+  <text x="300" y="135" text-anchor="end" font-family="ui-sans-serif" font-size="10" fill="#0b5"> μ</text>
+
+  <g stroke="#0b5" stroke-width="1.6" fill="none" marker-end="url(#ah2)" class="arrow-glow">
+    <line x1="80"  y1="60"  x2="220" y2="120"/>
+    <line x1="80"  y1="220" x2="220" y2="160"/>
+    <line x1="520" y1="60"  x2="380" y2="120"/>
+    <line x1="520" y1="220" x2="380" y2="160"/>
+    <line x1="300" y1="40"  x2="300" y2="80"/>
+    <line x1="300" y1="240" x2="300" y2="200"/>
+    <line x1="120" y1="140" x2="200" y2="140"/>
+    <line x1="480" y1="140" x2="400" y2="140"/>
+  </g>
+
+  <text x="300" y="265" text-anchor="middle" font-family="ui-sans-serif" font-size="10.5" fill="#444">$s(x) = -(x - \mu)/\sigma^2$ — 中心是 sink，远处箭头更长</text>
+</svg>
+
+<h3>5.2 一个练手解析例</h3>
+
+<p>取 $p(x) = \mathcal{N}(x; \mu, \sigma^2 I)$（高斯）。算 score：</p>
+
+<div class="deriv-step">
+<strong>步骤 1</strong>：$\log p(x) = -\dfrac{1}{2\sigma^2}\|x - \mu\|^2 + C$（$C$ 是不依赖 $x$ 的常数）。<br>
+<em>Why</em>：把高斯密度的指数项展开，前面的 $(2\pi\sigma^2)^{-d/2}$ 跑进了常数 $C$。
+</div>
+
+<div class="deriv-step">
+<strong>步骤 2</strong>：对 $x$ 求梯度，$C$ 消失。<br>
+$$\nabla_x \log p(x) \;=\; -\frac{1}{\sigma^2}(x - \mu)$$
+<em>Why</em>：$\|x - \mu\|^2$ 对 $x$ 的梯度是 $2(x - \mu)$；前面有 $-1/(2\sigma^2)$，乘起来得到 $-(x-\mu)/\sigma^2$。
+</div>
+
+<p>读这个公式：</p>
+<ul>
+  <li>$x = \mu$ 时（在均值上），score = 0——正中心；</li>
+  <li>$x$ 远离 $\mu$ 时，score 的<em>大小</em>线性增长，<em>方向</em>始终指回 $\mu$；</li>
+  <li>$\sigma$ 越小，同样位置的 score 越大——"陡峭的高斯"拉力更强。</li>
+</ul>
+
+<div class="callout callout-info">
+ℹ️ <strong>这个公式后面会反复用</strong>：DDPM 的 forward 噪声分布 $q(x_t | x_0) = \mathcal{N}(\sqrt{\bar\alpha_t} x_0, (1-\bar\alpha_t) I)$ 是高斯，对它求 score 就直接出来了——这就是 Tweedie's formula / "DDPM 等价 score model" 的代数根。第 11 章会展开。
+</div>
+
+<h2>六、为什么是「log」p(x) 的梯度，不是 p(x) 的梯度？</h2>
+
+<p>这是教材读者最常问的一个问题。讲师在 Lecture 5 没正面回答（他直接给出能量 → 概率的指数关系，对 log 已经默认）。但理解这一点是钥匙：</p>
+
+<h3>6.1 数值原因</h3>
+
+<p>$p(x)$ 在高维里几乎处处<strong>极小</strong>（密度被分到指数级多的体积上）。直接处理 $p(x)$ 会下溢成 0。<strong>$\log p(x)$ 是有限值</strong>，数值稳定。这是任何概率建模都要先取 log 的常识。</p>
+
+<h3>6.2 几何/结构原因（更深的）</h3>
+
+<p>用乘法法则：</p>
+
+$$\nabla_x p(x) \;=\; p(x) \cdot \nabla_x \log p(x)$$
+
+<p>两边除以 $p(x)$：</p>
+
+$$\nabla_x \log p(x) \;=\; \frac{\nabla_x p(x)}{p(x)}$$
+
+<p>意思是：score 是<strong>"密度的相对增长率"</strong>而不是绝对增长率。它把<em>密度大小</em>的影响除掉了，只留<em>形状信息</em>。两个分布形状一样、整体放大 100 倍，绝对梯度 $\nabla p$ 也放大 100 倍，但 score $\nabla \log p$ 完全相同。</p>
+
+<h3>6.3 配分函数原因（最关键的）</h3>
+
+<p>就是我们 4.2 节算过的：</p>
+<ul>
+  <li>$\nabla_x p(x)$ 依赖 $Z$；</li>
+  <li>$\nabla_x \log p(x)$ <strong>不依赖 $Z$</strong>。</li>
+</ul>
+
+<p>取 log 这一步<strong>把乘法变成加法</strong>，于是 $\log Z$ 变成一个加性常数，被梯度<em>清零</em>。如果不取 log，你永远绕不开 $Z$。</p>
+
+<div class="callout callout-tip">
+💡 <strong>一句话总结</strong>：<em>log 是为了让 $Z$ 出现在加法位置上，求梯度才能消掉它</em>。这是数学上的"巧合"，也是 score-based modelling 能存在的全部理由。
+</div>
+
+<h2>七、Score 和 diffusion 的连接点（伏笔）</h2>
+
+<p>讲师在 chunk #533-534 给出了核心承诺：score 函数和 diffusion "closely intersect"。本章先列出三个具体连接点，下两章一一展开。</p>
+
+<h3>7.1 反向 SDE 里 score 是<em>唯一</em>未知量</h3>
+
+<p>Anderson 1982 的结果是：一个 forward SDE</p>
+$$dx_t = f(x_t, t)\, dt + g(t)\, dw$$
+<p>它的<strong>反向时间</strong>过程是：</p>
+$$dx_t \;=\; \big[f(x_t, t) - g(t)^2 \nabla_x \log p_t(x_t)\big]\, dt + g(t)\, d\bar w$$
+
+<p>注意红字：反向 SDE 里出现了 $\nabla_x \log p_t(x_t)$——<strong>就是 score 函数</strong>，只不过是<em>每个噪声水平 t 上的边际密度</em> $p_t$ 的 score。$f$ 和 $g$ 是 forward 过程自己设定的，已知；<strong>唯一未知的就是 score</strong>。所以"做 diffusion 生成 = 学每个 t 的 score"。详见 第 11 章。</p>
+
+<h3>7.2 DDPM 的噪声预测器其实在学 score</h3>
+
+<p>DDPM 的网络 $\epsilon_\theta(x_t, t)$ 训练目标是预测加进去的噪声。但代数上有：</p>
+
+$$\nabla_{x_t} \log q(x_t | x_0) \;=\; -\frac{x_t - \sqrt{\bar\alpha_t}\, x_0}{1 - \bar\alpha_t} \;=\; -\frac{\epsilon}{\sqrt{1 - \bar\alpha_t}}$$
+
+<p>所以<strong>预测噪声 $\epsilon$ 等价于（差一个负系数地）预测 score</strong>。这就是 Yang Song 在 2021 SDE 论文里证明"DDPM 是 score-based 模型一个特例"的代数根。第 11 章正式给出。</p>
+
+<h3>7.3 Score matching：怎么在不知道 $p$ 的情况下学 $\nabla \log p$？</h3>
+
+<p>这是下一章 第 10 章的主题：Hyvärinen 2005 score matching、denoising score matching、sliced score matching。本章只点题：<strong>可以的，且只需要训练样本</strong>。</p>
+
+<div class="callout callout-note">
+🧭 <strong>章节地图小结</strong>：本章 = 「score 是什么 + 为什么有用」；第 9 章 = 「有了 score，怎么用 Langevin 采样」；第 10 章 = 「怎么训练一个网络学到 score（score matching）」；第 11 章 = 「DDPM ↔ score model ↔ SDE，三者等价」。
+</div>
+
+<figure class="clip-frame">
+  <iframe src="https://www.youtube.com/embed/zRyD7GQ9RHs?start=585" title="Vizuara L5: Energy-Based Models 起点" allowfullscreen></iframe>
+  <figcaption>📺 Vizuara《Principles of Diffusion Models》Lecture 5（约 9:46 处）—— Energy-Based Models 的核心动机段</figcaption>
+</figure>
+
+<h2>八、跨课程对比：Vizuara vs. CMU 的进路</h2>
+
+<p>本章的两个源课程对 score 的处理风格非常不同，值得对照一下：</p>
+
+<h3>8.1 Vizuara 路线：物理直觉先行</h3>
+
+<ul>
+  <li>从"能量谷底 + 球"的物理类比切入；</li>
+  <li>用"磁铁桌面"形象化方向场；</li>
+  <li>最后才写出 $\nabla \log p$ 的公式；</li>
+  <li><strong>风格</strong>：低数学密度、高直觉密度，适合初学者。</li>
+</ul>
+
+<h3>8.2 CMU 10799 路线：直接进 score-based 框架</h3>
+
+<p>CMU Lecture 4（chunk #910）的开篇风格完全不同（讲师 Kelly Hu）：</p>
+
+<div class="callout-quote">
+"Previously last class we have talked about what is diffusion model and essentially it's just like very nice way to turn noise into data. ... uh in order to construct the training data or the training signal, the supervision signal, we first start from our training data and then we gradually add noise until it becomes full Gaussian noise."
+</div>
+
+<ul>
+  <li>从 DDPM 的 forward / reverse 过程切入；</li>
+  <li>把 score-based 模型当作 DDPM 的"另一种等价表达"；</li>
+  <li>很快进入 SDE / score matching loss 的代数推导；</li>
+  <li><strong>风格</strong>：高数学密度、高节奏，假设你已经看过 DDPM 一遍。</li>
+</ul>
+
+<h3>8.3 该怎么选？</h3>
+
+<div class="my-addition">
+🟡 <strong>教材外补充：我的建议</strong><br>
+两个路线对应两种学习目标。<strong>第一次学</strong>：跟 Vizuara 的物理直觉路线，磁铁和谷底先嵌到脑子里。<strong>要做研究 / 复现论文</strong>：必须把 CMU 路线也走一遍，因为现代论文（Karras et al. 2022 EDM、Yang Song et al. 2021 SDE）默认 score-based 框架。本教材的做法是<em>先 Vizuara 后 CMU</em>——本章主要走前者，第 11 章接 CMU 的形式化讲法。
+</div>
+
+<h2>九、Score 函数的常见误解（FAQ）</h2>
+
+<h3>9.1 "score" 这个词为什么这么叫？</h3>
+
+<p>来自统计学。在经典统计里，<strong>score function</strong> 指 likelihood 对<em>参数</em>的梯度：$\nabla_\theta \log p_\theta(x)$。它衡量"参数动一动对似然影响多大"。Yang Song 在 score-based generative model 里<strong>挪用</strong>了这个词，但把梯度对象从 $\theta$ 换成了 $x$——所以叫 <strong>Stein score</strong>（区别于 Fisher score）。日常口语两个都叫 score，但要看清楚<em>对谁求梯度</em>。</p>
+
+<div class="callout callout-warning">
+⚠️ <strong>读论文时务必看清</strong>：score 是对 <strong>data $x$</strong> 求梯度（我们这里讲的），还是对 <strong>parameter $\theta$</strong> 求梯度（经典统计里的 Fisher score）。Diffusion 文献里"score" 默认前者。
+</div>
+
+<h3>9.2 既然 score 是向量，那 score 网络的输出维度多大？</h3>
+
+<p>等于 <strong>$x$ 的维度</strong>。如果 $x$ 是 $32 \times 32 \times 3 = 3072$ 维图像，score 网络 $s_\theta(x, t)$ 的输出也是 3072 维向量。所以 score 网络<strong>架构上和 DDPM 的噪声预测网络几乎一样</strong>（U-Net、输入图像、输出同尺寸张量）——这也是为什么后来发现"DDPM ≡ score model"是顺理成章的。</p>
+
+<h3>9.3 Score 为什么不能用来"算概率"？</h3>
+
+<p>因为 score 只是 $\log p$ 的<em>梯度</em>，<strong>损失了"绝对高度"信息</strong>。两个 $\log p$ 整体差一个常数，它们的 score 完全相同。所以从 score 反推 $p(x)$ 需要做积分（一维 OK，高维不可解）。score 模型<em>原生不会算似然</em>——这是 score-based 模型相比 normalizing flows / autoregressive models 的一个真实劣势。SDE 论文用 "probability flow ODE" 才补回了精确似然的能力（第 11 章）。</p>
+
+<h3>9.4 EBM 和 score 模型到底是不是一回事？</h3>
+
+<p>有内在联系，但不是一回事：</p>
+
+<ul>
+  <li><strong>EBM</strong>：参数化 $E_\theta(x)$（标量输出），$p_\theta = e^{-E_\theta}/Z_\theta$。训练困难（需绕过 $Z_\theta$），但<em>原则上能给出非归一化密度</em>。</li>
+  <li><strong>Score model</strong>：参数化 $s_\theta(x)$（向量输出，直接是 score），不显式定义 $E_\theta$。训练简单（score matching），但<em>不直接给密度</em>。</li>
+</ul>
+
+<p>它们的关系：<strong>EBM 是 score model 的"原函数"</strong>——如果 score model 的输出恰好是某个 $-E_\theta$ 的梯度（即"是<em>保守</em>向量场"），那它对应一个隐式的 EBM。但<em>一般情况下神经网络输出的向量场不保守</em>——这没关系，因为 Langevin 采样和反向 SDE 都不要求保守性。</p>
+
+<h3>9.5 那 score 函数<em>有没有</em>负的方向？</h3>
+
+<p>有。Score 是<strong>有符号</strong>的向量，它的每个分量都可以是负数。负号意味着"沿这个坐标轴的负方向走，log-密度上升更快"。负号在二维磁铁桌面上对应"箭头朝左下方"。如果一个学生把 score 写成 $\|\nabla \log p(x)\|$（取绝对值/范数）那就大错特错——他丢掉了 score 最关键的<em>方向信息</em>，只剩"这点附近密度变化得多剧烈"这个标量。Score 的灵魂在<strong>方向</strong>，不在大小。</p>
+
+<h2>十、用 PyTorch 实现一个最小 score model（伏笔代码）</h2>
+
+<p>讲师在 Lecture 5 没有给代码（chunks 都是直觉讲解）。但作为"教材体"我们补上最小骨架，让你看到 score model<strong>就是一个普通的输入-输出同维度的神经网络</strong>：</p>
+
+<pre><code>import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+class ScoreNet(nn.Module):
+    """
+    一个最小 score 网络：
+    输入 x ∈ R^d，输出 s_θ(x) ∈ R^d（和 x 同维度）。
+    """
+    def __init__(self, dim=2, hidden=128):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(dim, hidden),
+            nn.SiLU(),
+            nn.Linear(hidden, hidden),
+            nn.SiLU(),
+            nn.Linear(hidden, dim),  # 输出维度 = 输入维度
+        )
+
+    def forward(self, x):
+        return self.net(x)            # 直接是 ∇_x log p(x) 的估计
+
+# 用法演示：在已知 ground-truth 的玩具高斯上"检验" score 的形状
+score = ScoreNet(dim=2)
+x = torch.randn(64, 2)
+s = score(x)                          # s.shape == x.shape == [64, 2]
+print(s.shape)                        # torch.Size([64, 2])
+
+# 解析 score（用于对照训练）：N(0, I) 的 ground-truth score 是 -x
+gt = -x
+mse = F.mse_loss(s, gt)               # 这是 explicit score matching loss
+                                       # 真实数据上 gt 不可得 ——
+                                       # 下一章会讲怎么绕过这个困难（score matching）</code></pre>
+
+<div class="callout callout-note">
+🛠️ <strong>注意上面代码里的两点</strong>：(1) 最后一层<strong>没有激活函数</strong>——score 是实值向量，可正可负，不能套 ReLU/sigmoid；(2) 真实训练时 ground-truth score <strong>不可得</strong>（我们不知道 $p_\text{data}$），所以下一章要换一种不依赖 ground-truth 的损失（denoising score matching / sliced score matching）。
+</div>
+
+<h2>十一、本章脉络回顾</h2>
+
+<p>把这一章压成一张"认知坡道图"：</p>
+
+<ol>
+  <li><strong>问题</strong>：生成建模本质是学 $p_\text{data}(x)$，但直接学密度有归一化困难。</li>
+  <li><strong>EBM 视角</strong>：把 $p(x) = e^{-E(x)}/Z$，建模能量函数。物理直觉强，但 $Z$ 难算。</li>
+  <li><strong>Score 函数定义</strong>：$s(x) = \nabla_x \log p(x)$，是一个和 $x$ 同维度的向量场。</li>
+  <li><strong>关键代数</strong>：$\nabla_x \log p(x) = \nabla_x \log \tilde p(x)$——$Z$ 消失。</li>
+  <li><strong>几何意义</strong>：每点钉一支箭头，指向密度上升最陡的方向；磁铁拉力图。</li>
+  <li><strong>为什么 log</strong>：让 $Z$ 出现在加法位置，求梯度才能清零。</li>
+  <li><strong>和 diffusion 的桥</strong>：反向 SDE 里唯一未知量就是 score；DDPM 的噪声预测等价 score 预测。</li>
+  <li><strong>下一步</strong>：第 9 章 Langevin 采样；第 10 章 score matching 训练；第 11 章 DDPM / score / SDE 三位一体。</li>
+</ol>
+
+<div class="takeaways" style="background:#0b5; color:#fff; padding:1.4rem; border-radius:8px; margin-top:2rem;">
+  <h3 style="margin-top:0; color:#fff;">本章要记住的（讲师亲口给的核心）</h3>
+  <ol>
+    <li><strong>Score = 对输入 x 的 log-密度梯度</strong>：$s(x) = \nabla_x \log p(x)$，输出向量与输入同维度。不要和模型参数的梯度混淆。</li>
+    <li><strong>「磁铁桌面」比喻（Vizuara L7）</strong>：空间每一点都有一支指向"最近磁铁堆"的箭头。Score 就是这张拉力地图。</li>
+    <li><strong>「能量谷底 + 球」直觉（Vizuara L5）</strong>：低能 = 高概率，球往谷底滚。$p(x) = e^{-E(x)}/Z$ 是这套直觉的形式化——指数函数同时满足"非负、反向、合理"三条件。</li>
+    <li><strong>$Z$ 消失的代数</strong>：$\nabla_x \log p(x) = \nabla_x \log \tilde p(x)$，因为 $Z$ 不依赖 $x$，求梯度时清零。这是 score-based modelling 的立身之本。</li>
+    <li><strong>为什么是 log p 而不是 p</strong>：log 把乘法变加法，让 $Z$ 出现在<em>加性</em>位置，求梯度才能消。这是数学上的"巧合"，也是整条路线能存在的全部理由。</li>
+    <li><strong>高斯例子</strong>：$p = \mathcal{N}(\mu, \sigma^2 I)$ 时 $s(x) = -(x-\mu)/\sigma^2$，指向 $\mu$，大小随距离线性增长。第 11 章 DDPM ↔ score 的代数核心就是这个公式。</li>
+    <li><strong>承前启后</strong>：反向 SDE 里唯一未知量就是 score；DDPM 的 $\epsilon_\theta$ 等价于 $-s_\theta \cdot \sqrt{1-\bar\alpha_t}$。本章是 score-based 框架的总开关。</li>
+  </ol>
+</div>
+
+</article>

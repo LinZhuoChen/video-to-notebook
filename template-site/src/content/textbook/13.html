@@ -1,0 +1,612 @@
+<style>
+  .fm-ch { line-height: 1.75; }
+  .fm-ch svg { display: block; margin: 1.2rem auto; max-width: 100%; height: auto; }
+  .fm-ch .clip-frame { max-width: 720px; margin: 1.4rem auto; }
+  .fm-ch .clip-frame iframe { width: 100%; aspect-ratio: 16/9; border: 0; border-radius: 6px; }
+  .fm-ch .clip-frame figcaption { color: var(--text-muted); font-size: 0.85rem; margin-top: 0.4rem; text-align: center; }
+  .fm-ch .tldr { background: var(--surface-soft); border-left: 4px solid var(--module-accent); padding: 1rem 1.2rem; border-radius: 0 6px 6px 0; margin: 1.4rem 0; }
+  .fm-ch .tldr h2 { margin-top: 0; font-size: 1.05rem; border-bottom: 0; }
+  .fm-ch .callout { padding: 0.7rem 1rem; margin: 1rem 0; border-radius: 0 6px 6px 0; }
+  .fm-ch .callout-info { background: #eef6fc; border-left: 4px solid #2b80c4; }
+  .fm-ch .callout-note { background: #f3f0fa; border-left: 4px solid #6f4dd0; }
+  .fm-ch .callout-warning { background: #fff6e0; border-left: 4px solid #d4a017; }
+  .fm-ch .callout-tip { background: #e8f5e9; border-left: 4px solid #0b5; }
+  .fm-ch .callout-quote { background: var(--surface-soft); border-left: 3px solid var(--border-strong); padding: 0.5rem 1rem; margin: 0.8rem 0; font-style: italic; color: var(--text-muted); }
+  .fm-ch .my-addition { background: #fff7d6; border-left: 4px solid #b8860b; padding: 0.7rem 1rem; margin: 1rem 0; border-radius: 0 6px 6px 0; }
+  .fm-ch pre { background: #1f1f1f; color: #f6f4ee; padding: 1rem; border-radius: 6px; font-size: 0.86rem; line-height: 1.55; overflow-x: auto; }
+  .fm-ch code:not(pre code) { background: var(--surface-soft); padding: 0.1rem 0.35rem; border-radius: 3px; font-size: 0.9em; }
+  .fm-ch h2 { border-bottom: 1px solid var(--border); padding-bottom: 0.3rem; margin-top: 2.4rem; }
+  .fm-ch h3 { color: var(--module-accent); margin-top: 1.6rem; }
+  .fm-ch .deriv-step { margin: 0.8rem 0; padding: 0.6rem 0.8rem; background: var(--surface-soft); border-radius: 4px; }
+  .fm-ch .deriv-step strong { color: var(--module-accent); }
+  .fm-ch .source-quote { font-style: italic; color: var(--text-muted); border-left: 3px solid var(--module-accent); padding: 0.5rem 1rem; margin: 0.8rem 0; background: var(--surface-soft); border-radius: 0 4px 4px 0; }
+  @keyframes fm-flow { 0% { offset-distance: 0%; } 100% { offset-distance: 100%; } }
+  .fm-ch .flow-dot { animation: fm-flow 5s linear infinite; }
+</style>
+
+<article class="fm-ch">
+
+<h1>13. Flow Matching：直接回归速度场</h1>
+
+<p style="font-size:0.95rem; color:var(--text-muted);">主源：CMU 10799 Lecture 5（Flow Matching 开场）+ Lecture 13（Discrete Flow Matching，讲师把"probability path / conservation of mass / continuity equation / velocity / ODE / reparameterization"这一整套语言一行一行讲了出来，连续 FM 与离散 FM 共享同一套骨架）；副源：Vizuara《Principles of Diffusion Models》Lecture 9–10（flow 与 trajectory 的物理直觉，"小盒子里粒子轨迹"那张图）。</p>
+
+<div class="tldr">
+  <h2>📌 TL;DR</h2>
+  <p><strong>Flow Matching = 不学 score，直接学一个时变向量场 $v_\theta(x, t)$。</strong>给定一条把先验 $p_0 = \mathcal{N}(0, I)$ 接到数据 $p_1 = p_\text{data}$ 的<strong>概率路径</strong> $p_t(x)$，存在一个速度场 $u_t(x)$ 推着粒子沿着这条路径流动（ODE：$\dot x = u_t(x)$）。训练目标极朴素——MSE 回归：</p>
+  $$\mathcal{L}_\text{FM}(\theta) = \mathbb{E}_{t, x \sim p_t}\big\|v_\theta(x, t) - u_t(x)\big\|^2$$
+  <p>问题是<em>边际</em>速度场 $u_t(x)$ 没有闭式。Lipman et al. 2023 的关键贡献：换成<strong>条件 Flow Matching (CFM)</strong>——为每个数据点 $x_1$ 设计一条<em>条件路径</em> $p_t(x|x_1)$（通常是 Gaussian），它的<strong>条件速度场 $u_t(x | x_1)$ 有闭式</strong>。然后训这个：</p>
+  $$\mathcal{L}_\text{CFM}(\theta) = \mathbb{E}_{t,\,x_1 \sim p_\text{data},\,x \sim p_t(\cdot|x_1)}\big\|v_\theta(x, t) - u_t(x | x_1)\big\|^2$$
+  <p>定理：$\nabla_\theta \mathcal{L}_\text{FM} = \nabla_\theta \mathcal{L}_\text{CFM}$（两个目标对参数的梯度相等，差一个常数）。所以训简单的 CFM，得到的 $v_\theta$ 就是边际速度场。</p>
+  <p><strong>采样</strong>：$x_0 \sim \mathcal{N}(0,I)$，跑 Euler $x_{k+1} = x_k + \Delta t \cdot v_\theta(x_k, t_k)$，5–10 步通常够。<strong>这就是 SD3、Flux、SORA 背后的训练范式。</strong></p>
+  <p><strong>承前启后</strong>：<a href="/video-to-notebook/textbook/12/">第 12 章 CNF</a> 给出"用 ODE 把噪声推到数据"的<em>架构</em>，但 MLE 训练贵到难用；本章给出<em>怎么训</em>——score matching 让我们能训 SDE，flow matching 让我们能训 ODE，两件事在同一棵树上。</p>
+</div>
+
+<h2>一、为什么要"再造一个" Flow Matching？</h2>
+
+<p>到第 13 章你已经手里有三把锤子：DDPM（<a href="/video-to-notebook/textbook/7/">第 7 章</a>）、Score Matching / SDE（<a href="/video-to-notebook/textbook/10/">第 10 章</a>）、CNF（<a href="/video-to-notebook/textbook/12/">第 12 章</a>）。每一把都能"把噪声变成数据"，那为什么 Lipman、Albergo、Liu 三组人在 2022 年下半年几乎同时提出 flow matching？</p>
+
+<p>CMU L5 开场一句话回答了这个问题（chunk #2，讲师 Yiming Yang 实验室的助教）：</p>
+
+<blockquote class="source-quote">「Last time we learned about how diffusion turns noise into data by gradually adding noise and gradually denoising. ... it turns out [diffusion and score-based models] are pretty much the same, especially if you scale the number of time steps to infinite—then they both become this thing called a continuous-time stochastic process, formulated into stochastic differential equations.」</blockquote>
+
+<p>讲师接下来反问："SDE 多绕——前向加噪、写下逆向 SDE、再去学 score，全程跟随机性搏斗。如果我只想要个 ODE，把噪声 push 到数据，<strong>为什么不直接 linear interpolation 这两端</strong>？"——这一句几乎概括了整个 flow matching 的设计哲学（CMU L5 chunk #5，被 <a href="/video-to-notebook/textbook/12/">第 12 章</a>引用过）。</p>
+
+<p>三把锤子的痛点排成一行：</p>
+
+<ul>
+  <li><strong>DDPM / Score</strong>：score $\nabla_x \log p_t(x)$ 是个间接量——你想要的是"粒子怎么走"，得到的却是"密度往哪一边凸"，中间隔了一步翻译。而且每一步去噪都要做随机性管理（重参数化 + 反向 SDE）。</li>
+  <li><strong>CNF（第 12 章）</strong>：架构没问题（ODE + MLP），但<strong>训练贵</strong>——MLE 要积分 ODE、沿途估 trace、反传整段轨迹。CMU 讲师原话："CNF was kind of put on the shelf for a few years until flow matching saved it."（同章引述）</li>
+  <li><strong>都没有 GAN 的"直接回归"那么简单</strong>：GAN 训判别器，再训生成器；DDPM 训"预测噪声"；都是中间目标。能不能更直接——<em>把目标函数变成对一个简单向量场的 MSE 回归</em>？</li>
+</ul>
+
+<p>Flow matching 的回答：<strong>能</strong>。代价是放弃 likelihood 计算（不再像 CNF 那样能算 $\log p(x)$），换来一个干净的 MSE 损失和 5–10 步的快速采样。</p>
+
+<p>把这件事放到时间线上看更清楚：2020 年 DDPM 出来后，社区花了两年才意识到"我们其实想要的是 ODE 不是 SDE"——score-based SDE（Song et al. 2021）虽然已经隐含了一个"probability flow ODE"，但训练目标仍然是 score matching，思维还在 SDE 的世界里。2022 年下半年 Lipman、Albergo &amp; Vanden-Eijnden、Liu 三组人几乎同时想到："既然我们最后是用 ODE 采样，为什么不<em>直接</em>把训练目标也建在 ODE 上？"——flow matching 就是把这个想法做到底，让<strong>训练目标和采样器在同一种数学语言（ODE / velocity field）里说话，不再翻译来翻译去</strong>。</p>
+
+<div class="callout callout-warning">
+⚠️ <strong>容易踩的第一个坑</strong>：很多人第一次读 flow matching 会以为"它和 diffusion 是两种截然不同的范式"。这是错的。
+<br><br>
+后面会看到——当你把 flow matching 的<em>条件路径</em>选成"diffusion 那种 $\mathcal{N}(\sqrt{\bar\alpha_t} x_1, (1-\bar\alpha_t) I)$"，它的速度场和 DDPM 的 score 一一对应，差一个 $-\sigma_t$ 因子。<strong>Flow matching ⊃ score matching 在条件层面是等价的</strong>。换句话说，flow matching 是一个更大的脚手架，score matching 是它的一个特例。
+</div>
+
+<h2>二、先把「flow」当成一盒粒子在跑</h2>
+
+<p>Vizuara L9 开篇用了一个非常物理的例子，<strong>这一段是你建立"flow"直觉的关键</strong>，请认真读（chunk #279）：</p>
+
+<blockquote class="source-quote">「Imagine a box that includes a lot of tiny particles. This is particle P1. Now imagine that for some reason these particles are moving inside the box. So the particles are following specific trajectories. For example, this is the trajectory which is followed by P1. Then we take another point P2 and we find that this is the trajectory which is followed by the point P2. Similarly, every single point in the box ...」</blockquote>
+
+<p>把这段话翻译成数学：</p>
+
+<ul>
+  <li><strong>盒子</strong> = $\mathbb{R}^d$（数据空间）；</li>
+  <li><strong>粒子</strong> = 样本 $x$；</li>
+  <li><strong>粒子在 $t$ 时刻的位置</strong> = $x(t) \in \mathbb{R}^d$；</li>
+  <li><strong>每个粒子有自己的轨迹</strong> $x: [0,1] \to \mathbb{R}^d$，所有粒子的轨迹合起来叫做一个 <strong>flow</strong>。</li>
+</ul>
+
+<p>flow 不仅是单个粒子的轨迹——它是一整个<em>家族</em>的轨迹，<strong>每个初始位置 $x_0$ 配一条</strong>。形式化：</p>
+
+$$\psi_t : \mathbb{R}^d \to \mathbb{R}^d,\qquad x(t) = \psi_t(x_0)$$
+
+<p>$\psi_t$ 在 $t=0$ 时是恒等映射 $\psi_0(x_0) = x_0$，在 $t=1$ 时把整盒子粒子推到了它们的"终点位置" $\psi_1(x_0)$。</p>
+
+<p>每个粒子的<strong>瞬时速度</strong>定义这个 flow：</p>
+
+$$\frac{d}{dt}\psi_t(x_0) = u_t\!\big(\psi_t(x_0)\big)$$
+
+<p>这就是一个 ODE。给定速度场 $u_t(\cdot)$，flow 是 ODE 的解。Flow matching 要学的就是这个 $u_t$。</p>
+
+<svg viewBox="0 0 640 240" role="img" aria-label="盒子里粒子的轨迹与速度场">
+  <defs>
+    <marker id="fm-arrow" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+      <path d="M0,0 L6,3 L0,6 Z" fill="#2b80c4"/>
+    </marker>
+  </defs>
+  <g font-family="ui-sans-serif" font-size="11" fill="var(--text)">
+    <text x="320" y="20" text-anchor="middle" font-weight="600">「一盒粒子」的 flow：每个粒子一条轨迹，速度场 $u_t$ 统一编排</text>
+
+    <!-- Box -->
+    <rect x="40" y="40" width="560" height="170" rx="6" fill="none" stroke="var(--border)" stroke-dasharray="4,3"/>
+
+    <!-- Trajectories -->
+    <path d="M 70 180 Q 200 150 350 130 T 580 90"  stroke="#2b80c4" fill="none" stroke-width="1.5"/>
+    <path d="M 70 130 Q 200 110 350 100 T 580 70"  stroke="#2b80c4" fill="none" stroke-width="1.5"/>
+    <path d="M 70  90 Q 200 100 350 110 T 580 130" stroke="#2b80c4" fill="none" stroke-width="1.5"/>
+
+    <!-- Start / end labels -->
+    <text x="60" y="220" font-size="10" fill="var(--text-muted)">$t=0$（噪声 $p_0$）</text>
+    <text x="540" y="220" font-size="10" fill="var(--text-muted)">$t=1$（数据 $p_1$）</text>
+
+    <!-- Velocity arrows -->
+    <g stroke="#2b80c4" stroke-width="1" marker-end="url(#fm-arrow)" fill="none">
+      <line x1="200" y1="170" x2="220" y2="160"/>
+      <line x1="200" y1="120" x2="220" y2="115"/>
+      <line x1="200" y1="100" x2="220" y2="105"/>
+      <line x1="400" y1="125" x2="420" y2="115"/>
+      <line x1="400" y1="100" x2="420" y2="95"/>
+      <line x1="400" y1="110" x2="420" y2="118"/>
+    </g>
+
+    <text x="300" y="200" font-size="10" fill="var(--module-accent)">每个箭头 = $u_t(x)$，告诉粒子下一刻往哪走</text>
+  </g>
+</svg>
+
+<div class="callout callout-tip">
+💡 <strong>名字来源</strong>："Flow" 来自流体力学——把 $p_t(x)$ 想象成"密度"，$u_t(x)$ 想象成"流速场"，整个画面就是一团流体从 $p_0$ 形状慢慢变形成 $p_1$ 形状。Flow matching 学的就是<em>流速场</em>。
+</div>
+
+<p>有了这层物理直觉，再把 flow matching 的目标用大白话讲一遍：训练时，你看到一堆粒子（数据样本），看到它们大致从哪儿（噪声）流到哪儿（数据）；你的任务是学出"在任意位置、任意时刻，粒子应该往哪走"——也就是把整个时空 $(x, t) \in \mathbb{R}^d \times [0,1]$ 的速度场学出来。采样时就把一颗噪声粒子放到 $t=0$，按速度场跑到 $t=1$，看它落在哪。<strong>整个过程没有随机采样、没有反向 SDE、没有 score——只有一个 MLP/U-Net 在做"向量场拟合"</strong>。</p>
+
+<h2>三、概率路径 $p_t(x)$：把两端接起来</h2>
+
+<p>CMU L13 chunk #1625–1626 里讲师有一段对话——"velocity 的离散类比是什么？"学生答"probability path"。讲师把"probability path"叫做整个 flow matching 的<strong>骨架</strong>：</p>
+
+<blockquote class="source-quote">「You will try, you want to somehow form a probability path, right? To go from like some noise or like some full mass to clean data.」</blockquote>
+
+<p><strong>概率路径</strong>：一族随 $t \in [0,1]$ 平滑变化的概率密度 $\{p_t(x)\}_{t\in[0,1]}$，端点固定：</p>
+
+<ul>
+  <li>$p_0(x) = \mathcal{N}(x; 0, I)$（先验，从这里开始采样）；</li>
+  <li>$p_1(x) = p_\text{data}(x)$（数据分布，我们想到达的地方）。</li>
+</ul>
+
+<p><strong>路径有无穷多种选法</strong>——这是 flow matching 给你的设计自由。三种最常用的：</p>
+
+<ol>
+  <li><strong>Diffusion 路径</strong>（Variance Preserving，和 DDPM 等价）：
+  $$p_t(x|x_1) = \mathcal{N}\!\big(x; \alpha_t x_1, \sigma_t^2 I\big),\quad \alpha_0 = 0, \alpha_1 = 1, \sigma_0 = 1, \sigma_1 \to 0$$</li>
+  <li><strong>Optimal Transport 路径</strong>（线性插值，Lipman 推荐）：
+  $$x_t = (1 - t) x_0 + t x_1,\qquad x_0 \sim \mathcal{N}(0, I),\, x_1 \sim p_\text{data}$$
+  这条路径在 Liu et al. 的 "Rectified Flow" 里也叫 "straightening flow"——SD3、Flux 用的就是这个。</li>
+  <li><strong>Variance Exploding 路径</strong>（NCSN 风格）：方差随 $t$ 爆炸增长。</li>
+</ol>
+
+<div class="callout callout-info">
+ℹ️ <strong>"路径选择 = 模型先验"</strong>。不同的 $p_t$ 在物理上对应不同的"扩散方式"。OT 路径（线性插值）走的是直线——所以采样步数极少（rectified flow 一步采样的根源）；diffusion 路径走的是 Brownian-like 曲线——步数多但每步学起来稳定。SD3 选 OT 不是偶然。
+</div>
+
+<p>三条路径长什么样，可以心里画一张图：</p>
+
+<ul>
+  <li><strong>OT 路径</strong>：从噪声点 $x_0$ 到数据点 $x_1$ 走<em>一条直线</em>。粒子的整条轨迹是 $x_t = (1-t) x_0 + t x_1$，速度始终是常向量 $x_1 - x_0$。这是"最短路"。</li>
+  <li><strong>Diffusion 路径</strong>：粒子从 $x_0$ 出发，先<em>漂泊</em>一段（早期方差大、信号弱），再慢慢被拉向 $x_1$。轨迹是一条<em>弯曲的钩状曲线</em>。这也解释了为什么 DDPM 要 1000 步——你走的不是直线。</li>
+  <li><strong>VE 路径</strong>：粒子在原地<em>越抖越凶</em>，方差爆炸式增长后，再被吸回 $x_1$。NCSN 的"多尺度"思想。</li>
+</ul>
+
+<p>选路径的核心问题是<strong>采样步数 vs. 学习稳定性</strong>的权衡：路径越直，每步可以走得越远（步数少），但路径在端点附近变化剧烈，学起来局部"陡"；路径越弯，每步走小段稳定，但需要更多步。SD3 实测下来 OT + 5–10 步 Euler 已经把这个权衡推到了甜蜜点。</p>
+
+<h3>3.1 一个让你"看见"概率路径的小例子</h3>
+
+<p>把整个数据分布想象成二维平面上的两个小簇（比如 mixture of Gaussians，一簇在 $(2, 2)$，一簇在 $(-2, -2)$）。$p_0 = \mathcal{N}(0, I)$ 是<em>原点周围的圆</em>。$p_1$ 是<em>两个小斑点</em>。</p>
+
+<ul>
+  <li>$t = 0.0$：一团圆圆的云，集中在原点；</li>
+  <li>$t = 0.3$：云开始<em>分裂</em>，往两个数据簇方向拉伸；</li>
+  <li>$t = 0.7$：已经能看出两个独立的"小水滴"，但它们还有点模糊、彼此相连；</li>
+  <li>$t = 1.0$：两个小水滴坍缩成两个小斑点，就是 $p_1$。</li>
+</ul>
+
+<p>在每一帧上画箭头表示当前的速度场 $u_t(x)$：早期箭头从原点指向两个数据簇，中期箭头随位置而变（在簇之间分叉），后期箭头几乎消失（粒子已经到位）。这就是 flow matching 真正在学的东西——<strong>一个时空 4 维的"风场"</strong>。</p>
+
+<h2>四、Conservation of Mass 与 Continuity Equation</h2>
+
+<p>CMU L13 chunk #1626–1633 用了非常多的时间讲两个"物理守恒律"——这一段在连续 FM 里也是核心，所以请耐心读完（讲师讲完后说："这是 information theory 那帮人喜欢的名字"）。</p>
+
+<h3>4.1 ① 守恒律一：probability 必须始终加和到 1（Conservation of Mass）</h3>
+
+<p>在任意 $t$，$p_t$ 都是个合法概率分布：</p>
+
+$$\int p_t(x) \, dx = 1 \quad\forall t \in [0,1]$$
+
+<p>讲师把这件事翻译成 flow 的语言（chunk #1633）：</p>
+
+<blockquote class="source-quote">「The amount of flow that flows out of a certain state should equal all the amount of flow that flows in. ... All the flows will just add up to zero. They'll all cancel out essentially.」</blockquote>
+
+<p>翻译：进任意小盒子的<em>概率流</em> = 出这个小盒子的<em>概率流</em>。<strong>没有粒子凭空蒸发或诞生。</strong></p>
+
+<h3>4.2 ② 守恒律二：概率只能连续变化（Continuity Equation）</h3>
+
+<p>这是 flow matching 的<strong>命门方程</strong>。讲师 chunk #1632 一字一句念出来：</p>
+
+<blockquote class="source-quote">「The infinitesimal change in probability is equal to literally the amount of probability that comes into this particular state, minus the probability that goes out of this state. That's it. ... Super intuitive, I hope.」</blockquote>
+
+<p>形式化（连续情形）：</p>
+
+$$\boxed{\;\frac{\partial p_t(x)}{\partial t} + \nabla_x \cdot \big(p_t(x) \, u_t(x)\big) = 0\;}$$
+
+<p>左边第一项 = "密度在 $x$ 处随时间的变化率"；第二项 = "概率流的散度"（流出 − 流入）。两项相加为 0，就是 Conservation of Mass 的微分形式。</p>
+
+<p><strong>这条方程的意义</strong>：给定概率路径 $p_t$，能<em>反推</em>出推动它的速度场 $u_t$；反过来，给定 $u_t$，能<em>预测</em>路径如何演化。Flow 和 path 通过这条方程<strong>一一对应</strong>。</p>
+
+<div class="callout callout-quote">
+讲师 chunk #1634 总结："This is a OD[E] again, right? Amazing. Just like flow matching, we get a simple OD[E] again. So all we need to do now is to simulate this ODE in order to build a trajectory on this probability path."
+</div>
+
+<p>这条方程其实就是物理里的<strong>质量守恒</strong>定律（fluid dynamics 里同名同款），唯一的差别是"质量"换成了"概率"。如果你修过流体力学，看到它会有一种熟悉感——所有 flow matching 论文最后都建立在这一条偏微分方程之上，但因为闭式条件路径让我们绕开了直接解 PDE 的需要，所以工程实现里你<em>从来不会真的</em>显式去算 $\partial_t p_t + \nabla \cdot (p_t u_t)$。它只在<em>证明 CFM 定理</em>的时候出场（§七）。</p>
+
+<h2>五、Marginal vector field 为什么不能直接学</h2>
+
+<p>到这里你可能想："那就直接做 MSE 回归 $\|v_\theta(x, t) - u_t(x)\|^2$ 啊！"——卡住的地方是：</p>
+
+<blockquote><strong>$u_t(x)$ 没有闭式</strong>——它是<em>边际</em>速度场，需要把所有可能的数据点 $x_1$ 对应的轨迹"积起来"才能得到。具体说：</blockquote>
+
+$$u_t(x) = \int u_t(x | x_1) \, \frac{p_t(x | x_1) \, p_\text{data}(x_1)}{p_t(x)} \, dx_1$$
+
+<p>这个积分在高维不可解（和 ELBO 章的 $\log p(x)$ 一样的难度），所以直接训 $\mathcal{L}_\text{FM}$ 不现实。Lipman et al. 2023 的天才一招：<strong>训"条件版"</strong>。</p>
+
+<h2>六、Conditional Flow Matching：把不可算变成可算</h2>
+
+<h3>6.1 条件路径 $p_t(x|x_1)$</h3>
+
+<p>对每个数据点 $x_1 \sim p_\text{data}$，<strong>单独</strong>设计一条从噪声接到 $x_1$ 的路径。最常用的是 Gaussian 形式：</p>
+
+$$p_t(x | x_1) = \mathcal{N}\!\big(x; \mu_t(x_1), \sigma_t(x_1)^2 I\big)$$
+
+<p>端点要求：</p>
+
+<ul>
+  <li>$t=0$：$\mu_0(x_1) = 0,\; \sigma_0(x_1) = 1$（先验高斯，和 $x_1$ 无关）；</li>
+  <li>$t=1$：$\mu_1(x_1) = x_1,\; \sigma_1(x_1) = \sigma_\text{min} \to 0$（坍缩到 $x_1$ 这一点）。</li>
+</ul>
+
+<p>边际路径就是把这些条件路径用数据分布加权积分：</p>
+
+$$p_t(x) = \int p_t(x|x_1) \, p_\text{data}(x_1) \, dx_1$$
+
+<h3>6.2 条件速度场 $u_t(x|x_1)$ 是闭式的</h3>
+
+<p>这是 CFM 的核心红利。对 Gaussian 条件路径，可以解出：</p>
+
+$$u_t(x | x_1) = \frac{\sigma_t'(x_1)}{\sigma_t(x_1)}\big(x - \mu_t(x_1)\big) + \mu_t'(x_1)$$
+
+<p>其中 ' 是对 $t$ 求导。<strong>没有积分，没有神经网络估计——就是初等代数</strong>。对最常用的 OT 路径 $x_t = (1-t) x_0 + t x_1$：</p>
+
+$$u_t(x_t | x_1) = x_1 - x_0$$
+
+<p>这条<em>常向量</em>就是从噪声 $x_0$ 直接指向数据 $x_1$ 的方向。<strong>能比这更简单吗？</strong></p>
+
+<div class="callout callout-tip">
+💡 <strong>记住这个公式</strong>：OT 路径下条件速度 = "数据 − 噪声"，是一个<em>不随 $t$ 变</em>的常向量。后面写代码你会感觉这件事非常滑稽——目标函数原来就这么干净。
+</div>
+
+<h3>6.3 推一遍 OT 路径的速度场（让你彻底踏实）</h3>
+
+<p>OT 路径太干净了，干净到第一次看会觉得"是不是哪里漏算了"。所以我们手推一遍，把 §6.2 的一般公式套进 OT 路径，看看 $x_1 - x_0$ 是怎么蹦出来的。</p>
+
+<div class="deriv-step">
+<strong>Step 1: 写出条件路径</strong>
+$$p_t(x | x_1, x_0) = \delta\!\big(x - ((1-t) x_0 + t x_1)\big)$$
+<em>Why</em>：给定 $(x_0, x_1)$ 两端，整条直线被锁死，所以是 delta 分布（"零方差"的 Gaussian 极限）。
+</div>
+
+<div class="deriv-step">
+<strong>Step 2: 把 $x_0$ 边际掉，看 $p_t(x | x_1)$</strong>
+$$x = (1-t) x_0 + t x_1,\ x_0 \sim \mathcal{N}(0, I)\ \Longrightarrow\ x|x_1 \sim \mathcal{N}(t x_1,\, (1-t)^2 I)$$
+<em>Why</em>：高斯的线性变换还是高斯，均值 $\mu_t = t x_1$，方差 $\sigma_t^2 = (1-t)^2$。
+</div>
+
+<div class="deriv-step">
+<strong>Step 3: 套 §6.2 的速度公式</strong>
+$$u_t(x | x_1) = \frac{\sigma_t'}{\sigma_t}(x - \mu_t) + \mu_t'$$
+<em>Why</em>：$\mu_t' = x_1$；$\sigma_t = 1-t$ 所以 $\sigma_t' = -1$，$\sigma_t'/\sigma_t = -1/(1-t)$。代入并把 $x = (1-t)x_0 + t x_1$ 代回去：
+$$u_t = -\frac{1}{1-t}\big((1-t) x_0 + t x_1 - t x_1\big) + x_1 = -x_0 + x_1 = x_1 - x_0$$
+干净到没有任何 $t$ 依赖。<strong>这就是 OT 路径的魔法</strong>。
+</div>
+
+<h3>6.4 CFM 训练目标</h3>
+
+<p>把"边际版"换成"条件版"：</p>
+
+$$\boxed{\;\mathcal{L}_\text{CFM}(\theta) = \mathbb{E}_{t \sim \mathcal{U}(0,1),\; x_1 \sim p_\text{data},\; x \sim p_t(\cdot|x_1)} \big\|v_\theta(x, t) - u_t(x|x_1)\big\|^2\;}$$
+
+<p>采样过程极朴素：</p>
+
+<ol>
+  <li>抽 $t \in [0, 1]$ 均匀；</li>
+  <li>抽 $x_1$ 从训练集；</li>
+  <li>抽 $x \sim p_t(\cdot | x_1)$——对 Gaussian 就是 $x = \mu_t(x_1) + \sigma_t(x_1) \cdot \epsilon, \epsilon \sim \mathcal{N}(0, I)$；</li>
+  <li>算闭式 $u_t(x | x_1)$；</li>
+  <li>$\|v_\theta(x, t) - u_t(x|x_1)\|^2$ 做反传。</li>
+</ol>
+
+<h2>七、关键定理：训 CFM 等价于训 FM</h2>
+
+<p>到这里逻辑跳了一步——我们想要的是<em>边际</em>速度场 $u_t$，凭什么训条件目标 $\mathcal{L}_\text{CFM}$ 学到的 $v_\theta$ 就是 $u_t$？Lipman et al. 2023 的定理回答："因为两个 loss 的<strong>梯度对参数完全相等</strong>。"</p>
+
+<div class="deriv-step">
+<strong>定理（Lipman et al. 2023, Theorem 2）</strong>：在温和条件下，
+$$\nabla_\theta \mathcal{L}_\text{FM}(\theta) = \nabla_\theta \mathcal{L}_\text{CFM}(\theta)$$
+等价地，$\mathcal{L}_\text{FM}(\theta) = \mathcal{L}_\text{CFM}(\theta) + C$，$C$ 是<em>不依赖 $\theta$</em> 的常数。
+</div>
+
+<div class="deriv-step">
+<strong>证明骨架</strong>：把 $\mathcal{L}_\text{FM}$ 展开 $\|v_\theta - u_t\|^2 = \|v_\theta\|^2 - 2\langle v_\theta, u_t\rangle + \|u_t\|^2$。<br>
+<em>Why（第 1 项）</em>：$\|v_\theta\|^2$ 在两个 loss 里都一样（因为 $\int p_t(x) f(x) dx = \int\int p_t(x|x_1) p_\text{data}(x_1) f(x) dx \, dx_1$，f 不变）。<br>
+<em>Why（第 3 项）</em>：$\|u_t\|^2$ 不含 $\theta$，作为常数舍去。<br>
+<em>Why（第 2 项，关键）</em>：交叉项的边际版
+$$\mathbb{E}_{x \sim p_t}[\langle v_\theta, u_t \rangle] = \int v_\theta(x,t) \cdot u_t(x) \, p_t(x) \, dx$$
+代入 $u_t$ 的边际表达式（§五的公式），积分顺序一交换，发现它<em>恰好</em>等于条件版的
+$$\mathbb{E}_{x_1, x \sim p_t(\cdot|x_1)}[\langle v_\theta, u_t(x|x_1)\rangle]$$
+两个交叉项相等，所以两个 loss 只差常数。
+</div>
+
+<div class="callout callout-quote">
+讲师在 L13 chunk #1635 的一句话其实暗藏了这套等价性："This is the only thing that we need to learn ... this is the quote-unquote velocity that we should be learning."——重点是 "the only thing"。CFM 的存在让我们<em>只需要回归一个闭式向量</em>，剩下的等价性由数学保证。
+</div>
+
+<h3>7.1 直觉解释：为什么这一招行得通？</h3>
+
+<p>把上面证明的味道用大白话讲一遍：你的网络 $v_\theta(x, t)$ 不知道<em>哪个 $x_1$</em> 产生了当前看到的 $x$——它只能看到 $(x, t)$。所以当训练时一个特定的 $(x, t)$ 出现，背后可能对应<em>很多个</em>潜在的 $x_1$，每个 $x_1$ 给出不同的"目标速度"。MSE 的几何性质告诉我们：<strong>对一个固定输入做 MSE 回归到多个目标的最优解，就是这些目标的（加权）均值</strong>。</p>
+
+<p>把这一点形式化：对固定的 $(x, t)$，条件 loss 取最小值时，
+$$v_\theta^*(x, t) = \mathbb{E}_{x_1 \sim p(x_1 | x, t)}\big[u_t(x|x_1)\big]$$
+而右边这个期望（按贝叶斯展开）<em>恰好等于</em>边际速度场 $u_t(x)$。所以网络就算只见过条件目标，<strong>它学到的最优解自动是边际目标</strong>——这正是 CFM 定理的几何根因。</p>
+
+<div class="callout callout-tip">
+💡 <strong>类比锚点</strong>：这件事和 score matching 的"denoising score matching 等价于 marginal score matching"是<em>同一个数学事实</em>的两种装扮——都是"MSE 对条件目标 ≡ MSE 对边际目标 + 常数"。如果你之前学过 DSM 的证明（<a href="/video-to-notebook/textbook/10/">第 10 章</a>），这里几乎就是把"score"换成"velocity"重写一遍。
+</div>
+
+<h2>八、和 score matching 在条件层面等价</h2>
+
+<p>很多教材会单独证 flow matching 不是"另一种范式"，而是 score matching 的一个旋转视角。直接看公式：</p>
+
+<p>对 Gaussian 条件路径 $p_t(x|x_1) = \mathcal{N}(\mu_t(x_1), \sigma_t(x_1)^2 I)$，条件 score 是：</p>
+
+$$\nabla_x \log p_t(x|x_1) = -\frac{x - \mu_t(x_1)}{\sigma_t(x_1)^2}$$
+
+<p>而条件速度 $u_t(x|x_1)$（§6.2 的公式）可以写成：</p>
+
+$$u_t(x|x_1) = \mu_t'(x_1) + \sigma_t'(x_1) \cdot \frac{x - \mu_t(x_1)}{\sigma_t(x_1)}$$
+
+<p>对照一下，发现 $u_t$ 是 score 的"<strong>线性重组</strong>"——同一份信息换种参数化。所以训条件 FM 和训条件 score matching <em>本质学的是同一个东西</em>。<strong>这一点是 flow matching 不可怕的根本原因——你不是在学一种新东西，只是在换一个目标的表达方式</strong>。</p>
+
+<div class="my-addition">
+🟡 <strong>教材外补充：为什么这么多人最近从 DDPM 改投 flow matching？</strong>
+<ul>
+  <li><strong>目标函数更干净</strong>：MSE on velocity，<em>没有</em> SDE 的方差爆炸问题，<em>没有</em> $\epsilon$-prediction 和 $v$-prediction 之争——OT 路径下目标就是 $x_1 - x_0$，一行代码。</li>
+  <li><strong>采样更少步</strong>：rectified flow（Liu et al.）和 reflow 让 1–4 步采样可用，对比 DDPM 的 1000 步 / DDIM 的 50 步是质的飞跃。</li>
+  <li><strong>对 noise schedule 更鲁棒</strong>：Esser et al. 2024（SD3 论文）做了大量消融，发现 logit-normal sampling of $t$ + OT 路径在 ImageNet 上稳定优于 EDM。</li>
+  <li><strong>工业级 batch 友好</strong>：每个样本一条独立路径，可以完全并行，没有 DDPM "每个样本被绑在它的 noise schedule 上" 的尴尬。</li>
+</ul>
+所以 SD3、Flux.1、SORA、Movie Gen 全转向 flow matching，不是赶时髦——是工程上确实赢了。
+</div>
+
+<h2>九、采样：5–10 步 Euler 就够</h2>
+
+<p>训完 $v_\theta(x, t)$，采样就是数值积分一个 ODE：</p>
+
+$$\frac{dx}{dt} = v_\theta(x, t),\qquad x(0) \sim \mathcal{N}(0, I)$$
+
+<p>最朴素的 Euler 方法（CMU L13 chunk #1638 讲完离散 FM 后的采样过程几乎一字不差搬过来）：</p>
+
+<div class="deriv-step">
+<strong>采样循环</strong>（连续 FM）<br>
+1. $x_0 \sim \mathcal{N}(0, I)$<br>
+2. 步长 $\Delta t = 1/N$<br>
+3. 对 $k = 0, 1, \dots, N-1$：<br>
+&nbsp;&nbsp;&nbsp;&nbsp; $t_k = k \Delta t$<br>
+&nbsp;&nbsp;&nbsp;&nbsp; $x_{k+1} = x_k + \Delta t \cdot v_\theta(x_k, t_k)$<br>
+4. 返回 $x_N$ 作为样本
+</div>
+
+<p>典型选择 $N \in \{5, 10, 20\}$。对 OT 路径 + rectified flow，<strong>$N = 1$ 都能出图</strong>（直接走完整条直线）。这就是 SD3-Turbo / Flux-Schnell 的 1 步生成的物理基础。</p>
+
+<div class="callout callout-warning">
+⚠️ <strong>这里的 t 方向要小心</strong>：flow matching 的 $t$ 从 0（噪声）走到 1（数据），<em>和 DDPM 反过来</em>（DDPM 的 $t=0$ 是数据，$t=T$ 是噪声）。这个翻向不会改变本质，但工程上读 paper / 看代码时常常掉坑。讲师 CMU L13 chunk #1637 专门提醒："The time scale flips, right? So you start from $t = 0$."
+</div>
+
+<p>更高阶的积分器（Heun、RK4、DPM-Solver-flow）能进一步把 $N$ 压到 4 步、3 步。但 Euler 5 步在 SD3 上和 DDIM 50 步基本同质量，已经够好。</p>
+
+<svg viewBox="0 0 640 220" role="img" aria-label="条件 vs 边际速度场">
+  <defs>
+    <marker id="fm-arrow2" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+      <path d="M0,0 L6,3 L0,6 Z" fill="#6f4dd0"/>
+    </marker>
+    <marker id="fm-arrow3" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+      <path d="M0,0 L6,3 L0,6 Z" fill="#0b5"/>
+    </marker>
+  </defs>
+  <g font-family="ui-sans-serif" font-size="11" fill="var(--text)">
+    <text x="160" y="20" text-anchor="middle" font-weight="600">条件速度场 $u_t(x|x_1)$</text>
+    <text x="480" y="20" text-anchor="middle" font-weight="600">边际速度场 $u_t(x)$（积分后）</text>
+
+    <!-- Left: conditional -->
+    <g transform="translate(40, 40)">
+      <rect x="0" y="0" width="240" height="160" rx="6" fill="#f3f0fa" stroke="#6f4dd0"/>
+      <!-- single target x1 -->
+      <circle cx="200" cy="80" r="6" fill="#6f4dd0"/>
+      <text x="200" y="105" text-anchor="middle" font-size="10">$x_1$（一个数据点）</text>
+      <!-- arrows all pointing to x1 -->
+      <g stroke="#6f4dd0" stroke-width="1.2" marker-end="url(#fm-arrow2)" fill="none">
+        <line x1="40" y1="40" x2="120" y2="65"/>
+        <line x1="40" y1="80" x2="120" y2="78"/>
+        <line x1="40" y1="120" x2="120" y2="95"/>
+        <line x1="80" y1="60" x2="140" y2="72"/>
+        <line x1="80" y1="100" x2="140" y2="85"/>
+      </g>
+      <text x="120" y="150" text-anchor="middle" font-size="10" fill="#6f4dd0">闭式：$u_t(x|x_1) = x_1 - x_0$（OT 路径）</text>
+    </g>
+
+    <!-- Right: marginal -->
+    <g transform="translate(360, 40)">
+      <rect x="0" y="0" width="240" height="160" rx="6" fill="#e8f5e9" stroke="#0b5"/>
+      <!-- multiple data points -->
+      <circle cx="180" cy="50" r="5" fill="#0b5"/>
+      <circle cx="200" cy="100" r="5" fill="#0b5"/>
+      <circle cx="170" cy="130" r="5" fill="#0b5"/>
+      <!-- arrows pointing to "the average direction" -->
+      <g stroke="#0b5" stroke-width="1.2" marker-end="url(#fm-arrow3)" fill="none">
+        <line x1="40" y1="40" x2="120" y2="60"/>
+        <line x1="40" y1="80" x2="120" y2="85"/>
+        <line x1="40" y1="120" x2="120" y2="105"/>
+      </g>
+      <text x="120" y="150" text-anchor="middle" font-size="10" fill="#0b5">不可解析；但 CFM 定理保证 $v_\theta \to u_t$</text>
+    </g>
+  </g>
+</svg>
+
+<h2>十、和重参数化技巧的关系：又一次"clean data prediction"</h2>
+
+<p>CMU L13 chunk #1635–1637 反复强调一个 motif——<strong>所有 diffusion 论文最后都收敛到"预测 clean data 或它的某个简单变形"</strong>。讲师原话（chunk #1637）：</p>
+
+<blockquote class="source-quote">「In all the discrete diffusion papers ... no matter what you do, try to reparameterize your thing into something that you can directly get from the forward process and the clean data estimation. It's actually not only the discrete diffusion paper—it's actually all diffusion paper. ... For example, the epsilon prediction and the v prediction. And in this case, this is literally just the x0 prediction or the clean data prediction.」</blockquote>
+
+<p>把这句话放到连续 flow matching 上：</p>
+
+<ul>
+  <li>OT 路径下，$u_t(x_t | x_1) = x_1 - x_0$ —— 你要学的就是"从噪声指向 clean data"。</li>
+  <li>等价地，可以让网络预测 $\hat x_1$（clean data prediction），再用 $\hat x_1 - x_0$ 反推出速度。</li>
+  <li>等价地，可以预测 $\hat \epsilon$（noise prediction），用 $x_1 - \hat\epsilon$ 反推。</li>
+</ul>
+
+<p>SD3 论文的"参数化消融"就把这几种全试了一遍，发现差距很小——因为它们都是同一信息的线性重参数化。<strong>"预测 clean data" 在连续 / 离散 / score / FM 四个 setting 里反复出现，是整个生成模型族系最深的不变量</strong>。</p>
+
+<h2>十一、PyTorch 实战骨架（OT 路径 + Euler 采样）</h2>
+
+<p>下面是一个<strong>最小可跑</strong>的 flow matching 训练 + 采样代码骨架，OT 路径 + Euler 5 步：</p>
+
+<pre><code>import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+# ============ 1. 速度场网络（任意 MLP / U-Net 均可）============
+class VelocityNet(nn.Module):
+    def __init__(self, dim=2, hidden=128):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(dim + 1, hidden), nn.SiLU(),  # +1 是把 t 拼进来
+            nn.Linear(hidden, hidden), nn.SiLU(),
+            nn.Linear(hidden, hidden), nn.SiLU(),
+            nn.Linear(hidden, dim),
+        )
+
+    def forward(self, x, t):
+        # x: [B, dim], t: [B, 1] in [0, 1]
+        return self.net(torch.cat([x, t], dim=-1))
+
+
+# ============ 2. Conditional Flow Matching 训练步 ============
+def cfm_step(model, x1, opt):
+    """
+    x1: [B, dim] 一批数据样本
+    OT 条件路径: x_t = (1 - t) * x0 + t * x1
+    条件速度: u_t(x|x1) = x1 - x0   （常向量！）
+    """
+    B = x1.shape[0]
+    t = torch.rand(B, 1, device=x1.device)          # t ~ U(0,1)
+    x0 = torch.randn_like(x1)                        # 噪声端
+    xt = (1 - t) * x0 + t * x1                       # 条件路径上采样
+    u_target = x1 - x0                               # 闭式条件速度
+
+    v_pred = model(xt, t)
+    loss = F.mse_loss(v_pred, u_target)              # 就这一行！
+
+    opt.zero_grad(); loss.backward(); opt.step()
+    return loss.item()
+
+
+# ============ 3. Euler 采样 ============
+@torch.no_grad()
+def sample(model, n=64, dim=2, steps=5, device='cuda'):
+    x = torch.randn(n, dim, device=device)           # 从 N(0, I) 起步
+    dt = 1.0 / steps
+    for k in range(steps):
+        t = torch.full((n, 1), k * dt, device=device)
+        x = x + dt * model(x, t)                     # Euler 一步
+    return x                                          # x ≈ p_data 采样
+
+
+# ============ 4. 训练循环 ============
+model = VelocityNet(dim=2).cuda()
+opt = torch.optim.Adam(model.parameters(), lr=1e-3)
+for epoch in range(100):
+    for x1 in dataloader:                            # 你的数据 loader
+        cfm_step(model, x1.cuda(), opt)
+samples = sample(model, n=1024, steps=5)             # 5 步采 1024 张
+</code></pre>
+
+<div class="callout callout-note">
+🛠️ <strong>真正实现里要补的细节</strong>：
+<ul>
+  <li><strong>时间采样的偏置</strong>：均匀 $t \sim \mathcal{U}(0,1)$ 在中段（$t \approx 0.5$）损失最小。SD3 改用 logit-normal $t = \mathrm{sigmoid}(z), z \sim \mathcal{N}(0, 1)$，让更多采样集中在中间——质量明显提升。</li>
+  <li><strong>EMA</strong>：网络权重做指数移动平均（$\mathrm{decay} = 0.9999$），采样时用 EMA 权重，FID 通常掉 1–2 个点。</li>
+  <li><strong>Conditioning（CFG）</strong>：text-to-image / class-conditional 直接把 condition embedding 拼进网络输入。Classifier-free guidance 沿用 DDPM 的 trick——10% 概率丢弃 condition，采样时 $v = v_\text{cond} + s(v_\text{cond} - v_\text{uncond})$。</li>
+  <li><strong>U-Net / DiT 替换</strong>：上面的 MLP 只是玩具；实战图像生成用 DiT（diffusion transformer）或 U-Net，输入额外 time embedding。</li>
+</ul>
+</div>
+
+<h2>十二、几条常被问的"为什么"</h2>
+
+<h3>12.1 为什么 flow matching 可以不用 SDE？</h3>
+
+<p>因为概率路径 $p_t$ 已经把"端点对接"的事情做完了——你<em>规定</em>了 $p_0$ 和 $p_1$，规定了中间怎么演化。剩下只是<strong>沿着这条规定走的"司机"</strong>（速度场）。DDPM 那一套 SDE 是因为前向加噪是<em>随机过程</em>，反向必须也写成随机过程才对得上；flow matching 直接放弃随机性，用纯 ODE 走——这是设计选择，不是必须。</p>
+
+<h3>12.2 那为什么 SD3 不用 stochastic sampler？</h3>
+
+<p>实测下来，ODE-only 采样在 5 步内已经够好；引入 stochasticity（如 stochastic sampler）只有在采样步数很多时才有微弱质量提升，但代价是更慢的并行化。SD3 论文消融选择了纯 ODE。</p>
+
+<h3>12.3 那 likelihood 怎么办？</h3>
+
+<p>Flow matching 训完后<em>不能</em>像 DDPM 那样直接给出 $\log p(x)$——这是它的代价。但可以通过 instantaneous change-of-variables 公式（$d \log p_t / dt = -\nabla \cdot v_\theta$，<a href="/video-to-notebook/textbook/12/">第 12 章</a>讲过）<em>顺着 ODE 积分</em>把 likelihood 算出来——慢，但能算，作为评测足够。</p>
+
+<h3>12.4 和 rectified flow 是什么关系？</h3>
+
+<p>Rectified flow（Liu et al. 2022）= flow matching + OT 路径 + 反复 "reflow"。Reflow 的意思是：训完一个 $v_\theta^{(1)}$，用它把噪声推到数据上采样一遍得到新对 $(x_0, \hat x_1)$，<em>用这些新对再训一遍</em>。每次 reflow 让轨迹更"直"，最终 1 步采样质量逼近多步采样。SD3 没做 reflow（保留多步），Flux-Schnell 做了。</p>
+
+<h3>12.5 离散 token 也能 flow matching 吗？</h3>
+
+<p>能——CMU L13 整节课就在讲这件事。把"连续 velocity"换成"transition rate matrix"，把"continuity equation"换成"Kolmogorov forward equation"，把 Euler ODE 换成"continuous-time Markov chain (CTMC)"。整套骨架在离散空间上一一对应，最后训的还是 cross-entropy 形式的 clean-data prediction（chunk #1637）。这就是 Discrete Flow Matching / Edit Flow 的思想。</p>
+
+<h3>12.6 训练时的 $t$ 怎么采才合理？</h3>
+
+<p>朴素的 $t \sim \mathcal{U}(0, 1)$ 在大多数 setup 下会让网络在<em>中段</em>（$t \approx 0.5$）反复看到一堆"既不像噪声也不像数据"的中间态，loss 自然更难学。SD3 论文（Esser et al. 2024）做了大量消融，最后选了 <strong>logit-normal</strong> $t = \mathrm{sigmoid}(z), z \sim \mathcal{N}(\mu, \sigma^2)$，对图像生成相当于把更多采样放到中间——FID 改善很明显。Flux 用类似策略。</p>
+
+<h3>12.7 Flow matching 训出来的模型可以接 score-based 采样器吗？</h3>
+
+<p>可以。前面提到条件 velocity 和条件 score 是同一份信息的线性重组，所以在路径已知的情况下，可以从 $v_\theta$ 反推 $s_\theta = \nabla_x \log p_t$，然后用任何 score-based 采样器（DPM-Solver、Heun、SDE sampler）跑。这就是为什么"FM 训 + DDIM 采"在一些代码库里能跑通——它们说的是同一个潜在物理。</p>
+
+<figure class="clip-frame">
+  <iframe src="https://www.youtube.com/embed/_OOITDB2VCY?start=2" title="CMU 10799 Lecture 5: Flow Matching 开场" allowfullscreen></iframe>
+  <figcaption>📺 CMU 10799 Lecture 5：从 SDE / score matching 推到 flow matching 的开场动机（"why not just linear interpolate the two ends"）</figcaption>
+</figure>
+
+<figure class="clip-frame">
+  <iframe src="https://www.youtube.com/embed/bK-LfpKLv0g?start=212" title="CMU 10799 Lecture 13: probability path, continuity equation" allowfullscreen></iframe>
+  <figcaption>📺 CMU 10799 Lecture 13（3:32 处）：讲师把 conservation of mass、continuity equation、velocity、ODE 一行行写出来——连续 FM 和离散 FM 共享同一套语言</figcaption>
+</figure>
+
+<h2>十三、把 flow matching 放进整张 diffusion 地图</h2>
+
+<p>到这里你应该能画出整门课的"家族树"了：</p>
+
+<ul>
+  <li><strong>VAE</strong>（<a href="/video-to-notebook/textbook/2/">第 2 章</a>）：一步压缩 + 一步还原，ELBO 训练；</li>
+  <li><strong>DDPM</strong>（<a href="/video-to-notebook/textbook/7/">第 7 章</a>）：T 步 hierarchical VAE，预测噪声；</li>
+  <li><strong>Score Matching / SDE</strong>（<a href="/video-to-notebook/textbook/10/">第 10 章</a>）：从离散步数推到连续时间，学 score function；</li>
+  <li><strong>CNF</strong>（<a href="/video-to-notebook/textbook/12/">第 12 章</a>）：用 ODE 取代 SDE，但 MLE 训练贵；</li>
+  <li><strong>Flow Matching</strong>（本章）：用 MSE 训 CNF，目标干净、采样飞快；</li>
+  <li><strong>Rectified Flow / SD3 / Flux</strong>（后续章节）：FM + OT 路径 + reflow，工业落地。</li>
+</ul>
+
+<p>整张图的不变量只有一个——<strong>预测 clean data（或它的简单线性变形）</strong>。讲师 CMU L13 反复强调的这一点，就是你在所有 diffusion 论文里都能看到的"通用底层接口"。</p>
+
+<p>所以当你下次读一篇新出的 diffusion / flow 论文，可以先用三个问题套一遍："它选了什么<em>概率路径</em>？目标函数是<em>哪种 reparameterization</em>（$\epsilon$、$v$、$x_1$、velocity）？采样器用了<em>哪种数值积分</em>？"——这三件事确定了，论文的其它内容大半就是工程细节。Flow matching 之所以好教好用，恰恰是因为它把这三个轴<strong>显式地分开了</strong>，而不像 DDPM 那样把"路径选择"和"目标函数"绑在 forward noising schedule 里耦合在一起。</p>
+
+<div class="my-addition">
+🟡 <strong>教材外补充：一个常见的认知滑坡。</strong>很多人会把"flow matching = 用 OT 路径"或者"flow matching = 直接预测 $x_1 - x_0$"——这是把<em>一种特殊实现</em>当成了<em>整个框架</em>。准确表述是：<strong>flow matching 是一个目标函数族（对速度场的 MSE 回归），路径和参数化都是自由选项</strong>。把 OT 路径换成 DDPM 的 VP 路径，flow matching 立刻退化成 score matching 的同款训练目标。这个"自由度"才是它替代 DDPM 的真正力量。
+</div>
+
+<div class="takeaways" style="background:#0b5; color:#fff; padding:1.4rem; border-radius:8px; margin-top:2rem;">
+  <h3 style="margin-top:0; color:#fff;">本章要记住的（讲师亲口给的核心）</h3>
+  <ol>
+    <li><strong>Flow matching = MSE on velocity field</strong>。不学 score，不学 noise，直接学速度场。讲师 CMU L13："this is the only thing that we need to learn."</li>
+    <li><strong>概率路径 $p_t$ 是骨架</strong>，$p_0 = \mathcal{N}(0,I) \to p_1 = p_\text{data}$，中间怎么走由你设计。OT 路径（线性插值）是 SD3、Flux 的标配。</li>
+    <li><strong>两条物理守恒律</strong>：conservation of mass（概率加和为 1）+ continuity equation（$\partial_t p_t + \nabla\cdot(p_t u_t) = 0$）。讲师："super intuitive, I hope"——概率进 = 概率出。</li>
+    <li><strong>边际 $u_t$ 不可解析 → 用条件 $u_t(x|x_1)$</strong>。CFM 定理（Lipman et al. 2023, Thm 2）保证两个 loss 对参数梯度相等：训简单的，得到难学的。</li>
+    <li><strong>OT 路径下条件速度 $= x_1 - x_0$</strong>。一行代码：<code>loss = mse(v_theta(xt, t), x1 - x0)</code>。整个 SD3、Flux 的训练精髓在这一行。</li>
+    <li><strong>采样 Euler 5 步够用</strong>。$x_0 \sim \mathcal{N}(0,I)$，$x_{k+1} = x_k + \Delta t \cdot v_\theta(x_k, t_k)$。比 DDPM 1000 步快两个量级。时间方向反过来——$t=0$ 是噪声，$t=1$ 是数据。</li>
+    <li><strong>不变量是 clean data prediction</strong>。讲师："it's actually all diffusion paper"——从 $\epsilon$-prediction、$v$-prediction 到 flow matching，最终都收敛到"预测干净数据或它的线性变形"。</li>
+  </ol>
+</div>
+
+</article>

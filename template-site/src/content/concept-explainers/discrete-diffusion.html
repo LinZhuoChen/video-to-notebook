@@ -1,0 +1,257 @@
+<style>
+/* prefix: dd- */
+.dd-quickref{background:var(--surface-soft);border-left:3px solid var(--module-accent);padding:0.8rem 1rem;border-radius:0 4px 4px 0;margin:1rem 0;font-size:0.92rem;}
+.dd-quickref div{margin:0.3rem 0;}
+.dd-svg{display:block;margin:1.2rem auto;max-width:100%;height:auto;}
+.dd-pitfalls ol{padding-left:1.4rem;} .dd-pitfalls li{margin:0.5rem 0;}
+.dd-source{font-style:italic;color:var(--text-muted);border-left:2px solid var(--border);padding:0.2rem 0.8rem;margin:0.5rem 0;font-size:0.9rem;}
+.dd-callout{background:var(--module-accent-soft);border-left:3px solid var(--module-accent);padding:0.6rem 0.9rem;margin:0.8rem 0;border-radius:0 4px 4px 0;font-size:0.92rem;}
+.dd-myadd{background:var(--accent-soft);border-left:3px solid var(--accent);padding:0.5rem 0.8rem;margin:0.6rem 0;border-radius:0 4px 4px 0;font-size:0.9rem;color:var(--text);}
+.dd-controls{display:flex;flex-wrap:wrap;gap:0.4rem;margin:0.8rem 0;}
+.dd-controls button{padding:0.35rem 0.7rem;border:1px solid var(--border);background:var(--surface-soft);color:var(--text);border-radius:4px;cursor:pointer;font-size:0.85rem;}
+.dd-controls button.active{background:var(--module-accent);color:var(--surface);border-color:var(--module-accent);}
+.dd-readout{background:var(--surface-soft);border:1px solid var(--border);border-radius:4px;padding:0.8rem;margin:0.6rem 0;min-height:140px;}
+.dd-line{display:none;}
+.dd-line.dd-active-line{display:block;}
+.dd-tablewrap{overflow-x:auto;margin:0.8rem 0;}
+.dd-tablewrap table{border-collapse:collapse;font-size:0.88rem;width:100%;}
+.dd-tablewrap th,.dd-tablewrap td{border:1px solid var(--border);padding:0.4rem 0.6rem;text-align:left;}
+.dd-tablewrap th{background:var(--surface-soft);color:var(--text);}
+</style>
+
+<article class="concept-entry">
+  <header class="concept-header">
+    <span class="concept-eyebrow">概念</span>
+    <h1>Discrete Diffusion</h1>
+    <p class="concept-tagline">— 让 token 在有限词表里"跳"，不是在向量空间里"飘"。</p>
+  </header>
+
+  <aside class="dd-quickref">
+    <div><strong>定义</strong> · 前向过程在离散状态空间上做 Markov 跳变 $q(x_t|x_{t-1}) = \operatorname{Cat}(x_t \mid Q_t x_{t-1})$，反向用神经网络预测 categorical 分布。</div>
+    <div><strong>公式</strong> · $\bar{Q}_t = Q_t Q_{t-1} \cdots Q_1$，因此 $q(x_t|x_0) = \operatorname{Cat}(x_t \mid \bar{Q}_t x_0)$。</div>
+    <div><strong>易错</strong> · 不能"在 token 上加 Gaussian 噪声"——离散变量没有连续梯度；噪声靠"以一定概率跳到别的 token"实现。</div>
+  </aside>
+
+  <section class="concept-intuition">
+    <p>很多初学者听到 "discrete diffusion" 就会想：是不是把 DDPM 的高斯噪声换成"小一点的噪声"，再用 round() 离散化就行？不是。CMU 10-799 Lecture 12 讲师明确指出：离散扩散里根本没有"加噪声"这个连续操作，只有"以某个概率<strong>跳</strong>到别的 token"。词不是向量，"the cat" 和 "a cat" 之间不存在"中间一半的词"，你也没办法在 token 上做加法。这一点是和连续扩散最根本的差异——连续扩散里 $x_t = x_{t-1} + \sigma_t \epsilon$ 是有意义的；离散扩散里这个公式没意义，你只能问"下一步落到哪个 token 的概率有多大"。</p>
+    <div class="dd-source">「Nearly add noise kind of in discrete setting. Do you have like a fixed sequence of jumping from word to word? — Yeah. So this Q_t thing is like a transition mixtures that represent a jump essentially.」—— CMU 10-799 L13 @06:09</div>
+    <p>CMU 讲师的核心比喻是 <strong>"jump 跳跃"</strong>：每一步前向，token 都按照一个转移矩阵 $Q_t$ 决定"留在原位 / 跳到 MASK / 跳到随机其他 token"。把这件事写成连续时间，就是 CTMC（continuous-time Markov chain，连续时间马尔可夫链）；把它截成离散 $T$ 步，就是 Austin 等 (2021) 提出的 D3PM 框架。讲师还把 $Q_t$ 类比为 <strong>"velocity 速度场"</strong>——它扮演的角色和连续扩散里 flow matching 的 $v_\theta(x, t)$ 一样，只不过"速度"现在不是一个向量，而是一张"我此刻从哪个 token 跳到哪个 token 的概率表"。这把离散扩散、SEDD、discrete flow matching 三件事缝到了同一个数学框架下。</p>
+    <p>为什么要费这个劲做离散扩散？因为语言、代码、DNA、化学式天然是离散的。把它们硬编码成连续向量（如 word embedding），再做 DDPM，会丢掉"词的身份"这一约束——你训出来的中间结果可能根本不是任何合法 token，需要后处理 nearest-neighbor 投影才能落回词表，这一步会引入难以分析的误差。离散扩散从一开始就让噪声"住在"合法 token 上：前向链每一时刻的样本都是真实词表里的某个 token，反向链每一步采样出的也是合法 token。整个训练和推理过程都在离散空间里完成，理论分析（ELBO、收敛速度）也都用 Markov 链工具。</p>
+    <p>在训练里，这件事对应一个比 DDPM 更接近 BERT 的目标：网络读入"一句被加噪的句子"——某些 token 被替换成了 MASK 或其它随机 token——然后预测"原始 token 的 categorical 分布"。和 BERT 不同的是，MASK 比例不再固定（BERT 是 15%），而是由扩散时间 $t$ 决定：$t$ 接近 0 时几乎不 mask，$t$ 接近 $T$ 时几乎全 mask。最后用 ELBO 把所有时间步的预测损失加权求和。</p>
+  </section>
+
+  <section class="concept-deepdive">
+    <h2>前向链：一行公式定义一切</h2>
+    <p>设词表大小 $K$（GPT-2 大约 $K = 50{,}257$；DNA 则 $K = 4$；蛋白质 $K = 20$）。把每个 token 写成 one-hot 向量 $x \in \{0,1\}^K$。第 $t$ 步的前向跳变完全由一个 $K \times K$ 转移矩阵 $Q_t$ 决定：</p>
+    <p>$$q(x_t \mid x_{t-1}) = \operatorname{Cat}\!\bigl(x_t \,\big|\, Q_t \, x_{t-1}\bigr).$$</p>
+    <p>读法：$Q_t$ 的第 $j$ 列是"从 token $j$ 出发，下一步落到各 token 上的概率向量"。在词表是 $\{a, b, c\}$ 的玩具例子里，$(Q_t)_{2,1} = 0.3$ 意思是"如果当前 token 是 $a$，下一步以 0.3 的概率变成 $b$"。</p>
+    <p>CMU 讲师强调一个易被忽视的<strong>守恒律</strong>：每一列加起来必须 = 1（mass conservation，概率守恒）。直觉上很显然——从任意一个状态出发，下一步"落到某处"的总概率必须是 1；它不能跑出去也不能凭空多出来。在连续时间版（CTMC）里，把 $Q_t = I + \Delta t \cdot R_t$ 改写后，对应的<strong>速率矩阵</strong> $R_t$ 每一列加起来必须 = 0——"流出 = 流入"。这两个守恒律是讲师在 L13 反复强调的"两件事"之一，另一件是 Kolmogorov 连续性方程（continuity equation）。</p>
+
+    <div class="dd-source">「The amount of flow flowing out of a certain state should equal to the amount of flow that's flowing in. This is literally just conservation of mass.」—— CMU 10-799 L13 @05:13</div>
+
+    <p>讲师在 L13 用"水流"打比方解释这两个守恒律：想象 $K$ 个水桶（每个 token 一个），每一时刻有水从桶之间流来流去，但所有桶里的水加起来必须恒等于 1（这就是 mass conservation）；某个桶的水位变化率等于"流入的水流减去流出的水流"，这就是 Kolmogorov forward equation（也叫 Chapman-Kolmogorov 方程）。讲师原话："the infinitesimal change in probability equals the amount of probability that comes into this particular state minus the probability that goes out of this state."（L13 @08:58）这正是连续扩散里 Fokker-Planck 方程的离散版本。</p>
+
+    <h2>三种 Q_t：D3PM 给出的设计空间</h2>
+    <div class="dd-tablewrap">
+      <table>
+        <thead><tr><th>类型</th><th>$Q_t$ 结构</th><th>$T \to \infty$ 时的终态</th><th>典型用途</th></tr></thead>
+        <tbody>
+          <tr><td>Uniform（均匀替换）</td><td>以 $\beta_t$ 概率均匀跳到任意 token；以 $1-\beta_t$ 留下</td><td>词表上的均匀分布</td><td>D3PM 早期实验</td></tr>
+          <tr><td>Absorbing（吸收态 / MASK）</td><td>以 $\beta_t$ 概率跳到 <code>[MASK]</code>；MASK 是 absorbing state（不会再跳出）</td><td>整段全是 <code>[MASK]</code></td><td>BERT-style；MDLM、MaskGIT 的根</td></tr>
+          <tr><td>Gaussian-like（嵌入式）</td><td>把 token 嵌入连续空间 → 扩散 → 投影回最近 token</td><td>连续高斯</td><td>处理"近义词更易混"的场景，如像素值 0–255</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>讲师特别点出：absorbing 是<strong>最容易实现、效果也最好</strong>的一种。它把"加噪"简化为"以概率 $\bar\beta_t$ 把每个位置独立替换成 MASK"，这正是 masked language modeling 的扩散化版本。讲师原话："the easiest way to do discrete diffusion is mask diffusion — you always try to interpolate between your clean data and the full mask."（L13 @01:39）端点很清晰：$t = 0$ 时是干净文本，$t = T$ 时整段都是 MASK——这是一个标准的"两端皆已知"的插值问题。uniform 设定下，端点是"词表上的均匀分布"，反向时网络要从"完全随机的句子"还原；而 absorbing 设定下，反向时网络面对的是"已经填了一部分、剩下打了 MASK 的句子"，问题更接近 BERT，更容易学。</p>
+    <p>三种 $Q_t$ 还对应了三种生成阶段。Absorbing 给了一个干净的"已知 vs 未知"二分——已经填好的 token 不动，剩下的 MASK 一步步被填上；这种"单调减"的特性让推理时可以很自然地搭配 confidence-based parallel decoding（MaskGIT 的思路）。Uniform 没有这种二分——每个 token 在每一步都可能被改写，网络要不断和自己的旧预测博弈，训练上更难。Gaussian-like 因为保留了"邻近性"，特别适合像素值或分子键能这种"近的状态更像"的离散数据。</p>
+
+    <h2>闭式：跳过中间步直接到 $x_t$</h2>
+    <p>因为 Markov 链可以做矩阵连乘，定义累积转移：</p>
+    <p>$$\bar{Q}_t \;=\; Q_t \, Q_{t-1} \cdots Q_1, \qquad q(x_t \mid x_0) = \operatorname{Cat}\!\bigl(x_t \mid \bar{Q}_t \, x_0\bigr).$$</p>
+    <p><strong>Why：</strong>这一步对应连续扩散里的"从 $x_0$ 一步到 $x_t$"闭式。没有它，训练时每个样本都要从 $t=0$ 一步步跑到 $t$，开销 $O(t)$；有了它，给定 $x_0$ 和随机抽到的 $t$，直接采样一次就行，开销 $O(1)$。这是 DDPM 在连续域 $\bar\alpha_t$ 闭式（$x_t = \sqrt{\bar\alpha_t}\,x_0 + \sqrt{1-\bar\alpha_t}\,\epsilon$）的离散对应物。在 absorbing 情形下，闭式更简单：$\bar{Q}_t$ 等价于"以概率 $1 - \prod_{s \leq t}(1 - \beta_s)$ 把每个位置独立替换为 MASK"——你只需要知道一个累积保留概率 $\bar\alpha_t$，就能一步采到任意 $t$ 时刻。这种"逐位置独立"的 factorization 是后续 MDLM 简化训练损失的关键。</p>
+
+    <h2>反向：神经网络预测 categorical</h2>
+    <p>反向过程也是 Markov 链，但每一步的转移概率由神经网络给出：</p>
+    <p>$$p_\theta(x_{t-1} \mid x_t) = \operatorname{Cat}\!\bigl(x_{t-1} \mid f_\theta(x_t, t)\bigr).$$</p>
+    <p>注意：你<strong>不</strong>预测 $\epsilon$（离散世界没有可加的噪声向量），而是直接预测下一时刻 token 的<strong>概率向量</strong>。网络输出是一个长度 $K$ 的 logits，经过 softmax 自动满足列和 = 1。在 absorbing 情况下，更高效的做法是预测 $\hat{x}_0$——给定当前被 MASK 掉一部分的 $x_t$，网络猜原始干净 token；然后用 Bayes 解析地反推 $p_\theta(x_{t-1}|x_t) = q(x_{t-1}|x_t, \hat{x}_0)$。这个 reparameterization 把"预测 $K$ 个 token 的全概率"换成了"预测 $K$ 个 token 中哪个是原始的"，更接近分类任务，训起来比直接预测 transition 稳得多。</p>
+
+    <p>训练目标用同一个 ELBO，逐项替换为 categorical KL（两个 categorical 之间的 KL 有闭式 $\sum_k q_k \log(q_k / p_k)$，不需要 reparameterization trick）：</p>
+    <p>$$\mathcal{L} = \mathbb{E}\!\left[\sum_{t=2}^{T} D_{\mathrm{KL}}\!\bigl(q(x_{t-1}|x_t, x_0)\,\|\,p_\theta(x_{t-1}|x_t)\bigr)\right] - \log p_\theta(x_0|x_1).$$</p>
+    <p>当 $Q_t$ 是 absorbing 时，这个 ELBO 可以进一步化简为一个 <strong>"加权交叉熵"</strong>——只在"当前是 MASK"的位置算损失，权重和 $t$ 的位置有关。这是 MDLM (Sahoo et al. 2024) 的核心发现：复杂的离散扩散 ELBO 在 absorbing 设定下退化为一个像 BERT 那样直白的目标，于是工程上"训扩散模型"变得和"训 MLM"一样简单。</p>
+
+    <div class="dd-source">「We can train it using the same ELBO loss from DDPM essentially. We also talked about how to define the discrete score (concrete score), and learn it using a more stable loss called score entropy.」—— CMU 10-799 L13 @00:48</div>
+
+    <h2>SVG：三种 $Q_t$ 的轨迹示意</h2>
+    <p>下图把同一句话（or 同一个像素序列）在三种 $Q_t$ 下的前向轨迹画在一起，从左到右是时间。注意三条路径在终点的分布完全不同——这是后续选哪一种 $Q_t$ 的依据。</p>
+
+    <svg class="dd-svg" viewBox="0 0 600 320" role="img" aria-label="三种 Q_t 下的离散扩散轨迹：uniform 均匀替换、absorbing 吸收到 MASK、Gaussian-like 嵌入扩散">
+      <g font-family="ui-sans-serif" font-size="11" fill="var(--text)">
+        <text x="300" y="18" text-anchor="middle" font-weight="600">三条前向轨迹（同一句话，不同 $Q_t$）</text>
+
+        <!-- row 1: uniform -->
+        <text x="20" y="62" fill="var(--text-muted)">Uniform</text>
+        <g transform="translate(80,45)">
+          <rect x="0" y="0" width="60" height="30" fill="var(--surface-soft)" stroke="var(--border)"/><text x="30" y="20" text-anchor="middle">the</text>
+          <rect x="70" y="0" width="60" height="30" fill="var(--surface-soft)" stroke="var(--border)"/><text x="100" y="20" text-anchor="middle">cat</text>
+          <rect x="140" y="0" width="60" height="30" fill="var(--surface-soft)" stroke="var(--border)"/><text x="170" y="20" text-anchor="middle">sat</text>
+          <text x="210" y="20" fill="var(--text-muted)">→</text>
+          <rect x="225" y="0" width="60" height="30" fill="var(--surface-soft)" stroke="var(--border)"/><text x="255" y="20" text-anchor="middle">the</text>
+          <rect x="295" y="0" width="60" height="30" fill="var(--red-soft)" stroke="var(--red)"/><text x="325" y="20" text-anchor="middle" fill="var(--red)">dog</text>
+          <rect x="365" y="0" width="60" height="30" fill="var(--surface-soft)" stroke="var(--border)"/><text x="395" y="20" text-anchor="middle">sat</text>
+          <text x="435" y="20" fill="var(--text-muted)">→</text>
+          <rect x="450" y="0" width="60" height="30" fill="var(--red-soft)" stroke="var(--red)"/><text x="480" y="20" text-anchor="middle" fill="var(--red)">XYZ</text>
+        </g>
+
+        <!-- row 2: absorbing -->
+        <text x="20" y="142" fill="var(--text-muted)">Absorbing</text>
+        <g transform="translate(80,125)">
+          <rect x="0" y="0" width="60" height="30" fill="var(--surface-soft)" stroke="var(--border)"/><text x="30" y="20" text-anchor="middle">the</text>
+          <rect x="70" y="0" width="60" height="30" fill="var(--surface-soft)" stroke="var(--border)"/><text x="100" y="20" text-anchor="middle">cat</text>
+          <rect x="140" y="0" width="60" height="30" fill="var(--surface-soft)" stroke="var(--border)"/><text x="170" y="20" text-anchor="middle">sat</text>
+          <text x="210" y="20" fill="var(--text-muted)">→</text>
+          <rect x="225" y="0" width="60" height="30" fill="var(--surface-soft)" stroke="var(--border)"/><text x="255" y="20" text-anchor="middle">the</text>
+          <rect x="295" y="0" width="60" height="30" fill="var(--module-accent-soft)" stroke="var(--module-accent)"/><text x="325" y="20" text-anchor="middle" fill="var(--module-accent)">[M]</text>
+          <rect x="365" y="0" width="60" height="30" fill="var(--surface-soft)" stroke="var(--border)"/><text x="395" y="20" text-anchor="middle">sat</text>
+          <text x="435" y="20" fill="var(--text-muted)">→</text>
+          <rect x="450" y="0" width="60" height="30" fill="var(--module-accent-soft)" stroke="var(--module-accent)"/><text x="480" y="20" text-anchor="middle" fill="var(--module-accent)">[M]</text>
+        </g>
+        <text x="80" y="180" fill="var(--text-muted)" font-size="10">终点：每个位置都是 [M]——MASK 是吸收态，进去就出不来。</text>
+
+        <!-- row 3: gaussian-like -->
+        <text x="20" y="232" fill="var(--text-muted)">Gaussian-like</text>
+        <g transform="translate(80,215)">
+          <rect x="0" y="0" width="60" height="30" fill="var(--surface-soft)" stroke="var(--border)"/><text x="30" y="20" text-anchor="middle">128</text>
+          <rect x="70" y="0" width="60" height="30" fill="var(--surface-soft)" stroke="var(--border)"/><text x="100" y="20" text-anchor="middle">130</text>
+          <rect x="140" y="0" width="60" height="30" fill="var(--surface-soft)" stroke="var(--border)"/><text x="170" y="20" text-anchor="middle">132</text>
+          <text x="210" y="20" fill="var(--text-muted)">→</text>
+          <rect x="225" y="0" width="60" height="30" fill="var(--blue-soft)" stroke="var(--blue)"/><text x="255" y="20" text-anchor="middle">127</text>
+          <rect x="295" y="0" width="60" height="30" fill="var(--blue-soft)" stroke="var(--blue)"/><text x="325" y="20" text-anchor="middle">131</text>
+          <rect x="365" y="0" width="60" height="30" fill="var(--blue-soft)" stroke="var(--blue)"/><text x="395" y="20" text-anchor="middle">130</text>
+          <text x="435" y="20" fill="var(--text-muted)">→</text>
+          <rect x="450" y="0" width="60" height="30" fill="var(--blue-soft)" stroke="var(--blue)"/><text x="480" y="20" text-anchor="middle">64</text>
+        </g>
+        <text x="80" y="270" fill="var(--text-muted)" font-size="10">附近的整数比远处更易混淆——保留"顺序"信息（适合像素值）。</text>
+
+        <text x="300" y="305" text-anchor="middle" fill="var(--text-muted)" font-size="10">不变量：每一行的"跳"都按 $Q_t$ 给的概率发生，列和 = 1。</text>
+      </g>
+    </svg>
+
+    <h2>组合爆炸：$K = 50{,}000$ 怎么办？</h2>
+    <p>这是讲师在 L13 @07:53 学生提问时的关键时刻——一位同学问："This is represented by a matrix for state transitions. It already seems like a very big matrix."（这个用矩阵表示状态转移，看起来已经是个很大的矩阵了。）讲师笑着回了一句 "It is. It is."（确实是。）然后给出了离散扩散最重要的工程妥协。</p>
+    <p>问题：$Q_t \in \mathbb{R}^{K \times K}$ 对 GPT-2 词表就是 $50{,}257^2 \approx 2.5 \times 10^9$ 个数；如果是 LLaMA 词表 $K = 128{,}000$，这个数字飙到 $1.6 \times 10^{10}$。每一步都存这么大矩阵，显存爆炸；更糟糕的是，神经网络要预测的对象（rate 矩阵）大小是 logit 维度的<strong>二次方</strong>——讲师原话："the rate matrix is quadratics of the logit dimension"。<strong>解法</strong>：永远不显式构造 $Q_t$，而是用<strong>结构化的</strong> $Q_t$，让矩阵-向量乘 $Q_t x$ 在 $O(K)$ 甚至 $O(1)$ 而非 $O(K^2)$ 完成。</p>
+    <ul>
+      <li><strong>Uniform 情形</strong>：$Q_t = (1-\beta_t) I + \frac{\beta_t}{K} \mathbf{1}\mathbf{1}^\top$——只需要存一个标量 $\beta_t$，矩阵-向量乘只需 $O(K)$。</li>
+      <li><strong>Absorbing 情形</strong>：$Q_t = (1-\beta_t) I + \beta_t \, e_{\text{MASK}} \mathbf{1}^\top$——只需要标量 $\beta_t$ 和一个特殊 token 索引。前向采样直接退化为"对每个位置抛一次硬币：留下或换 MASK"，无任何矩阵运算。</li>
+      <li><strong>Gaussian-like 情形</strong>：$Q_t$ 是一个 band 矩阵（只有主对角线和邻近几条副对角线非零），每行存稀疏几项即可；和"卷积"在 $O(K)$ 实现是同构的。</li>
+      <li><strong>SEDD（Lou et al. 2024）</strong>：直接预测"<strong>concrete score</strong>" $s_\theta(x_t, y) \approx \frac{q_t(y)}{q_t(x_t)}$ 的 logits，避开了显式 rate 矩阵。讲师原话："This is also why we're trying to do the reparameterization trick."（L13 @08:24）这种 score-based formulation 让训练损失变成 score entropy——比直接学 rate 矩阵的 KL 数值上更稳定。</li>
+    </ul>
+
+    <div class="dd-callout"><strong>工程细节</strong>：网络通常预测 logits 而不是直接预测 rate 矩阵。原因有两个——一是参数量从 $O(K^2)$ 降到 $O(K)$；二是 logits 用 softmax 自动满足"列和 = 1"约束，rate 矩阵则要手动投影才能保证守恒律。这就是为什么所有现代离散扩散语言模型（D3PM、SEDD、MDLM）的网络输出形状都是 $[\text{batch}, \text{seq\_len}, K]$，和一个标准 Transformer 完全一致——你拿一个预训练的 BERT 改改 loss 就能开始训练。</div>
+
+    <h2>三种范式如何统一</h2>
+    <p>讲师在 L12 → L13 的衔接里完成了一个重要梳理：离散扩散不是一个单一算法，而是三种等价表述。</p>
+    <ol>
+      <li><strong>Categorical noise + denoiser</strong>：对应 DDPM 在离散上的版本（D3PM）。前向用 $Q_t$ 加噪，反向网络预测下一时刻的 categorical 分布或者 $\hat{x}_0$；损失是 ELBO 上的 KL 求和。</li>
+      <li><strong>Score matching 形式</strong>：对应 SEDD（score-entropy discrete diffusion，Lou et al. 2024）。把"learn $p_\theta$"换成"learn concrete score"——比值 $q_t(y) / q_t(x_t)$ 的对数，类似连续扩散里 $\nabla \log p_t(x)$ 的角色。讲师说："score entropy loss is a more stable loss function."（L13 @01:23）</li>
+      <li><strong>Flow matching 形式</strong>：CTMC + Kolmogorov 方程，预测"概率路径"（probability path）上的速度场。讲师在课堂上让学生回答这个对应物："What is the analog to velocity in flow matching in our discrete setting? — Probability part."（L13 @02:23）"probability path" 就是从干净数据流向纯噪声的一族 $p_t$。</li>
+    </ol>
+    <p>三者都从同一个连续时间 Markov 链出发，只是损失函数不同——和连续扩散里 "DDPM = score matching = flow matching 都等价" 的图景对应。讲师在 L13 @08:24 总结了为什么会出现三种范式：在大词表上直接学 rate 矩阵不稳定且参数量爆炸，于是大家用不同的 reparameterization——预测 categorical 概率、预测 concrete score、或者预测 probability flow——结果在数学上等价但在工程上区别巨大。</p>
+
+    <h2>预告：MDLM 与 SEDD 是这套框架的两个高效实例</h2>
+    <p>读到这里你已经掌握了离散扩散的全部数学骨架：$Q_t$、累积矩阵 $\bar{Q}_t$、ELBO、守恒律、结构化降阶。剩下两件事是把这套骨架"工程化"成可训练的语言模型。</p>
+    <ul>
+      <li><strong>MDLM（Masked Diffusion Language Model）</strong>：选 $Q_t$ 为 absorbing，证明 ELBO 退化为加权 cross-entropy；训练几乎和 BERT 一样，推理时按时间步逐步揭开 MASK。它最像"BERT 的连续时间外推"。</li>
+      <li><strong>SEDD（Score-Entropy Discrete Diffusion）</strong>：选择 score-matching 形式，预测 concrete score $s_\theta$；用 score entropy 损失替代 KL，数值上更稳。它最像"score-based generative model 的离散版"。</li>
+    </ul>
+    <p>这两条路在 2024–2025 年都已经能在 LM1B、WikiText 等基准上接近或追上自回归 GPT，且支持任意顺序填空、并行解码、可控生成——这是离散扩散从理论走向"被严肃考虑替代 AR LM"的关键节点。下一节我们会单独讲 MDLM 和 SEDD 的细节，重点是它们如何把这一节抽象的 ELBO 落地成几行 PyTorch。</p>
+
+    <div class="dd-myadd">🟡 教材外补充：当 $Q_t$ 是 absorbing 时，前向就是 "随时间增大 MASK 比例"，反向就是 "并行预测被 MASK 位置的 token"——这正是 MDLM (Sahoo et al. 2024) 和 MaskGIT 在做的事。换句话说，BERT 的 MLM 训练目标可以看作 absorbing 离散扩散 ELBO 的一个特例（取 $T = 1$ 且固定 mask 比例 15%）。MDLM 的贡献是证明 simplified ELBO 在 absorbing 设定下等价于 weighted cross-entropy，让训练像 BERT 一样简单；而推理时仍然保留了多步 refinement 的能力。此外，SEDD 把同样的物理过程用 concrete score 表述，参数共享、稳定性更好；2024–2025 年它和 MDLM 并列成为开源社区里最常被复现的离散扩散语言模型骨架。GenGPT、LLaDA 等纯扩散语言模型都是在这条线上长出来的。</div>
+  </section>
+
+  <section class="concept-interact">
+    <p>点击按钮，按顺序展开 ELBO 在离散扩散中的推导链。<strong>不变量</strong>：每一步 $q(x_t|x_{t-1})$ 都是合法的 categorical 分布——列和恒等于 1。</p>
+
+    <div class="dd-controls">
+      <button data-step="0" class="active">① 前向单步</button>
+      <button data-step="1">② 累积闭式</button>
+      <button data-step="3">③ 反向单步</button>
+      <button data-step="4">④ ELBO 拆解</button>
+      <button data-step="5">⑤ 守恒律</button>
+    </div>
+    <div class="dd-readout" id="dd-readout">
+      <div class="dd-line dd-active-line" data-line="0">
+        $q(x_t \mid x_{t-1}) = \operatorname{Cat}(x_t \mid Q_t \, x_{t-1})$<br>
+        <span style="color:var(--text-muted);font-size:0.88rem;">$Q_t \in \mathbb{R}^{K \times K}$；列和 = 1。Token 按概率"跳"。</span>
+      </div>
+      <div class="dd-line" data-line="1">
+        $\bar{Q}_t = Q_t Q_{t-1} \cdots Q_1$<br>
+        $q(x_t \mid x_0) = \operatorname{Cat}(x_t \mid \bar{Q}_t \, x_0)$<br>
+        <span style="color:var(--text-muted);font-size:0.88rem;">不再需要逐步采样——一次到位（对应 DDPM 的 $\bar\alpha_t$ 闭式）。</span>
+      </div>
+      <div class="dd-line" data-line="3">
+        $p_\theta(x_{t-1} \mid x_t) = \operatorname{Cat}(x_{t-1} \mid f_\theta(x_t, t))$<br>
+        <span style="color:var(--text-muted);font-size:0.88rem;">网络输出 categorical 的概率向量，不是 $\epsilon$；softmax 自带列和 = 1。</span>
+      </div>
+      <div class="dd-line" data-line="4">
+        $\mathcal{L} = \mathbb{E}\!\left[\sum_t D_{\mathrm{KL}}\!\bigl(q(x_{t-1}|x_t,x_0)\,\|\,p_\theta(x_{t-1}|x_t)\bigr)\right]$<br>
+        <span style="color:var(--text-muted);font-size:0.88rem;">两个 categorical 之间的 KL 有闭式：$\sum_k q_k \log \frac{q_k}{p_k}$。</span>
+      </div>
+      <div class="dd-line" data-line="5">
+        $\sum_j (Q_t)_{ij} = 1 \;\;\forall i$（离散时间）<br>
+        $\sum_j (R_t)_{ij} = 0 \;\;\forall i$（连续时间 rate 矩阵）<br>
+        <span style="color:var(--text-muted);font-size:0.88rem;">"流入 = 流出"——CMU 称之为 conservation of mass。</span>
+      </div>
+    </div>
+
+    <script>
+      (function () {
+        const btns = document.querySelectorAll('.dd-controls button');
+        const lines = document.querySelectorAll('#dd-readout .dd-line');
+        function show(step) {
+          btns.forEach(b => b.classList.toggle('active', +b.dataset.step === step));
+          lines.forEach(l => l.classList.toggle('dd-active-line', +l.dataset.line === step));
+        }
+        btns.forEach(b => b.addEventListener('click', () => show(+b.dataset.step)));
+        show(0);
+      })();
+    </script>
+  </section>
+
+  <section class="concept-example">
+    <h2>手算：$K = 3$ 的 absorbing 链两步</h2>
+    <p>设词表 $\{a, b, \text{MASK}\}$，$K = 3$；$\beta_1 = \beta_2 = 0.4$。Absorbing 矩阵（列代表"从某 token 出发"，行代表"落到哪个 token"）：</p>
+    <p>$$Q_1 = \begin{pmatrix} 0.6 & 0 & 0 \\ 0 & 0.6 & 0 \\ 0.4 & 0.4 & 1 \end{pmatrix}.$$</p>
+    <p>从 $x_0 = a = (1, 0, 0)^\top$ 出发：$Q_1 \, x_0 = (0.6,\, 0,\, 0.4)^\top$——以 0.6 概率仍是 $a$，以 0.4 概率变 MASK，不会变 $b$（因为 absorbing 只允许"留下"或"跳到 MASK"）。守恒律检查：第 1 列之和 $= 0.6 + 0 + 0.4 = 1$ ✓；第 2 列 $= 0 + 0.6 + 0.4 = 1$ ✓；第 3 列 $= 0 + 0 + 1 = 1$ ✓（MASK 是吸收态，不会跳出）。</p>
+    <p>再走一步：$Q_2 = Q_1$，累积矩阵 $\bar{Q}_2 = Q_2 Q_1$ 的第 1 列 = $Q_1 \cdot (0.6, 0, 0.4)^\top = (0.36,\, 0,\, 0.64)^\top$——两步后仍是 $a$ 的概率 $0.6 \times 0.6 = 0.36$，已 MASK 概率 $1 - 0.36 = 0.64$。对比从 $\bar{Q}_2$ 直接读出来的"累积保留概率" $\bar\alpha_2 = 0.36 = (1 - 0.4)^2$，与公式 $\bar\alpha_t = \prod_{s \leq t}(1 - \beta_s)$ 完全吻合。这就是 absorbing 离散扩散最大的工程优势：你<strong>从不需要</strong>真的把 $Q_t$ 算出来，一个标量 $\bar\alpha_t$ 就够了。</p>
+  </section>
+
+  <section class="concept-pitfalls">
+    <h2>常见误区</h2>
+    <ol>
+      <li><strong>"在 token embedding 上加 Gaussian 噪声 = 离散扩散"。</strong>反例：把 "cat" 的 embedding 加噪到 $(0.3, -0.2, \ldots)$，再 nearest-token 投影回去可能落到 "dog"——但路径上 $(0.3, -0.2, \ldots)$ 不是任何合法 token，违背"住在合法状态"的原则；这是 latent diffusion 不是 discrete diffusion。真正的离散扩散每一步采样出的都必须是词表里的某个合法 token。</li>
+      <li><strong>"$Q_t$ 要显式存 $50{,}000 \times 50{,}000$ 大矩阵"。</strong>反例：uniform 情形只需 1 个标量 $\beta_t$，矩阵-向量乘退化为线性组合；absorbing 只需标量 $\beta_t$ + MASK 的 token index，前向甚至不用乘法。讲师 L13 @08:24 明确说："we're trying to do reparameterization trick" 来避开 $O(K^2)$。SEDD 进一步用神经网络直接输出 logits，从根本上不和 $Q_t$ 打照面。</li>
+      <li><strong>"absorbing discrete diffusion 和 BERT 的 MLM 是两回事"。</strong>反例：absorbing $Q_t$ 把每个位置独立 mask 到吸收态，反向预测 $\hat{x}_0$——这正是 BERT cloze 任务的"随时间版本"。BERT 固定 mask 比例 15%，而 absorbing 扩散让 mask 比例随 $t$ 从 0 滑到 1。MDLM (2024) 严格证明二者 ELBO 等价（仅相差一个时间相关的 reweight 系数）。所以"扩散语言模型"和"BERT" 不是相反方向，而是同一个数学物体的不同时间切片。</li>
+    </ol>
+  </section>
+
+  <section class="concept-seealso">
+    <h2>相关概念</h2>
+    <ul>
+      <li><a href="/video-to-notebook/concepts/masked-diffusion/">Masked Diffusion</a> — absorbing $Q_t$ 的最重要实例</li>
+      <li><a href="/video-to-notebook/concepts/score-entropy-discrete-diffusion/">Score-Entropy Discrete Diffusion (SEDD)</a> — 离散扩散的 score-matching 形式</li>
+      <li><a href="/video-to-notebook/concepts/flow-matching/">Flow Matching</a> — 离散版本基于 CTMC + Kolmogorov 方程</li>
+      <li><a href="/video-to-notebook/concepts/rectified-flow/">Rectified Flow</a> — 连续侧的对应思想</li>
+    </ul>
+  </section>
+
+  <section class="concept-sources">
+    <h2>来源</h2>
+    <ol>
+      <li><a href="https://www.youtube.com/watch?v=mXEjZblUBPs&t=2s" target="_blank" rel="noopener">cmu-10799-diffusion-flow · L12 · Discrete Diffusion &amp; Masked Diffusion · (00:02)</a></li>
+      <li><a href="https://www.youtube.com/watch?v=bK-LfpKLv0g&t=99s" target="_blank" rel="noopener">cmu-10799-diffusion-flow · L13 · "the easiest way to do discrete diffusion is mask diffusion" · (01:39)</a></li>
+      <li><a href="https://www.youtube.com/watch?v=bK-LfpKLv0g&t=369s" target="_blank" rel="noopener">cmu-10799-diffusion-flow · L13 · "Q_t is a jump / velocity essentially" · (06:09)</a></li>
+      <li><a href="https://www.youtube.com/watch?v=bK-LfpKLv0g&t=423s" target="_blank" rel="noopener">cmu-10799-diffusion-flow · L13 · "represented by a matrix... it is a very big matrix" + reparameterization trick · (07:03)</a></li>
+    </ol>
+  </section>
+</article>

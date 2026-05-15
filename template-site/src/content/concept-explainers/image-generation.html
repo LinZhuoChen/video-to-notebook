@@ -1,0 +1,281 @@
+<style>
+/* prefix: ig- */
+.ig-quickref{background:var(--surface-soft);border-left:3px solid var(--module-accent);padding:0.8rem 1rem;border-radius:0 4px 4px 0;margin:1rem 0;font-size:0.92rem;}
+.ig-quickref div{margin:0.3rem 0;}
+.ig-svg{display:block;margin:1.2rem auto;max-width:100%;height:auto;}
+.ig-pitfalls ol{padding-left:1.4rem;} .ig-pitfalls li{margin:0.5rem 0;}
+.ig-source{font-style:italic;color:var(--text-muted);border-left:2px solid var(--border);padding:0.2rem 0.8rem;margin:0.5rem 0;font-size:0.9rem;}
+.ig-family-table{width:100%;border-collapse:collapse;margin:1rem 0;font-size:0.88rem;}
+.ig-family-table th,.ig-family-table td{padding:0.5rem 0.6rem;border-bottom:1px solid var(--border);text-align:left;vertical-align:top;}
+.ig-family-table th{background:var(--surface-soft);color:var(--text);font-weight:600;}
+.ig-family-table tr:hover{background:var(--surface-soft);}
+.ig-why{display:block;font-size:0.82rem;color:var(--text-muted);margin-top:0.2rem;}
+.my-addition{background:var(--module-accent-soft);border-left:3px solid var(--module-accent);padding:0.4rem 0.8rem;margin:0.6rem 0;font-size:0.88rem;color:var(--text);border-radius:0 4px 4px 0;}
+.ig-axes{display:grid;grid-template-columns:1fr 1fr;gap:0.6rem;margin:0.8rem 0;}
+.ig-axis-card{background:var(--surface-soft);border:1px solid var(--border);border-radius:4px;padding:0.5rem 0.7rem;font-size:0.86rem;}
+.ig-axis-card strong{color:var(--module-accent);}
+.ig-timeline-controls{display:flex;flex-wrap:wrap;gap:0.3rem;margin:0.8rem 0;}
+.ig-timeline-controls button{background:var(--surface-soft);border:1px solid var(--border);color:var(--text);padding:0.35rem 0.7rem;border-radius:4px;cursor:pointer;font-size:0.82rem;}
+.ig-timeline-controls button.active{background:var(--module-accent);color:var(--surface);border-color:var(--module-accent);}
+.ig-timeline-readout{background:var(--surface-soft);border-left:3px solid var(--module-accent);padding:0.6rem 0.9rem;margin:0.5rem 0;font-size:0.9rem;min-height:3.5rem;}
+.ig-tl-dot{cursor:pointer;}
+.ig-tl-dot.ig-tl-active{stroke:var(--module-accent);stroke-width:3;}
+@keyframes ig-blink{0%,100%{opacity:0.4;}50%{opacity:1;}}
+.ig-tl-cursor{animation:ig-blink 1.4s ease-in-out infinite;}
+</style>
+
+<article class="concept-entry">
+  <header class="concept-header">
+    <span class="concept-eyebrow">概念 · 学科地图</span>
+    <h1>Image Generation</h1>
+    <p class="concept-tagline">— 从 $p_\text{data}(\text{image})$ 采样的任务；不是一种模型，是一片家族。</p>
+  </header>
+
+  <aside class="ig-quickref">
+    <div><strong>定义</strong> · 学习一个生成器 $G$，使其样本分布 $p_G$ 逼近真实图片分布 $p_\text{data}$，并能从 $p_G$ 采样得到「新」图。</div>
+    <div><strong>公式</strong> · 通用目标：$\min_\theta D(p_\text{data} \,\|\, p_\theta)$，$D$ 取 KL / JS / Wasserstein / score-matching loss 不一而足。</div>
+    <div><strong>易错</strong> · "image generation" 不等于 "diffusion"；diffusion 只是 2020 年后才占主导的一支，前面还有 VAE / GAN / 自回归 / 流模型。</div>
+  </aside>
+
+  <section class="concept-intuition">
+    <p>很多人接触深度学习是从 ChatGPT 或 Stable Diffusion 入门，于是默认「图像生成 = 扩散模型」。<strong>这是用「最近的胜者」覆盖了整个学科</strong>。Image generation 是一个<em>任务</em>（task），不是一个<em>方法</em>（method）——它问的是「能不能从图片分布里抽出新样本」，而对这个问题，人类至少给出了 6 大类不同答案。</p>
+    <p>一个具体的比喻：图像生成像「学画画」。你可以一笔一笔地画完整张（自回归 / PixelRNN——按从左到右、从上到下的顺序画像素），可以脑子里先想个轮廓再细化（VAE / latent diffusion——压一个潜变量再展开），可以照着一团雾慢慢擦出形状（diffusion——从纯噪声逐步去噪），可以让一个画家和一个评论家互怼直到画家骗过评论家（GAN——生成器和判别器对抗），也可以画一遍再反向擦回噪声看看能不能复原（normalising flow——可逆映射）。它们的目标一致——「画出真的」，路径完全不同。<strong>同一个任务的多种方法学</strong>，才是 image generation 作为研究领域的核心张力，也是过去十年深度学习最热闹的赛道之一。</p>
+    <div class="ig-source">「Diffusion models has really revolutionized text-to-image synthesis—examples are DALL·E 3, Stable Diffusion, Midjourney⋯ 但它的应用还远不止文本生图，蛋白质、视频、音频都在用。」—— Vizuara《Principles of Diffusion Models》L11 @04:36</div>
+    <div class="my-addition">🟡 教材外补充：本词条的 3 条源 occurrence 都只是顺带提及 image generation（课程介绍、Sora-style scaling 一句话、text-to-image 是后面要讲的内容），不构成完整教学。所以本页主要承担<strong>导航 / 全景</strong>职责——把读者落到正确的子家族页（diffusion / VAE / GAN / flow matching）。</div>
+    <p>在机器学习的工作流里，image generation 对应「<strong>无监督密度建模 + 采样</strong>」这一对孪生任务：训练时让模型理解「什么样的像素组合是合理图片」，推理时让它「按这个理解吐出新组合」。下游应用——文本到图（text-to-image）、超分（super-resolution）、修复（inpainting）、视频生成、3D 生成、蛋白结构生成——全部是它的特化。</p>
+    <div class="my-addition">🟡 教材外补充：为什么图像生成这么难？因为图像分布是「极高维 + 强结构」的双重困难。一张 256×256 RGB 图就是 196 608 维的向量，但只有<em>极小一片</em>子流形上的点看起来像「真实图片」——其它都是噪声。生成模型必须既找到这片子流形，又能在它上面无偏采样。VAE 试图用 latent space + 重建逼近它，GAN 用判别器隐式逼近，diffusion 用「逐步去噪」追踪它。每一类方法都对应一种「如何描述这片高维子流形」的回答。</div>
+    <p>读完本词条，你应该能在脑子里画出一张「图像生成方法树」：根节点是 $p_\text{data}(\text{image})$ 这个目标，第一层分叉是 explicit vs. implicit likelihood（显式 vs. 隐式概率），第二层分叉是 one-shot vs. iterative（一步生成 vs. 迭代精修），叶子是 VAE / GAN / Flow / AR / Diffusion / Flow Matching 等具体模型。本页是地图，子家族页才是详细路线。一个好的判断方式：每读一篇新论文，先问「它在这棵树上的哪个位置？解决了哪个分叉处的痛点？」——这比一开始就钻进 loss 公式更能建立学科 sense。</p>
+  </section>
+
+  <section class="concept-deepdive">
+    <h2>家族谱：6+ 类生成范式</h2>
+    <p>下表按「核心机制」对图像生成方法做分类。每一行的 <strong>Why</strong> 解释「为什么人们当时会发明这一支」——这是判断后来者优劣的关键参照。</p>
+
+    <table class="ig-family-table">
+      <thead>
+        <tr><th>家族</th><th>代表 / 起点</th><th>核心机制</th><th>为什么 (Why)</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>VAE</strong></td>
+          <td>Kingma & Welling 2014</td>
+          <td>encoder $q(z|x)$ + decoder $p(x|z)$，潜空间 Gaussian 先验，优化 ELBO。</td>
+          <td><span class="ig-why">提供<strong>可解释的潜变量</strong>和稳定训练；KL 项强制潜空间连续可采样。代价：重建模糊。</span></td>
+        </tr>
+        <tr>
+          <td><strong>GAN</strong></td>
+          <td>Goodfellow 2014</td>
+          <td>生成器 $G$ vs. 判别器 $D$ 的 minimax 博弈，无显式似然。</td>
+          <td><span class="ig-why">绕开了显式概率建模，直接用<strong>判别器作为隐式似然</strong>，所以样本极其<strong>锐利逼真</strong>。代价：训练不稳定、mode collapse。</span></td>
+        </tr>
+        <tr>
+          <td><strong>Autoregressive</strong></td>
+          <td>PixelRNN / PixelCNN 2016, Image GPT 2020</td>
+          <td>把图片拆成 pixel 序列，建模 $p(x) = \prod_i p(x_i | x_{&lt;i})$。</td>
+          <td><span class="ig-why">和 NLP 的 next-token 思路统一——<strong>能算精确 likelihood</strong>。代价：采样要 $H \cdot W$ 步，1024×1024 图 = 一百万步，慢到不可用。</span></td>
+        </tr>
+        <tr>
+          <td><strong>Normalising Flow</strong></td>
+          <td>RealNVP 2016, Glow 2018</td>
+          <td>用一串<strong>可逆变换</strong> $f$ 把简单分布映到数据分布；$\log p(x) = \log p(z) + \log|\det J_f|$。</td>
+          <td><span class="ig-why">同时拥有<strong>精确 likelihood + 一步采样</strong>——VAE 和 GAN 各占一头，flow 想都要。代价：可逆约束限制网络表达力。</span></td>
+        </tr>
+        <tr>
+          <td><strong>Diffusion</strong></td>
+          <td>DDPM (Ho 2020), Score SDE (Song 2021)</td>
+          <td>前向加噪 $T$ 步把数据→噪声，训一个网络预测噪声 / score，反向迭代去噪。</td>
+          <td><span class="ig-why">把「一步生成一张图」拆成「$T$ 步小修小补」，<strong>每一步都是简单的去噪</strong>——loss 形式极其稳定，质量碾压 GAN。代价：采样要 $T$ 次前向。</span></td>
+        </tr>
+        <tr>
+          <td><strong>Latent Diffusion</strong></td>
+          <td>Rombach 2022 (Stable Diffusion)</td>
+          <td>先用 VAE 把 512×512 图压到 64×64 latent，在 latent 上做 diffusion。</td>
+          <td><span class="ig-why">在像素上做 diffusion 一张 1024 图 GPU 要算几分钟；压到 latent 后<strong>计算量降低 ~64×</strong>，让消费级 GPU 也能跑。这是 SD 能开源出圈的根本原因。</span></td>
+        </tr>
+        <tr>
+          <td><strong>Consistency / Flow Matching / Rectified Flow</strong></td>
+          <td>Song 2023, Lipman 2023, Liu 2023</td>
+          <td>把 diffusion 的 $T$ 步学成 1~4 步直射，或绕开 SDE 直接学速度场 $v_\theta(x, t)$。</td>
+          <td><span class="ig-why">Diffusion 慢是因为 NFE (number of function evaluations) 大；这一系列工作的目标就是<strong>把 NFE 砍到个位数</strong>而不丢质量。LCM、SD-Turbo、FLUX.1-schnell 都是这一脉。</span></td>
+        </tr>
+        <tr>
+          <td><strong>Image–Video unified</strong></td>
+          <td>Sora 2024, Veo 2024, Movie Gen 2024</td>
+          <td>把图片当作单帧视频，在时空 latent 上做 diffusion / flow matching。</td>
+          <td><span class="ig-why">视频 = 图片 + 时间一致性。统一架构让一套权重同时做 T2I / T2V / I2V，<strong>规模效应大于专用模型</strong>。</span></td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2>两条根本分叉：显式 vs. 隐式、一步 vs. 迭代</h2>
+    <p>上表 8 行看起来繁多，但其实只有两个根本设计选择：</p>
+    <p><strong>① 显式概率 vs. 隐式概率</strong>。显式（VAE、Flow、AR、Diffusion 都能写出 $\log p_\theta(x)$ 或其下界）让你能算 likelihood、做模型选择、跨任务比较；隐式（GAN）只能采样，不能算概率，但训练目标更直接、样本质量历史上更高。Diffusion 之所以「打败」GAN，部分原因是它属于显式那一类，却拿到了 GAN 级别的样本质量——两全。</p>
+    <p><strong>② 一步生成 vs. 迭代生成</strong>。VAE / GAN / Flow 都是「encoder → 一次前向 → 出图」，推理快；Diffusion 是「$T$ 步去噪 → 出图」，推理慢。2023 年起 consistency model / rectified flow 的目标就是把 diffusion 的好处（高质量、稳定训练、可控）保留下来，但把推理压回到 1–4 步——这就是为什么 FLUX.1-schnell、SD-Turbo、LCM 是当前最热门的方向。</p>
+    <p>把这两条轴交叉起来，能把 8 个家族放进 4 个象限：GAN（隐式 × 一步）、VAE/Flow/AR（显式 × 一步 / 接近一步）、Diffusion（显式 × 迭代）、Consistency / Flow Matching（显式 × 迭代但学成准一步）。后续每读到一个新方法，都问「它落在哪个象限、解决了上一代什么痛点」，几乎都能定位。</p>
+
+    <h2>每个家族学的「数学对象」是什么？</h2>
+    <p>另一个理解差异的角度：每一类生成模型本质上是在<strong>用神经网络拟合一个不同的数学对象</strong>。把这一列单独拎出来，许多公式上的混乱会瞬间清晰：</p>
+    <ul>
+      <li><strong>VAE</strong> 学的是 <em>posterior $q(z|x)$ 和 likelihood $p(x|z)$</em>，loss = 重建 + KL；推理时从先验 $p(z) = \mathcal{N}(0,I)$ 采 $z$ 再解码。</li>
+      <li><strong>GAN</strong> 学的是 <em>从噪声 $z \sim \mathcal{N}(0,I)$ 到数据的映射 $G(z)$</em>，loss 由判别器 $D$ 给出，本身不显式写概率。</li>
+      <li><strong>自回归</strong> 学的是 <em>条件概率链 $p(x_i | x_{&lt;i})$</em>，loss = next-token cross-entropy，和 GPT 完全同构。</li>
+      <li><strong>Normalising Flow</strong> 学的是 <em>可逆映射 $f$ 及其 Jacobian 行列式</em>，loss = $-\log p(x)$ 直接由 change-of-variable 公式给出。</li>
+      <li><strong>Diffusion</strong> 学的是 <em>噪声预测 $\epsilon_\theta(x_t, t)$ 或等价的 score $\nabla_x \log p_t(x)$</em>，loss = 简单的 MSE。这就是为什么 Ho 2020 反复强调 "simple loss" —— diffusion 把所有复杂性藏进了「迭代采样过程」而不是「训练目标」。</li>
+      <li><strong>Flow Matching / Rectified Flow</strong> 学的是 <em>速度场 $v_\theta(x, t)$</em>，loss = MSE 拟合一条从噪声到数据的「直线」轨迹；推理时解 ODE。</li>
+    </ul>
+    <p>「学不同的对象」决定了「采样过程长什么样」：学 likelihood → 直接采样；学 score → SDE / ODE 迭代；学 velocity → ODE 一两步。这就是从训练目标推出推理算法的「家族签名」。</p>
+
+    <h2>为什么 diffusion 后来居上？</h2>
+    <p>2020 年之前，图像生成的「王者」是 GAN（StyleGAN 系列在 FFHQ 人脸上几乎以假乱真），其次是 VAE 的各种增强（VQ-VAE-2 在 ImageNet 上能出像样的图）。但 GAN 有三个长期顽疾：训练不稳定（loss 来回震荡，需要无数 trick）、mode collapse（采样多样性差）、可控性弱（条件 GAN 远不如 cVAE 灵活）。DDPM 一篇论文同时缓解了这三件事：</p>
+    <ul>
+      <li><strong>稳定</strong>：训练目标就是 $\|\epsilon - \epsilon_\theta\|^2$，没有对抗博弈，几乎不可能训崩。</li>
+      <li><strong>多样性</strong>：每一步从高斯分布采样一次，天然探索全分布，不会 collapse。</li>
+      <li><strong>可控性</strong>：score 的线性结构让 classifier guidance / CFG / ControlNet 都能直接以「梯度加和」的形式注入条件。</li>
+    </ul>
+    <p>代价是采样慢——但 2023 年起 consistency model / rectified flow / 蒸馏方法把它砍到个位数 NFE，这块短板也被补齐。所以 2024 年看，diffusion 家族（含 flow matching 这条「数学等价但更优的形式」）在<strong>四个评价轴上同时不弱</strong>，这就是它统治 T2I 的原因。</p>
+
+    <h2>除了图像生成，本家族还做什么？</h2>
+    <p>Vizuara 课程里 Dr. Raj 特别强调一句：「diffusion 不仅是 T2I——蛋白、视频、音频都在用。」这是这一类方法学的可贵之处。具体已被验证的应用：<strong>视频生成</strong>（Sora、Veo、Movie Gen），<strong>3D 生成</strong>（DreamFusion 用 SDS 把 2D 扩散蒸到 NeRF），<strong>蛋白结构</strong>（RFdiffusion、Chroma），<strong>分子生成</strong>（EDM、DiffDock），<strong>音频/音乐</strong>（AudioLDM、MusicLDM），<strong>机器人动作</strong>（Diffusion Policy）。把图像生成学好，就拿到了一把多模态生成的万能钥匙——这也是为什么本词条值得做成「入口页」而不是「细节页」。</p>
+
+    <h2>怎么读这页：路径建议</h2>
+    <p>读到这里你应该已经对「图像生成是一片家族」建立了直觉。下一步推荐的学习路径有两条：<strong>历史路径</strong>——按时间顺序读 VAE → GAN → PixelCNN → Glow → DDPM → SD → Flow Matching，理解每一支的「上一代痛点 → 本代解法」；<strong>原理路径</strong>——先彻底吃透一支（推荐 DDPM，因为它的 loss 最简单、数学最干净），再把其它家族当作「不同的训练对象 + 采样过程」横向理解。两条路径殊途同归，区别只在于你更习惯按时间还是按抽象层级组织知识。本课程笔记的主线走的是「原理路径」，所以接下来的概念页会主要展开 DDPM、score matching、CFG、latent diffusion、flow matching 这条链；遇到需要横向对比时，再回到本页查家族表。</p>
+
+    <h2>四条评价轴</h2>
+    <p>比较两种生成方法时，看这 4 个指标，几乎可以一句话定胜负：</p>
+    <div class="ig-axes">
+      <div class="ig-axis-card"><strong>质量 (Quality)</strong>：FID（Fréchet Inception Distance，越低越好）、IS（Inception Score，越高越好）、CLIP score（语义对齐）、人工偏好评分。Diffusion 在 FID 上长期 SOTA，但 FID 对分辨率和数据预处理极敏感，不能只看一个数。</div>
+      <div class="ig-axis-card"><strong>多样性 (Diversity)</strong>：mode coverage / precision-recall。GAN 的 mode collapse 是历史性问题——一个模型可能反复生成同一只狗；diffusion 因为每一步是去噪而不是判别器博弈，天然覆盖全分布。</div>
+      <div class="ig-axis-card"><strong>速度 (Speed)</strong>：NFE（number of function evaluations，单图前向网络的次数）/ 单图时延。GAN ≈ 1 NFE，VAE ≈ 1 NFE，自回归 ≈ H×W NFE，diffusion 50–1000 NFE，consistency model / rectified flow 1–4 NFE。</div>
+      <div class="ig-axis-card"><strong>可控性 (Controllability)</strong>：能不能按条件指挥生成？classifier guidance、CFG（无分类器引导）、ControlNet（边缘/姿态/深度条件）、LoRA（轻量风格微调）、IP-Adapter（图像 prompt）都是给 diffusion 加缰绳的工具。GAN 上的对应物（cGAN、StyleGAN inversion）远没有这么丰富。</div>
+    </div>
+    <p>除了这 4 条主轴，还有几条「次要但工程上要命」的轴：<strong>训练稳定性</strong>（GAN 训崩很常见，diffusion 几乎不崩）、<strong>likelihood 是否可算</strong>（科研论文常要这个）、<strong>条件解耦</strong>（latent 空间是否能做属性插值），以及<strong>下游可微调性</strong>（LoRA / DreamBooth / Textual Inversion 都是给 diffusion 的，不是给 GAN 的）。一个真实工程决策的例子：如果做 24fps 实时风格滤镜，必选 GAN 或一步 distilled diffusion；如果做高质量海报生成且不在意延迟，选 FLUX.1 或 SD3；如果做生物医学图像（要 likelihood 评估稀有事件），考虑 normalising flow；如果做 1024×1024 以上的超高分辨率，考虑 cascaded diffusion 或 latent + super-resolution 的组合。家族选择是任务驱动的，不存在「最佳」模型，只存在「最适合当前 quality × speed × budget × controllability 约束」的模型。</p>
+
+    <svg class="ig-svg" viewBox="0 0 600 220" role="img" aria-label="Image generation 任务总框架：从数据分布采样到下游应用">
+      <g font-family="ui-sans-serif" font-size="11" fill="var(--text)">
+        <rect x="20" y="80" width="120" height="60" rx="6" fill="var(--surface-soft)" stroke="var(--border)"/>
+        <text x="80" y="105" text-anchor="middle">真实数据分布</text>
+        <text x="80" y="122" text-anchor="middle" font-size="10" fill="var(--text-muted)">$p_\text{data}$</text>
+        <path d="M 145 110 L 215 110" stroke="var(--text-muted)" marker-end="url(#ig-arrow)"/>
+        <text x="180" y="100" text-anchor="middle" font-size="10" fill="var(--text-muted)">拟合</text>
+        <rect x="220" y="50" width="160" height="120" rx="6" fill="var(--module-accent-soft)" stroke="var(--module-accent)"/>
+        <text x="300" y="72" text-anchor="middle" font-weight="600">生成模型 $p_\theta$</text>
+        <text x="300" y="92" text-anchor="middle" font-size="10">VAE · GAN · AR</text>
+        <text x="300" y="108" text-anchor="middle" font-size="10">Flow · Diffusion</text>
+        <text x="300" y="124" text-anchor="middle" font-size="10">Latent Diffusion</text>
+        <text x="300" y="140" text-anchor="middle" font-size="10">Consistency · Flow Match</text>
+        <text x="300" y="158" text-anchor="middle" font-size="10" fill="var(--text-muted)">7+ 大家族</text>
+        <path d="M 385 110 L 455 110" stroke="var(--text-muted)" marker-end="url(#ig-arrow)"/>
+        <text x="420" y="100" text-anchor="middle" font-size="10" fill="var(--text-muted)">采样</text>
+        <rect x="460" y="80" width="120" height="60" rx="6" fill="var(--surface-soft)" stroke="var(--border)"/>
+        <text x="520" y="105" text-anchor="middle">新图片</text>
+        <text x="520" y="122" text-anchor="middle" font-size="10" fill="var(--text-muted)">$x \sim p_\theta$</text>
+        <defs>
+          <marker id="ig-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--text-muted)"/>
+          </marker>
+        </defs>
+      </g>
+    </svg>
+  </section>
+
+  <section class="concept-interact">
+    <p>点击下方时间轴上的圆点（或按钮），看 2014–2024 这十年图像生成的关键里程碑。<strong>不变量</strong>：横轴是时间，每一年的「胜者」都在解决<em>前一支</em>留下的痛点（VAE 模糊 → GAN 锐利 → 多样性差 → diffusion → 太慢 → consistency / flow matching）。</p>
+
+    <div class="ig-timeline-controls">
+      <button data-step="0" class="active">2014 VAE/GAN</button>
+      <button data-step="1">2016 PixelRNN</button>
+      <button data-step="2">2018 BigGAN/StyleGAN</button>
+      <button data-step="3">2020 DDPM</button>
+      <button data-step="4">2021 DALL·E 1 / CLIP</button>
+      <button data-step="5">2022 SD / Imagen / DALL·E 2</button>
+      <button data-step="6">2023 SDXL / ControlNet</button>
+      <button data-step="7">2024 Sora / FLUX / Veo</button>
+    </div>
+
+    <svg class="ig-svg" viewBox="0 0 600 160" role="img" aria-label="2014-2024 图像生成里程碑时间轴">
+      <g font-family="ui-sans-serif" font-size="10" fill="var(--text-muted)">
+        <line x1="40" y1="80" x2="560" y2="80" stroke="var(--border-strong)" stroke-width="2"/>
+        <g id="ig-tl-points">
+          <g><circle class="ig-tl-dot" data-i="0" cx="60" cy="80" r="7" fill="var(--module-accent)"/><text x="60" y="105" text-anchor="middle">2014</text></g>
+          <g><circle class="ig-tl-dot" data-i="1" cx="135" cy="80" r="7" fill="var(--surface-soft)" stroke="var(--border-strong)"/><text x="135" y="105" text-anchor="middle">2016</text></g>
+          <g><circle class="ig-tl-dot" data-i="2" cx="210" cy="80" r="7" fill="var(--surface-soft)" stroke="var(--border-strong)"/><text x="210" y="105" text-anchor="middle">2018</text></g>
+          <g><circle class="ig-tl-dot" data-i="3" cx="285" cy="80" r="7" fill="var(--surface-soft)" stroke="var(--border-strong)"/><text x="285" y="105" text-anchor="middle">2020</text></g>
+          <g><circle class="ig-tl-dot" data-i="4" cx="345" cy="80" r="7" fill="var(--surface-soft)" stroke="var(--border-strong)"/><text x="345" y="105" text-anchor="middle">2021</text></g>
+          <g><circle class="ig-tl-dot" data-i="5" cx="410" cy="80" r="7" fill="var(--surface-soft)" stroke="var(--border-strong)"/><text x="410" y="105" text-anchor="middle">2022</text></g>
+          <g><circle class="ig-tl-dot" data-i="6" cx="475" cy="80" r="7" fill="var(--surface-soft)" stroke="var(--border-strong)"/><text x="475" y="105" text-anchor="middle">2023</text></g>
+          <g><circle class="ig-tl-dot" data-i="7" cx="540" cy="80" r="7" fill="var(--surface-soft)" stroke="var(--border-strong)"/><text x="540" y="105" text-anchor="middle">2024</text></g>
+        </g>
+        <text x="40" y="40" font-size="11" fill="var(--text)">里程碑：</text>
+        <text x="40" y="55" font-size="10" fill="var(--text-muted)">VAE 与 GAN 同年诞生 → 十年间「拟真度 / 多样性 / 速度 / 可控」轮番被攻克</text>
+        <text x="300" y="140" text-anchor="middle" font-size="9" fill="var(--text-faint)">点击圆点查看详情</text>
+      </g>
+    </svg>
+
+    <div class="ig-timeline-readout" id="ig-readout">点击上方按钮或圆点查看每个年份的代表工作。</div>
+
+    <script>
+    (function () {
+      const data = [
+        {y:'2014', t:'<strong>VAE</strong> (Kingma) + <strong>GAN</strong> (Goodfellow) 同年问世。两条路线奠基：显式概率（VAE / ELBO）vs. 隐式概率（GAN / 对抗）。'},
+        {y:'2016', t:'<strong>PixelRNN / PixelCNN</strong> (van den Oord)：图片当作像素序列做自回归，精确 likelihood，但 1024×1024 图要采样一百万步。'},
+        {y:'2018', t:'<strong>BigGAN</strong> (Brock) + <strong>StyleGAN</strong> (Karras)：GAN 走到人脸照片级别。同期 <strong>Glow</strong> (Kingma) 把 normalising flow 推到图像可用。'},
+        {y:'2020', t:'<strong>DDPM</strong> (Ho et al.)：「diffusion = 加噪+去噪」的简化重构。一年后 <strong>Score SDE</strong> (Song) 把它和 score matching 统一。Diffusion 路线正式起飞。'},
+        {y:'2021', t:'<strong>DALL·E 1</strong> (OpenAI, 自回归 + dVAE) + <strong>CLIP</strong> 给 text-to-image 注入语义对齐。GLIDE 用 classifier-free guidance 揭开 T2I 扩散时代。'},
+        {y:'2022', t:'<strong>Stable Diffusion</strong> (Rombach et al., latent diffusion) 开源出圈；<strong>Imagen</strong> (Google) + <strong>DALL·E 2</strong> 闭源刷质量；<strong>Midjourney</strong> 用 Discord 把 T2I 推向大众。'},
+        {y:'2023', t:'<strong>SDXL</strong>、<strong>ControlNet</strong> (Zhang)、<strong>LoRA</strong> 让 SD 进入可控 + 可微调时代。同时 <strong>Consistency Models</strong> (Song) 和 <strong>Rectified Flow</strong> (Liu) 把采样步数砍到 1–4 步。'},
+        {y:'2024', t:'<strong>Sora</strong> / <strong>Veo</strong> 把视频生成推向 60 秒级；<strong>FLUX.1</strong> (Black Forest Labs) 用 rectified flow 占据开源 T2I 王座；图像-视频架构走向统一。'},
+      ];
+      const btns = document.querySelectorAll('.ig-timeline-controls button');
+      const dots = document.querySelectorAll('.ig-tl-dot');
+      const readout = document.getElementById('ig-readout');
+      function show(i) {
+        btns.forEach(b => b.classList.toggle('active', +b.dataset.step === i));
+        dots.forEach(d => {
+          const on = +d.dataset.i === i;
+          d.classList.toggle('ig-tl-active', on);
+          d.setAttribute('fill', on ? 'var(--module-accent)' : 'var(--surface-soft)');
+        });
+        readout.innerHTML = '<strong>' + data[i].y + '</strong> · ' + data[i].t;
+      }
+      btns.forEach(b => b.addEventListener('click', () => show(+b.dataset.step)));
+      dots.forEach(d => d.addEventListener('click', () => show(+d.dataset.i)));
+      show(0);
+    })();
+    </script>
+  </section>
+
+  <section class="concept-example">
+    <h2>一个用户面里程碑：从 prompt 到图</h2>
+    <p>2022 年起，普通用户接触的 T2I 产品基本都是 diffusion 家族：<strong>DALL·E 2/3</strong>（OpenAI，先 unCLIP 后 latent diffusion）、<strong>Midjourney v5/v6</strong>（私有 diffusion，美学微调极强）、<strong>Stable Diffusion 1.5/SDXL/SD3</strong>（开源 latent diffusion，社区生态最大）、<strong>Imagen 3</strong>（Google）、<strong>FLUX.1</strong>（rectified flow，2024 开源 SOTA）。当你输入 "a corgi in space"，模型内部经历的是：<em>CLIP / T5 编码 prompt → 采 64×64×4 latent 噪声 → U-Net / DiT 跑 50 步迭代去噪（或 schnell 模型只跑 4 步）→ classifier-free guidance 在每步把条件方向放大 → VAE decoder 把 latent 解到 1024×1024 像素</em>。整条流水线就是本词条所有家族的合奏：<strong>VAE</strong> 负责压缩潜空间，<strong>diffusion</strong> 负责采样，<strong>CFG</strong> 负责条件控制，<strong>flow matching / consistency</strong> 负责加速。</p>
+    <p>另一个值得算的小数字：SD 1.5 在 512×512 上做 50 步 DDIM 采样，单图 RTX 3090 约 2 秒；同样硬件上 FLUX.1-schnell 4 步约 0.3 秒；StyleGAN-XL 单步约 0.01 秒。质量上 FLUX.1 ≥ SD ≥ StyleGAN-XL（在通用 T2I 任务上）。这正是「质量 × 速度」trade-off 的真实成本——而每一代新方法的目标，几乎都是「把这条 trade-off 曲线整体往外推」。Consistency model 把 diffusion 的 50 步压到 4 步而几乎不丢质量，就是这种推动；FLUX.1 把 rectified flow 推上 12B 参数，就是这种推动；Sora 把图像家族泛化到视频，也是这种推动。理解了「家族 + trade-off + 痛点驱动迭代」这三件事，你看图像生成领域就不会再被新名词晃眼。</p>
+  </section>
+
+  <section class="concept-pitfalls">
+    <h2>三个常见误区</h2>
+    <ol>
+      <li><strong>「图像生成 ≈ Stable Diffusion」。</strong>反例：2024 年开源 SOTA 是 <strong>FLUX.1</strong>（rectified flow 而非 DDPM 范式）；GAN 在「单步、低延迟」场景仍是首选（StyleGAN-T 一步出图 &lt; 10ms，diffusion 做不到）；自回归思路在 <strong>Parti</strong>、<strong>VAR</strong> 上又被重新激活。SD 是「2022 年的当红炸子鸡」，不是终点。</li>
+      <li><strong>「FID 越低模型越好」。</strong>反例：FID 在 ImageNet 上对小扰动敏感——同一个模型把分辨率从 256 升到 512，FID 数值会跳；CFG scale 也会让 FID 变好但 diversity 变差（采样集中到「最常见的样子」）。Karras 2022 的实验显示，把 CFG 从 1 调到 7.5，FID 可以从 2.3 → 1.8，但 recall 从 0.7 跌到 0.4。看一个数字定胜负，会错过 mode collapse 和 over-saturation。</li>
+      <li><strong>「Latent diffusion 是 diffusion 的小改进」。</strong>反例：从像素扩散到 latent 扩散的<strong>计算量差约 64×</strong>（512×512 → 64×64 的 spatial 缩减，再乘以 latent 通道数 4 vs. RGB 3，再乘以每步 U-Net 在更小空间上的省算）。SD 能在消费级 GPU 跑、Midjourney 能商业化、ControlNet 能流行，全部建立在「先 VAE 压缩」这个工程决定上。它不是细节优化，是范式跃迁——没有 latent，就没有今天的 T2I 民主化，也就没有 LoRA / 社区 fine-tune 生态。</li>
+    </ol>
+  </section>
+
+  <section class="concept-seealso">
+    <h2>相关概念</h2>
+    <ul>
+      <li><a href="/video-to-notebook/concepts/ddpm/">DDPM</a> — 现代 diffusion 的起点</li>
+      <li><a href="/video-to-notebook/concepts/latent-diffusion/">Latent Diffusion</a> — Stable Diffusion 的底层范式</li>
+      <li><a href="/video-to-notebook/concepts/classifier-free-guidance/">Classifier-Free Guidance</a> — T2I 质量飞跃的关键技巧</li>
+      <li><a href="/video-to-notebook/concepts/video-diffusion/">Video Diffusion</a> — 图像生成的时空推广</li>
+    </ul>
+  </section>
+
+  <section class="concept-sources">
+    <h2>来源</h2>
+    <ol>
+      <li><a href="https://www.youtube.com/watch?v=_6CcOpIedbg&t=276s" target="_blank" rel="noopener">diffusion-principles-vizuara · L11 · 课程开场：「diffusion 革新 T2I—DALL·E 3、SD、Midjourney」· (04:36)</a></li>
+      <li><a href="https://www.youtube.com/watch?v=lPipzIG6rkc&t=4059s" target="_blank" rel="noopener">cmu-10799-diffusion-flow · L7 · Guidance &amp; Controllable Generation：T2I 与一步采样预告 · (1:07:39)</a></li>
+      <li><a href="https://www.youtube.com/watch?v=H7MxR3XDt30&t=3514s" target="_blank" rel="noopener">cmu-10799-diffusion-flow · L11 · Guest Lecture (Linqi Zhou, Luma AI)：从 ImageNet 一步 → 10B 参数 T2I 的 scaling · (58:34)</a></li>
+    </ol>
+    <p style="font-size:0.84rem;color:var(--text-muted);margin-top:0.6rem;">⚠️ 本词条仅有 3 条源 occurrence 且均为顺带提及；正文以「学科地图 / 全景导航」为主，深入内容请跳转 see-also 中的子家族页。</p>
+  </section>
+</article>

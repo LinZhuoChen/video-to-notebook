@@ -1,0 +1,303 @@
+<style>
+/* prefix: pfode- */
+.pfode-quickref{background:var(--surface-soft);border-left:3px solid var(--module-accent);padding:0.8rem 1rem;border-radius:0 4px 4px 0;margin:1rem 0;font-size:0.92rem;}
+.pfode-quickref div{margin:0.3rem 0;}
+.pfode-pitfalls ol{padding-left:1.4rem;} .pfode-pitfalls li{margin:0.6rem 0;}
+.pfode-source{font-style:italic;color:var(--text-muted);border-left:2px solid var(--module-accent);padding:0.3rem 0.9rem;margin:0.6rem 0;font-size:0.9rem;background:var(--surface-soft);border-radius:0 4px 4px 0;}
+.pfode-svg{display:block;margin:1.2rem auto;max-width:100%;height:auto;}
+.pfode-why{background:var(--accent-soft);border-left:3px solid var(--accent);padding:0.4rem 0.8rem;margin:0.5rem 0;border-radius:0 4px 4px 0;font-size:0.93rem;}
+.pfode-why strong{color:var(--accent);}
+.my-addition{background:var(--module-accent-soft);border-left:3px solid var(--module-accent);padding:0.4rem 0.8rem;margin:0.6rem 0;border-radius:0 4px 4px 0;font-size:0.92rem;}
+.pfode-bridge{background:var(--blue-soft);border:1px dashed var(--blue);padding:0.6rem 0.9rem;margin:0.8rem 0;border-radius:4px;font-size:0.93rem;}
+.pfode-controls{display:flex;flex-wrap:wrap;gap:0.4rem;margin:0.6rem 0;}
+.pfode-controls button{background:var(--surface-soft);border:1px solid var(--border);color:var(--text);padding:0.3rem 0.7rem;border-radius:4px;cursor:pointer;font-size:0.88rem;}
+.pfode-controls button.active{background:var(--module-accent);color:var(--surface);border-color:var(--module-accent);}
+.pfode-stage svg{display:block;margin:0.4rem auto;}
+.pfode-readout{font-size:0.88rem;color:var(--text-muted);text-align:center;min-height:1.4em;margin-top:0.4rem;}
+@keyframes pfode-jitter{0%{transform:translate(0,0);}25%{transform:translate(1.5px,-1px);}50%{transform:translate(-1px,2px);}75%{transform:translate(2px,1px);}100%{transform:translate(0,0);}}
+.pfode-sde-dot{animation:pfode-jitter 0.6s linear infinite;transform-origin:center;transform-box:fill-box;}
+</style>
+
+<article class="concept-entry">
+  <header class="concept-header">
+    <span class="concept-eyebrow">概念 · Module 3: SDE / Score</span>
+    <h1>Probability Flow ODE</h1>
+    <p class="concept-tagline">— 把 SDE 的布朗项扣掉，留下一条与原 SDE 边缘分布完全一致的确定性 ODE。</p>
+  </header>
+
+  <aside class="pfode-quickref">
+    <div><strong>定义</strong> · 给前向 SDE $dx = f(x,t)\,dt + g(t)\,dW$，存在一条与之边缘分布等价的 ODE：$\dfrac{dx}{dt} = f(x,t) - \tfrac{1}{2} g(t)^2 \nabla_x \log p_t(x)$。</div>
+    <div><strong>核心性质</strong> · 在每个 $t$ 上，$p_t^{\text{ODE}}(x) = p_t^{\text{SDE}}(x)$；但给定 $x_T$ 后，ODE 轨迹完全由 score 决定，<em>不再有布朗噪声</em>。</div>
+    <div><strong>来源</strong> · Song, Sohl-Dickstein, Kingma, Kumar, Ermon, Poole 2021，"Score-Based Generative Modeling through SDEs"，定理 1。</div>
+    <div><strong>四大用途</strong> · 确定性采样（DDIM 是 PF-ODE 的 Euler 离散）、精确似然（Hutchinson trace）、图像 inversion、高阶 solver（DPM-Solver / Heun / RK4）。</div>
+    <div><strong>易错</strong> · PF-ODE 不是"更快版 SDE"——它是 SDE 的<em>边缘等价镜像</em>，不是更便宜的近似，也不是 SDE 的 limit。</div>
+  </aside>
+
+  <section class="concept-intuition">
+    <h2>反偏见开场：PF-ODE 不是"快一点的 sampler"</h2>
+    <p>很多人第一次见 PF-ODE 都会把它当成"扔掉随机项让采样更快"的工程小聪明。这种理解是错的，而且会把后续好几条性质都看歪。<strong>PF-ODE 不是 SDE 的近似，也不是 SDE 的某种极限——它是与 SDE 在每一个时刻 $t$ 上拥有<em>完全相同边缘分布 $p_t$</em>的确定性镜像。</strong>两种动力学的<em>样本路径</em>差天差地，但<em>每一帧的群体直方图</em>分毫不差。</p>
+
+    <p>把这件事换成物理：SDE 是一群墨水粒子在水里做布朗运动，每颗粒子的具体轨迹随机得无法预测；PF-ODE 是把这群粒子的随机抖动全部抽掉，只保留"使整团墨水的形状与原来一帧帧吻合"的那条<em>平均流动</em>。每颗粒子现在沿一条确定的曲线走——但全体粒子在任意时刻的空间分布，跟原来那群随机抖动的粒子完全一样。</p>
+
+    <p>这个"双重身份"是 PF-ODE 全部威力的根。它让你既能享受 SDE 的训练优势——score matching 学的是 $\nabla\log p_t$，跟 SDE / ODE 无关——又能享受 ODE 的推理优势：确定性、可逆、可用高阶 solver、可算似然、可做 image inversion。后面四条性质都是从这一条"边缘等价"派生出来的。</p>
+
+    <div class="pfode-source">「Today we are going to look at a framework which unifies everything together. ... Both DDPM and score-based approach are special cases of this overall unified approach. ... And when you view everything from this lens, it makes a lot of sense.」<br>—— Vizuara L8（00:35–01:30）</div>
+
+    <p>Vizuara 的 Dr. Raj 这节课开宗明义：DDPM 与 score-based 两条 2020 年前的路线，在 2021 年被 Yang Song 用 SDE 框架统一起来。这个统一里最关键的一块拼图，就是 PF-ODE——它把 SDE 视角下的"随机扩散"和能量视角下的"确定性流"在数学上焊到了一起。</p>
+
+    <p>Dr. Raj 还用了一段非常物理的开场：墨水滴入水中扩散，"宏观上时间不可逆——你没法把扩散开的墨水重新聚回原来的球形。但显微镜放大到原子层面，你会发现每颗粒子的布朗运动<em>是</em>可逆的——它在时间反演下分布相同。"这条"微观可逆"性质，正是 PF-ODE 存在的物理直觉来源：随机轨迹在反演下统计上对称，于是<em>那条对应的"平均流动"</em>就可以被严格写出来。</p>
+
+    <div class="pfode-source">「At the microscopic level, if you look at these individual tiny particles, ... it turns out that these motions are exactly reversible. ... And this is the only theme which is used in the entire diffusion literature in all the different approaches.」<br>—— Vizuara L8（08:30–09:00）</div>
+
+    <div class="my-addition">🟡 教材外补充：Vizuara 没有显式写出 PF-ODE 的 $\tfrac{1}{2} g^2 \nabla\log p_t$ 公式——他在 L8 主要讲 SDE 框架和微观可逆性的物理直觉。CMU L10/L11 则反过来——直接把 PF-ODE 当成既定事实，讨论它怎么和 flow matching、distillation 衔接。这一页要把<em>夹在两门课之间</em>的那道桥补上：把 Vizuara 的物理直觉、Song et al. 2021 的公式、和 CMU 的工程后果（采样步数、flow map）连成一条主线。</div>
+  </section>
+
+  <section class="concept-deepdive">
+    <h2>定理：每个 SDE 都有一条等价 ODE</h2>
+
+    <p>Song et al. 2021 的核心定理（论文 Theorem 1 / Eq. 13）：给定一个一般的 Itô SDE</p>
+
+    <p>$$dx = f(x, t)\, dt + g(t)\, dW,$$</p>
+
+    <p>它的解过程 $\{x(t)\}_{t \in [0, T]}$ 的边缘分布 $p_t(x)$ 满足 Fokker–Planck 方程。可以证明，下面这条<em>无随机项</em>的常微分方程</p>
+
+    <p>$$\frac{dx}{dt} = f(x, t) - \frac{1}{2}\, g(t)^2\, \nabla_x \log p_t(x),$$</p>
+
+    <p>给出的<strong>边缘分布与原 SDE 在每个 $t$ 上完全相同</strong>。这条 ODE 就是 probability flow ODE（PF-ODE）。注意公式里出现的 score $\nabla_x \log p_t(x)$ ——这正是 score matching 学到的对象，所以你已经训好的 score 网络 $s_\theta(x, t) \approx \nabla_x \log p_t(x)$ 可以直接代进 PF-ODE 用来采样、算似然、反演。</p>
+
+    <div class="pfode-why"><strong>Why 公式长这样</strong>：推导走 Fokker–Planck。SDE 的密度演化是 $\partial_t p_t = -\nabla\!\cdot(f p_t) + \tfrac{1}{2} g^2 \Delta p_t$（drift 项 + 扩散项）。把扩散项用恒等式 $\Delta p_t = \nabla\!\cdot(p_t \nabla\log p_t)$ 写成散度形式，整条 FP 方程就变成 $\partial_t p_t = -\nabla\!\cdot\!\big[(f - \tfrac{1}{2}g^2 \nabla\log p_t) p_t\big]$。这是一条<em>纯连续性方程</em>——形如 $\partial_t p + \nabla\!\cdot(pv) = 0$——读出来的有效速度场就是 $v = f - \tfrac{1}{2}g^2 \nabla\log p_t$。这条 ODE 的解流场的边缘密度演化方程，与原 SDE 完全相同。这是连续性方程与 FP 方程之间一个标准的、严格的对应。</div>
+
+    <p><strong>关键澄清：边缘等价 $\ne$ 路径等价。</strong>边缘等价指 $p_t^{\text{ODE}}(x) = p_t^{\text{SDE}}(x)$ 对所有 $t$ 成立。路径等价才会要求 $x_t^{\text{ODE}} = x_t^{\text{SDE}}$ 对所有 $t$ 都成立——这显然不行，SDE 是随机的，ODE 是确定的。把"边缘等价"和"路径等价"混淆是 PF-ODE 最常见的误解（参见下面的 pitfalls）。</p>
+
+    <h2>性质一：确定性采样 —— DDIM 就是 PF-ODE 的 Euler</h2>
+
+    <p>用 PF-ODE 采样的步骤极简单：从 $x_T \sim \mathcal{N}(0, \sigma_T^2 I)$ 起步，用任何 ODE solver 把 $t: T \to 0$ 反着积分一遍，沿途用 $s_\theta(x, t)$ 替换 $\nabla\log p_t$。Euler 一阶离散就是：</p>
+
+    <p>$$x_{t - \Delta t} = x_t - \big[f(x_t, t) - \tfrac{1}{2} g(t)^2 s_\theta(x_t, t)\big]\, \Delta t.$$</p>
+
+    <p>DDIM（Song, Meng, Ermon 2021）在原论文里是从一个不同的角度——non-Markov forward process——推出来的，但事后大家发现：<strong>DDIM 在 VP-SDE 上的更新公式，等价于 PF-ODE 的一阶 Euler 离散</strong>。换句话说，DDIM 不是一个全新算法，而是 PF-ODE 在特定 noise schedule 下的具体离散方案。这也解释了为什么 DDIM 在 50 步以下能给出可用的样本，而 DDPM 同等步数下往往糟糕：DDIM 是 ODE 离散，ODE 解的存在唯一性允许大步长；DDPM 是 SDE 离散，每一步都重新注入噪声，大步长会让噪声主导信号。</p>
+
+    <div class="pfode-why"><strong>Why 这件事重要</strong>：在 DDIM 出现之前，"扩散模型采样要 1000 步"是默认事实。DDIM 把步数砍到 50；后续 DPM-Solver、Heun、RK4 等高阶 PF-ODE solver 把步数砍到 10–20；distillation / consistency models 进一步砍到 1–4 步。<strong>所有这些采样加速的根</strong>都是同一句话："采样不必走 SDE，可以走与之边缘等价的 ODE。" 没有 PF-ODE，就没有上面整条加速线。</p>
+
+    <p>另一条值得强调的工程线索：DDIM 之所以能脱离 SDE 框架成立，<em>正是因为 PF-ODE 存在</em>。如果没有"边缘等价的 ODE"这条定理，2021 年的研究者面对 50 步采样需求时大概只能继续在 SDE 框架里凑数值技巧。PF-ODE 把整个问题从随机过程数值分析（一个相对小众、工具不够成熟的领域）转移到了常微分方程数值分析（一个 50 年来积累极厚的领域），整条采样加速产业链由此打开。这是为什么"PF-ODE 只是个理论玩具"的判断是<em>完全错误</em>的——它是 2021 年之后整个扩散模型工程加速浪潮的<strong>理论触发器</strong>。</p>
+
+    <h2>性质二：精确似然 —— Hutchinson trace 把行列式打掉</h2>
+
+    <p>PF-ODE 是一种 continuous normalizing flow（CNF），所以满足瞬时变量替换公式：</p>
+
+    <p>$$\frac{d\log p_t(x(t))}{dt} = -\,\mathrm{tr}\!\left(\nabla_x v_\theta(x, t)\right), \quad v_\theta := f - \tfrac{1}{2} g^2 s_\theta.$$</p>
+
+    <p>把 $t$ 从 $0$ 积到 $T$，加上 $\log p_T(x_T)$（高斯，闭式），就得到数据点 $x_0$ 的精确对数似然：</p>
+
+    <p>$$\log p_0(x_0) = \log p_T(x_T) + \int_0^T \mathrm{tr}(\nabla v_\theta)\, dt.$$</p>
+
+    <p>高维下 $\mathrm{tr}(\nabla v_\theta)$ 不能显式算 $d$ 个对角元（$d=10^6$ 量级），但 Hutchinson 随机迹估计 $\mathrm{tr}(A) = \mathbb{E}_\epsilon[\epsilon^\top A \epsilon]$ 只需要一次 Jacobian–向量积，$O(d)$。这是 Song et al. 2021 在 CIFAR-10 上首次<strong>用 score-based 模型刷出 NLL SOTA</strong>的工程关键——在 PF-ODE 出现之前，diffusion 模型只能给出 ELBO 下界，没法直接报告 log-likelihood。</p>
+
+    <h2>性质三：图像 inversion —— ODE 可逆，SDE 不行</h2>
+
+    <p>给一张真实图 $x_0$，想找出"哪个 $x_T$ 经过这个模型会生成它？"——这就是 image inversion，是 prompt editing、stylization、SDEdit 等下游应用的基础。在 PF-ODE 框架下做法极简单：把求解器<strong>反向跑</strong>，$t: 0 \to T$ 积分同一条 ODE，就能从 $x_0$ 唯一地反推到 $x_T$。这是因为 ODE 解的存在唯一性定理保证了双射。</p>
+
+    <p>SDE 没法这么干——SDE 是随机的，同一个 $x_0$ 反过来跑可以对应无穷多种 $x_T$ 轨迹，没有唯一的 inverse。要在 SDE 框架下做 inversion 只能近似（比如 SDEdit 加噪声再去噪声、DDIM inversion 借 PF-ODE 这条捷径）。<em>实际工业 pipeline 里所有 inversion 算法走的都是 PF-ODE 这条线</em>，没有例外。</p>
+
+    <h2>性质四：高阶 solver —— DPM-Solver、Heun、RK4</h2>
+
+    <p>PF-ODE 是一条"普通的"常微分方程，所有 50 年来积累的 ODE 数值积分文献都适用。Heun（二阶 Runge–Kutta）一步两次 score evaluation，但精度从 $O(\Delta t)$ 升到 $O(\Delta t^2)$；DPM-Solver 利用 score 的半解析结构进一步压低误差；RK4 / DPM-Solver++ 把 SOTA 步数压到 10 步以内。这条工程线在 SDE 框架下几乎不可能存在——SDE 的高阶 solver（Milstein、Euler–Maruyama 改进版）一来计算复杂，二来误差结构和 ODE 完全不同，三来扩散模型上根本没人去做。<strong>"高阶 solver = 更少 NFE = 更快采样"这条产业链完全建立在 PF-ODE 之上。</strong></p>
+
+    <h2>SDE vs PF-ODE：随机性如何换步数</h2>
+
+    <p>既然两条动力学边缘等价，凭什么用哪一条？经验事实：</p>
+
+    <ul>
+      <li><strong>SDE 路径</strong>：多样性高、对模型误差更鲁棒（每步注入的噪声会"洗掉"上一步累积的 score 估计误差），但需要的步数多（500–1000 步）。</li>
+      <li><strong>PF-ODE 路径</strong>：步数少（10–50 步即可），但确定性轨迹会把 score 估计误差一路累积下去；多样性也更窄——同一个起点 $x_T$ 始终给同一个 $x_0$。</li>
+    </ul>
+
+    <p>EDM（Karras et al. 2022）做了系统性消融：在<em>同一份训练好的模型</em>上，SDE 采样的 FID 通常比 PF-ODE 略好（多样性优势），但 NFE 至少需要 4–8 倍。工业部署普遍选 PF-ODE + 高阶 solver。</p>
+
+    <h2>连接：PF-ODE 是一种 CNF</h2>
+
+    <div class="pfode-bridge"><strong>PF-ODE = CNF（用 score-matching 训练）</strong>。一个 CNF $\dfrac{dx}{dt} = v_\theta(x, t)$ 可以用最大似然训（经典 Neural ODE 路线，慢）、用 flow matching 训（FM 路线，快）、或者<em>用 score matching 间接训</em>——这第三条就是 diffusion / PF-ODE 路线。Score 网络 $s_\theta$ 学到 $\nabla\log p_t$ 之后，速度场 $v_\theta = f - \tfrac{1}{2}g^2 s_\theta$ 就<em>构造出来</em>了，不需要直接学。这就是为什么 diffusion 与 flow matching 在 CNF 框架下被视为<em>同一种生成模型的两种训练 shortcut</em>。</div>
+
+    <p>这条桥的工程后果非常具体：Stable Diffusion 3、SORA、Flux 这些"新一代"模型表面上是 flow matching，实际上跑的是 CNF；老一代 Stable Diffusion 1/2、DALL·E 2、Imagen 是 diffusion，实际上跑的也是 CNF（PF-ODE 形式）。两代之间的差别<em>不是模型架构</em>，而是<em>怎么训那个共享的速度场</em>。这也是为什么 CMU L10 / L11 在讨论 distillation 和 flow maps 时可以把 diffusion 和 flow matching 一起讨论——它们的推理时动力学（一条 ODE）是统一的。</p>
+
+    <div class="pfode-source">「At inference time they solve the so-called probability flow ODE ... and we argue that diffusion and flow matching are not optimal in utilizing the network capacity — because even if your network predicts $u_t$ perfectly at every single point, you will still need many many steps to simulate the ODE accurately.」<br>—— CMU 10799 L11（Linqi Zhou, Luma AI，04:13–04:50）</div>
+
+    <p>Luma AI 的 Linqi Zhou 在这段话里把 PF-ODE 的工程瓶颈点了出来：哪怕 score / velocity 学到了完美值，<em>积分这条 ODE 本身</em>还是需要不少步——这是 ODE 数值积分的内在限制，不是模型不够准。这就是为什么后续会出现 consistency models、flow maps、shortcut models 这一整条"绕开 ODE 积分"的研究线。换言之，PF-ODE 把扩散模型的瓶颈从"训练目标定义不清"（DDPM 时代的 ELBO 推导冗长）转化为"推理时数值积分需要多少步"——前者是数学问题，后者是数值分析问题，后者明显更容易被工程优化攻克。</p>
+
+    <p>把这条思路再推一步：consistency models（Song et al. 2023）做的事情，本质是把 PF-ODE 的多步积分<em>蒸馏</em>成一步映射——它训一个网络 $f_\theta(x_t, t)$，让它对 PF-ODE 轨迹上的<em>任意</em>点都映回同一个 $x_0$。这等价于学一条"flow map"，把 ODE 的 50 步压缩到 1 步。Rectified Flow（Liu et al. 2022）也是同一思路的变体：用线性插值预设路径，让训出的 PF-ODE 在直线上跑得更直，于是大步长 Euler 误差更小。所有这些"采样加速派"工作，都把 PF-ODE 作为<em>基线和理论锚点</em>——优化的目标是"逼近 PF-ODE 的 $x_0$，但用更少步数"。</p>
+
+    <div class="pfode-source">「If you're doing flow matching, then we can also learn flow maps for the probability flow ODE or the flow matching ODE — essentially a flow map is just a function to tell you to jump from $x_t$ at time $t$ to $x_s$ at time $s$.」<br>—— CMU 10799 L10（50:04–50:40）</div>
+
+    <h2>主图：SDE 路径 vs PF-ODE 路径</h2>
+
+    <svg class="pfode-svg" viewBox="0 0 600 240" role="img" aria-label="同一起点 x_T 下，SDE 多条随机轨迹与 PF-ODE 一条确定轨迹的对比">
+      <defs>
+        <marker id="pfode-ar" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--module-accent)"/></marker>
+      </defs>
+      <g font-family="ui-sans-serif" font-size="11" fill="var(--text)">
+        <text x="50" y="20" font-weight="600">$x_T$（同一起点）</text>
+        <text x="500" y="20" font-weight="600">$t=0$ 数据</text>
+        <!-- start dot -->
+        <circle cx="60" cy="120" r="6" fill="var(--blue)"/>
+        <text x="60" y="145" text-anchor="middle" font-size="10" fill="var(--text-muted)">$x_T$</text>
+
+        <!-- SDE wiggly trajectories (3 of them, same start, different ends) -->
+        <g stroke="var(--blue)" fill="none" stroke-width="1.3" opacity="0.75">
+          <path d="M 60 120 Q 100 80 130 110 T 200 90 T 270 130 T 340 100 T 420 70 T 500 80"/>
+          <path d="M 60 120 Q 110 150 140 120 T 210 140 T 280 110 T 350 150 T 420 130 T 500 140"/>
+          <path d="M 60 120 Q 95 100 130 130 T 200 110 T 270 90 T 340 130 T 420 110 T 500 105"/>
+        </g>
+        <circle cx="500" cy="80" r="4" fill="var(--blue)" class="pfode-sde-dot"/>
+        <circle cx="500" cy="140" r="4" fill="var(--blue)" class="pfode-sde-dot"/>
+        <circle cx="500" cy="105" r="4" fill="var(--blue)" class="pfode-sde-dot"/>
+        <text x="555" y="110" font-size="10" fill="var(--blue)">SDE: 3 个不同终点</text>
+
+        <!-- PF-ODE single deterministic trajectory -->
+        <path d="M 60 120 C 180 130, 320 175, 500 185" stroke="var(--module-accent)" fill="none" stroke-width="2" marker-end="url(#pfode-ar)"/>
+        <circle cx="500" cy="185" r="5" fill="var(--module-accent)"/>
+        <text x="555" y="190" font-size="10" fill="var(--module-accent)">PF-ODE: 1 个确定终点</text>
+
+        <!-- baseline -->
+        <line x1="40" y1="220" x2="560" y2="220" stroke="var(--border)" stroke-dasharray="2,3"/>
+        <text x="300" y="235" text-anchor="middle" font-size="10" fill="var(--text-muted)">在每个时刻 $t$，两种动力学的<em>群体直方图 $p_t(x)$ 相同</em>——但单条轨迹完全不同。</text>
+      </g>
+    </svg>
+
+    <p>蓝色三条波折线是同一起点下 SDE 跑三次的随机轨迹，终点各不相同；橙色实线是同一起点下 PF-ODE 的唯一确定轨迹。视觉冲击点：起点相同的情况下，SDE 轨迹"撒得开"——这是布朗项 $g(t)\,dW$ 在做工；PF-ODE 一条线落地——确定性 ODE 的双射性质。<strong>但</strong>——这是 PF-ODE 最反直觉的地方——把蓝色"群体"和橙色"群体"分别在某个 $t$ 切一刀看横截面直方图，两者完全重合。</p>
+  </section>
+
+  <section class="concept-interact">
+    <p>下面四个按钮切换故事的四帧：① 同一个 $x_T$ 起点；② SDE 跑出多条随机轨迹；③ PF-ODE 跑出一条确定轨迹；④ 把两种群体在 $t=0$ 时的边缘分布叠加——重合。<strong>不变量</strong>：每个 $t$ 上的<em>边缘分布</em>相同；变化的是<em>路径形态</em>。</p>
+
+    <div class="pfode-controls">
+      <button data-step="0" class="active">① 起点 $x_T$</button>
+      <button data-step="1">② SDE 多条随机路径</button>
+      <button data-step="2">③ PF-ODE 一条确定路径</button>
+      <button data-step="3">④ $t=0$ 边缘重合</button>
+    </div>
+
+    <div class="pfode-stage">
+      <svg id="pfode-stage-svg" viewBox="0 0 500 200" role="img" aria-label="PF-ODE vs SDE 互动示意">
+        <defs>
+          <marker id="pfode-iar" markerWidth="5" markerHeight="5" refX="4" refY="2.5" orient="auto"><path d="M0,0 L5,2.5 L0,5 Z" fill="var(--module-accent)"/></marker>
+        </defs>
+        <g id="pfode-g-start">
+          <circle cx="60" cy="100" r="7" fill="var(--blue)"/>
+          <text x="60" y="125" text-anchor="middle" font-size="11" fill="var(--text-muted)">$x_T$</text>
+          <text x="250" y="100" text-anchor="middle" font-size="12" fill="var(--text-muted)">单个起点，看接下来怎么走。</text>
+        </g>
+        <g id="pfode-g-sde" style="display:none;" stroke="var(--blue)" fill="none" stroke-width="1.3" opacity="0.8">
+          <path d="M 60 100 Q 110 70 150 110 T 250 90 T 350 120 T 440 75"/>
+          <path d="M 60 100 Q 110 130 150 100 T 250 130 T 350 100 T 440 130"/>
+          <path d="M 60 100 Q 110 85 150 130 T 250 110 T 350 80 T 440 100"/>
+          <path d="M 60 100 Q 110 115 150 80 T 250 100 T 350 140 T 440 155"/>
+          <circle cx="440" cy="75" r="4" fill="var(--blue)"/>
+          <circle cx="440" cy="130" r="4" fill="var(--blue)"/>
+          <circle cx="440" cy="100" r="4" fill="var(--blue)"/>
+          <circle cx="440" cy="155" r="4" fill="var(--blue)"/>
+        </g>
+        <g id="pfode-g-ode" style="display:none;">
+          <path d="M 60 100 C 180 110, 320 140, 440 150" stroke="var(--module-accent)" fill="none" stroke-width="2" marker-end="url(#pfode-iar)"/>
+          <circle cx="60" cy="100" r="5" fill="var(--blue)"/>
+          <circle cx="440" cy="150" r="5" fill="var(--module-accent)"/>
+        </g>
+        <g id="pfode-g-marg" style="display:none;">
+          <text x="250" y="30" text-anchor="middle" font-size="11" fill="var(--text-muted)">$t=0$ 处的边缘 $p_0(x)$（多次重复实验取直方图）</text>
+          <!-- SDE histogram (blue) -->
+          <g fill="var(--blue)" opacity="0.55">
+            <rect x="120" y="120" width="20" height="40"/>
+            <rect x="145" y="100" width="20" height="60"/>
+            <rect x="170" y="85" width="20" height="75"/>
+            <rect x="195" y="95" width="20" height="65"/>
+            <rect x="220" y="110" width="20" height="50"/>
+          </g>
+          <!-- PF-ODE histogram (orange) overlapping -->
+          <g fill="var(--module-accent)" opacity="0.55">
+            <rect x="120" y="120" width="20" height="40"/>
+            <rect x="145" y="100" width="20" height="60"/>
+            <rect x="170" y="85" width="20" height="75"/>
+            <rect x="195" y="95" width="20" height="65"/>
+            <rect x="220" y="110" width="20" height="50"/>
+          </g>
+          <text x="380" y="100" font-size="11" fill="var(--blue)">■ SDE</text>
+          <text x="380" y="120" font-size="11" fill="var(--module-accent)">■ PF-ODE</text>
+          <text x="380" y="145" font-size="10" fill="var(--text-muted)">完全重合</text>
+        </g>
+      </svg>
+      <div class="pfode-readout" id="pfode-readout">$x_T \sim \mathcal{N}(0, \sigma_T^2 I)$：同一个噪声起点。</div>
+    </div>
+
+    <script>
+      (function () {
+        const btns = document.querySelectorAll('.pfode-controls button');
+        const groups = ['pfode-g-start', 'pfode-g-sde', 'pfode-g-ode', 'pfode-g-marg'];
+        const texts = [
+          '$x_T \\sim \\mathcal{N}(0, \\sigma_T^2 I)$：同一个噪声起点。',
+          'SDE: $dx = f\\,dt + g\\,dW$，每次跑布朗项不同 → 4 条不同轨迹、4 个不同终点。',
+          'PF-ODE: $dx = (f - \\tfrac{1}{2}g^2 \\nabla\\log p_t)\\,dt$，无随机项 → 1 条确定轨迹、1 个终点。',
+          '在 $t=0$ 取边缘 $p_0(x)$：SDE（蓝）和 PF-ODE（橙）的直方图完全重合 — 这就是 Song 2021 的定理。'
+        ];
+        const readout = document.getElementById('pfode-readout');
+        function show(step) {
+          btns.forEach(b => b.classList.toggle('active', +b.dataset.step === step));
+          groups.forEach((id, i) => {
+            document.getElementById(id).style.display = i === step ? '' : 'none';
+          });
+          readout.textContent = texts[step];
+          if (window.renderMathInElement) {
+            window.renderMathInElement(readout, {delimiters: [{left: '$', right: '$', display: false}]});
+          }
+        }
+        btns.forEach(b => b.addEventListener('click', () => show(+b.dataset.step)));
+        show(0);
+      })();
+    </script>
+  </section>
+
+  <section class="concept-example">
+    <h2>手算：VP-SDE 上的 PF-ODE 一步 Euler</h2>
+    <p>取 1-D VP-SDE：$f(x, t) = -\tfrac{1}{2}\beta(t) x$，$g(t) = \sqrt{\beta(t)}$。设 $\beta(t) = 0.1$（常数 noise schedule，简化），当前状态 $x_t = 1.5$，已训好的 score 网络给出 $s_\theta(x_t, t) = -0.8$。代入 PF-ODE：</p>
+
+    <p>$$\frac{dx}{dt} = -\tfrac{1}{2}(0.1)(1.5) - \tfrac{1}{2}(0.1)(-0.8) = -0.075 + 0.04 = -0.035.$$</p>
+
+    <p>用 $\Delta t = 0.1$ 反向积分（采样方向是 $t \to t - \Delta t$，所以走 $-\Delta t$ 实际上对应往数据靠近）：</p>
+
+    <p>$$x_{t - 0.1} \approx x_t - (-0.035)(0.1) = 1.5 + 0.0035 = 1.5035.$$</p>
+
+    <p>（VP-SDE 的反向时间方向上，更新公式是 $x_{t-\Delta t} = x_t + [\ldots]\Delta t$。）对比 SDE Euler–Maruyama 同样步长下还要加上 $\sqrt{\beta \Delta t}\,\epsilon$，其中 $\epsilon \sim \mathcal{N}(0, 1)$ —— 即额外 $\pm 0.1$ 量级的随机扰动。两条更新的<em>期望相同</em>（都是 $1.5035$），但 SDE 每次撒出去一个噪声，PF-ODE 不撒。把这一步反复迭代上千次，就能看到群体分布相同、单条轨迹截然不同的现象。</p>
+  </section>
+
+  <section class="concept-pitfalls">
+    <h2>三大常见误区</h2>
+    <ol>
+      <li><strong>"PF-ODE 是 SDE 的近似——边缘只是<em>大致</em>相同。"</strong> 反例：Song et al. 2021 Theorem 1 给的是<em>等式</em>，不是近似。$p_t^{\text{ODE}}(x) = p_t^{\text{SDE}}(x)$ 在所有 $t$、所有 $x$ 上严格成立，证明走 Fokker–Planck 方程的恒等变形——把扩散项 $\tfrac{1}{2}g^2 \Delta p$ 改写成 $\nabla\!\cdot(\tfrac{1}{2}g^2 p \nabla\log p)$，这是恒等变换不是近似。实务上 PF-ODE 的样本质量和 SDE 不完全一样，差别来自<em>数值积分误差</em>和<em>有限步数 score 估计误差</em>，不是定理本身的近似。</li>
+      <li><strong>"PF-ODE 是 SDE 的 limit（让噪声系数趋近 0）。"</strong> 反例：让 $g \to 0$ 会同时去掉随机项<em>和</em> score 项前的 $\tfrac{1}{2}g^2$ 系数——剩下来只有 drift $f$，那是一条<em>错误的</em> ODE，边缘分布和原 SDE 完全不一样（会塌缩到 drift 决定的确定性流，丢失全部噪声扩散信息）。PF-ODE 的正确推导<em>不是</em>取 $g \to 0$，而是保留 $g$ 不变，但用 FP 方程的恒等变形把扩散项吸进一个等效速度场。<em>PF-ODE 和原 SDE 用的是同一个 $g$、同一个 score</em>。</li>
+      <li><strong>"DDIM 是 DDPM 的某种近似或简化。"</strong> 反例：DDIM 在 VP-SDE 上的更新公式严格等于 PF-ODE 的 Euler 一阶离散——这是一条严格的对应（参 Song, Meng, Ermon 2021 附录、以及 Salimans & Ho 2022 的细致推导）。DDPM 是 SDE 的 Euler–Maruyama 离散，DDIM 是 PF-ODE 的 Euler 离散。两者不是"DDIM = DDPM 的快速版"那种近似关系，而是<em>两种不同动力学</em>（同边缘）的两种 Euler 离散。DDIM 在 50 步以下能稳定工作，根因是 ODE 解的稳定性允许大步长——这是 ODE 数值分析的常识，不是 DDIM 算法本身的魔法。把误区反过来理解会更清晰：DDIM 论文里写的"non-Markov forward process"是 2020 年的<em>事后推导</em>，2021 年大家在 PF-ODE 框架下回头看，才发现它就是这条 ODE 的 Euler 离散。两条推导路径在数学上完全等价，但 PF-ODE 视角更通用——它允许直接换上 Heun、RK4、DPM-Solver 等高阶 solver，而 DDIM 原始推导框架下做不到这一点。</li>
+    </ol>
+  </section>
+
+  <section class="concept-seealso">
+    <h2>相关概念</h2>
+    <div class="pfode-bridge"><strong>位置关系</strong>：PF-ODE 处在 SDE（Module 3）与 CNF / Flow Matching（Module 4）之间的桥梁位置。从左侧看，它是 SDE 的边缘镜像；从右侧看，它是用 score-matching 间接训练的 CNF。这条桥让 diffusion 和 flow matching 在<em>推理时</em>是同一种动力学（都是 ODE 积分），区别只在<em>训练时</em>损失函数的选择。</div>
+    <ul>
+      <li><a href="/video-to-notebook/concepts/sde-formulation/">SDE Formulation</a> — PF-ODE 的"原生"动力学；PF-ODE 是它的确定性镜像。</li>
+      <li><a href="/video-to-notebook/concepts/score-function/">Score Function</a> — PF-ODE 速度场的核心可学习对象 $\nabla\log p_t$。</li>
+      <li><a href="/video-to-notebook/concepts/continuous-normalizing-flow/">Continuous Normalizing Flow</a> — PF-ODE 在结构上就是一种 CNF，区别只是训练损失。</li>
+      <li><a href="/video-to-notebook/concepts/ddim/">DDIM</a> — PF-ODE 的一阶 Euler 离散；50 步以下采样的标准方案。</li>
+      <li><a href="/video-to-notebook/concepts/flow-matching/">Flow Matching</a> — 与 PF-ODE 推理动力学相同、训练方式不同的同族方法。</li>
+      <li><a href="/video-to-notebook/concepts/consistency-models/">Consistency Models</a> — 通过 distillation 学一个 flow map，绕开 PF-ODE 的多步积分。</li>
+    </ul>
+  </section>
+
+  <section class="concept-sources">
+    <h2>来源</h2>
+    <ol>
+      <li><a href="https://www.youtube.com/watch?v=57EFSTxL_5o&t=35s" target="_blank" rel="noopener">diffusion-principles-vizuara · L8 · 「framework which unifies everything together」 · (00:35)</a></li>
+      <li><a href="https://www.youtube.com/watch?v=57EFSTxL_5o&t=510s" target="_blank" rel="noopener">diffusion-principles-vizuara · L8 · 「microscopic motions are exactly reversible」 · (08:30)</a></li>
+      <li><a href="https://www.youtube.com/watch?v=57EFSTxL_5o&t=384s" target="_blank" rel="noopener">diffusion-principles-vizuara · L8 · 「Brownian motion / 微观可逆性」 · (06:24)</a></li>
+      <li><a href="https://www.youtube.com/watch?v=L9nsCHHMv-c&t=3004s" target="_blank" rel="noopener">cmu-10799-diffusion-flow · L10 · 「flow maps for probability flow ODE」 · (50:04)</a></li>
+      <li><a href="https://www.youtube.com/watch?v=H7MxR3XDt30&t=253s" target="_blank" rel="noopener">cmu-10799-diffusion-flow · L11 (Linqi Zhou, Luma AI) · 「at inference time they solve the probability flow ODE」 · (04:13)</a></li>
+      <li>Song, Y., Sohl-Dickstein, J., Kingma, D. P., Kumar, A., Ermon, S., &amp; Poole, B. (2021). <em>Score-Based Generative Modeling through Stochastic Differential Equations</em>. ICLR. — Theorem 1, Eq. 13（PF-ODE 公式与边缘等价证明）。</li>
+    </ol>
+  </section>
+</article>

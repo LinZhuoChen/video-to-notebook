@@ -1,0 +1,596 @@
+<style>
+  .ddpm-ch { line-height: 1.75; }
+  .ddpm-ch svg { display: block; margin: 1.2rem auto; max-width: 100%; height: auto; }
+  .ddpm-ch .clip-frame { max-width: 720px; margin: 1.4rem auto; }
+  .ddpm-ch .clip-frame iframe { width: 100%; aspect-ratio: 16/9; border: 0; border-radius: 6px; }
+  .ddpm-ch .clip-frame figcaption { color: var(--text-muted); font-size: 0.85rem; margin-top: 0.4rem; text-align: center; }
+  .ddpm-ch .tldr { background: var(--surface-soft); border-left: 4px solid var(--module-accent); padding: 1rem 1.2rem; border-radius: 0 6px 6px 0; margin: 1.4rem 0; }
+  .ddpm-ch .tldr h2 { margin-top: 0; font-size: 1.05rem; border-bottom: 0; }
+  .ddpm-ch .callout { padding: 0.7rem 1rem; margin: 1rem 0; border-radius: 0 6px 6px 0; }
+  .ddpm-ch .callout-info { background: #eef6fc; border-left: 4px solid #2b80c4; }
+  .ddpm-ch .callout-note { background: #f3f0fa; border-left: 4px solid #6f4dd0; }
+  .ddpm-ch .callout-warning { background: #fff6e0; border-left: 4px solid #d4a017; }
+  .ddpm-ch .callout-tip { background: #e8f5e9; border-left: 4px solid #0b5; }
+  .ddpm-ch .callout-quote { background: var(--surface-soft); border-left: 3px solid var(--border-strong); padding: 0.5rem 1rem; margin: 0.8rem 0; font-style: italic; color: var(--text-muted); }
+  .ddpm-ch .source-quote { font-style: italic; color: var(--text-muted); border-left: 3px solid var(--module-accent); padding: 0.5rem 1rem; margin: 0.8rem 0; background: var(--surface-soft); border-radius: 0 4px 4px 0; }
+  .ddpm-ch .my-addition { background: #fff7d6; border-left: 4px solid #b8860b; padding: 0.7rem 1rem; margin: 1rem 0; border-radius: 0 6px 6px 0; }
+  .ddpm-ch pre { background: #1f1f1f; color: #f6f4ee; padding: 1rem; border-radius: 6px; font-size: 0.84rem; line-height: 1.55; overflow-x: auto; }
+  .ddpm-ch code:not(pre code) { background: var(--surface-soft); padding: 0.1rem 0.35rem; border-radius: 3px; font-size: 0.9em; }
+  .ddpm-ch h2 { border-bottom: 1px solid var(--border); padding-bottom: 0.3rem; margin-top: 2.4rem; }
+  .ddpm-ch h3 { color: var(--module-accent); margin-top: 1.6rem; }
+  .ddpm-ch .deriv-step { margin: 0.8rem 0; padding: 0.6rem 0.8rem; background: var(--surface-soft); border-radius: 4px; }
+  .ddpm-ch .deriv-step strong { color: var(--module-accent); }
+  .ddpm-ch .takeaways { background:#0b5; color:#fff; padding:1.4rem; border-radius:8px; margin-top:2rem; }
+  .ddpm-ch .takeaways h3 { color:#fff; margin-top:0; }
+  @keyframes ddpm-flow { 0% { stroke-dashoffset: 80; } 100% { stroke-dashoffset: 0; } }
+  .ddpm-ch .flow-arrow { stroke-dasharray: 6 4; animation: ddpm-flow 2s linear infinite; }
+</style>
+
+<article class="ddpm-ch">
+
+<h1>7. DDPM 全貌</h1>
+
+<p style="font-size:0.95rem; color:var(--text-muted);">主源：Vizuara《Principles of Diffusion Models》Lecture 3 + Lecture 4（讲师 Dr. Raj Dandekar）；副源：CMU 10799 Lecture 2（Kelly Marsh）；Vizuara《Diffusion LM》Lecture 4（denoising 直觉）。论文：Ho, Jain, Abbeel, "Denoising Diffusion Probabilistic Models", NeurIPS 2020。</p>
+
+<div class="tldr">
+  <h2>📌 TL;DR</h2>
+  <p>把<a href="/video-to-notebook/textbook/4/">第 4 章</a>的<strong>前向加噪</strong> $q(x_t|x_0)=\mathcal{N}(\sqrt{\bar\alpha_t}\,x_0,\,(1-\bar\alpha_t)I)$ 和<a href="/video-to-notebook/textbook/6/">第 6 章</a>的<strong>反向去噪</strong> $p_\theta(x_{t-1}|x_t)$ 拼起来，就得到 <strong>DDPM</strong>（Ho et al. 2020）这一<em>能跑通</em>的模型。</p>
+  <p>本章把 DDPM 完整图景说清。它有三件大事：</p>
+  <ol>
+    <li><strong>训练目标三等价</strong>：预测 $x_0$、预测 $\epsilon$、预测 $v$ 是同一损失的三种参数化。本章给出 $\mu_\theta \leftrightarrow \epsilon_\theta \leftrightarrow x_{0,\theta}$ 之间的代数互换公式，并说清楚为什么 Ho 2020 选了 $\epsilon$-prediction。</li>
+    <li><strong>简化损失（simple loss）</strong>：$L_\text{simple}=\mathbb{E}_{t,x_0,\epsilon}\big[\|\epsilon-\epsilon_\theta(x_t,t)\|^2\big]$——把<a href="/video-to-notebook/textbook/3/">第 3 章</a>的 ELBO 中所有 KL 权重通通设成 1。它是一个<em>加权 ELBO</em>，不是新损失，但实践中训练更稳、样本更好。</li>
+    <li><strong>训练 / 采样两段伪代码</strong>：训练循环只有 5 行，采样循环只有 6 行——背下它们，你就能从零写一份 MNIST DDPM。</li>
+  </ol>
+  <p>从抽象层看，<strong>DDPM = T 步 hierarchical VAE</strong>。VAE 是 1 步 hierarchical，DDPM 是 $T\!=\!1000$ 步。所有<a href="/video-to-notebook/textbook/2/">第 2 章</a>学的 ELBO 拆解原封不动适用，只是 latent 链变得很长。本章最后会把这条桥讲清。</p>
+</div>
+
+<h2>一、为什么"DDPM 全貌"要在第 7 章讲</h2>
+
+<p>这是 Vizuara《Principles of Diffusion Models》Lecture 3 的核心一章，也是 CMU 10799 Lecture 2 真正<em>开始讲 diffusion</em> 的那一节。Kelly 在开场的一句话里就给了仪式感：</p>
+
+<blockquote class="source-quote">「Cool. Hello everyone... today we're going to be talking about diffusion models <strong>finally</strong>. Uh yeah, we spent the last lecture not talking about diffusion model in the diffusion class, but I guess this time we finally gonna talk about diffusion model now.」（CMU L2, chunk #1）</blockquote>
+
+<p>Dr. Raj 也在 Lecture 4 的开场把"理论 + 实战"放在一起讲（chunk #2）：</p>
+
+<blockquote class="source-quote">「The last lecture focused on the theory of DDPMs where we looked at how exactly are diffusion models trained... My experience with diffusion models has been that the theory appears very interesting but you cannot truly understand the underlying concepts unless you supplement it with a practical example or multiple practical examples.」</blockquote>
+
+<p>这正是本章要做的事——把前 6 章铺好的<strong>地基</strong>（VAE / ELBO / 前向 / 反向）凝成一份可以直接跑通的<strong>建筑</strong>。前面六章你已经分别学会了 VAE 怎么压缩、ELBO 怎么拆、前向加噪怎么写、反向去噪怎么参数化；本章要做的是把这些零件组装成一个<em>可训练、可采样、能在 MNIST 上跑出数字</em> 的完整系统。本章读完，你应该：</p>
+
+<ul>
+  <li>能用十秒钟在白板上画完 DDPM 的"加噪—去噪"链；</li>
+  <li>能把损失 $L_\text{simple}$ 写出来，并解释每一项的来历；</li>
+  <li>能徒手写出训练循环（5 行）和采样循环（6 行）；</li>
+  <li>能向人解释"为什么预测噪声 $\epsilon$ 比预测 $x_0$ 好"——而且不止说一条理由；</li>
+  <li>能把 DDPM 跟 VAE 一对一映射，知道它"本质上仍然是 VAE"。</li>
+</ul>
+
+<p>Vizuara 这门课把 DDPM 拆成"L3 理论" + "L4 实战"两节，本章合并两节内容。换句话说，本章的密度会高于第 6 章——但所有概念你之前都见过，本章主要是<strong>把它们焊在一起</strong>。</p>
+
+<div class="callout callout-warning">
+⚠️ <strong>常见误解打头炮</strong>：很多人第一次看到 $L_\text{simple}=\|\epsilon-\epsilon_\theta\|^2$ 时，会以为"DDPM 抛弃了 ELBO，发明了一个全新的损失"。<strong>不是</strong>。$L_\text{simple}$ 就是 ELBO，只是<em>每一步</em>前的权重被人为设成 1（原本是一个跟噪声 schedule 有关的小系数）。本章会把这个等价性掰碎讲。
+</div>
+
+<h2>二、Lecture 3 给的 DDPM 完整图景</h2>
+
+<p>Dr. Raj 把 DDPM 一开场就压缩成两条链（chunk #2 后续，他在白板上画的那张图）：</p>
+
+<ul>
+  <li><strong>前向链</strong>（forward / encoder，无参）：$x_0 \to x_1 \to x_2 \to \cdots \to x_T$，每步加一点高斯噪声；$x_T$ 趋近 $\mathcal{N}(0,I)$。</li>
+  <li><strong>反向链</strong>（reverse / decoder，有参 $\theta$）：$x_T \to x_{T-1} \to \cdots \to x_1 \to x_0$，每步学一个条件高斯。</li>
+</ul>
+
+<svg viewBox="0 0 720 220" role="img" aria-label="DDPM 前向加噪 + 反向去噪链">
+  <defs>
+    <marker id="ddpm-fwd" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+      <path d="M0,0 L6,3 L0,6 Z" fill="#d4a017"/>
+    </marker>
+    <marker id="ddpm-rev" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+      <path d="M0,0 L6,3 L0,6 Z" fill="#0b5"/>
+    </marker>
+  </defs>
+  <g font-family="ui-sans-serif" font-size="11" fill="var(--text)">
+    <!-- 五个圆代表 x0..xT -->
+    <g>
+      <circle cx="60"  cy="80" r="22" fill="#fff" stroke="#0b5" stroke-width="2"/>
+      <text x="60"  y="84" text-anchor="middle" font-weight="600">x_0</text>
+      <circle cx="200" cy="80" r="22" fill="#f3f0fa" stroke="#6f4dd0" stroke-width="2"/>
+      <text x="200" y="84" text-anchor="middle">x_1</text>
+      <circle cx="360" cy="80" r="22" fill="#fbe7c6" stroke="#d4a017" stroke-width="2"/>
+      <text x="360" y="84" text-anchor="middle">x_t</text>
+      <circle cx="520" cy="80" r="22" fill="#fde2d4" stroke="#c0392b" stroke-width="2"/>
+      <text x="520" y="84" text-anchor="middle">x_{T-1}</text>
+      <circle cx="660" cy="80" r="22" fill="#222" stroke="#000" stroke-width="2"/>
+      <text x="660" y="84" text-anchor="middle" fill="#fff">x_T</text>
+    </g>
+    <!-- 前向箭头 (上方, 黄色, q) -->
+    <g stroke="#d4a017" stroke-width="2" fill="none" marker-end="url(#ddpm-fwd)">
+      <path d="M 82 70 Q 130 40 178 70"/>
+      <path d="M 222 70 Q 280 40 338 70"/>
+      <path d="M 382 70 Q 450 40 498 70"/>
+      <path d="M 542 70 Q 600 40 638 70"/>
+    </g>
+    <text x="360" y="20" text-anchor="middle" fill="#d4a017" font-weight="600">前向 q(x_t|x_{t-1})：固定加噪（无参）</text>
+    <!-- 反向箭头 (下方, 绿色, p_theta) -->
+    <g stroke="#0b5" stroke-width="2" fill="none" marker-end="url(#ddpm-rev)" class="flow-arrow">
+      <path d="M 638 100 Q 580 140 542 100"/>
+      <path d="M 498 100 Q 440 140 382 100"/>
+      <path d="M 338 100 Q 280 140 222 100"/>
+      <path d="M 178 100 Q 130 140 82 100"/>
+    </g>
+    <text x="360" y="190" text-anchor="middle" fill="#0b5" font-weight="600">反向 p_θ(x_{t-1}|x_t)：神经网络学（参数 θ）</text>
+    <text x="360" y="210" text-anchor="middle" fill="var(--text-muted)" font-size="10">同一个网络 ε_θ 处理所有 t；time embedding 告诉它"现在第几步"</text>
+  </g>
+</svg>
+
+<p>这张图你已经在第 4 / 6 章见过。第 7 章的<strong>新</strong>东西是<em>把训练目标"参数化"出来</em>——把"网络要学什么"从抽象的 $\mu_\theta$ 落到具体的 $\epsilon_\theta$。</p>
+
+<h2>三、复习一下：前向公式的两条"魔法"</h2>
+
+<p>训练 DDPM 的关键是<strong>能够一步跳到任意 $t$</strong>。第 4 章证过两条等式（这里只复述结论）：</p>
+
+<div class="deriv-step">
+<strong>魔法 1：一步转移</strong>
+$$q(x_t \mid x_{t-1}) = \mathcal{N}\!\big(x_t;\ \sqrt{1-\beta_t}\,x_{t-1},\ \beta_t I\big)$$
+<em>Why</em>：每步加一点方差 $\beta_t$ 的高斯噪声，并把当前像素稍微缩一点（防止能量发散）。
+</div>
+
+<div class="deriv-step">
+<strong>魔法 2：一步直达任意 t</strong>（边际化技巧）
+$$x_t = \sqrt{\bar\alpha_t}\,x_0 + \sqrt{1-\bar\alpha_t}\,\epsilon,\qquad \epsilon \sim \mathcal{N}(0, I)$$
+$$q(x_t \mid x_0) = \mathcal{N}\!\big(x_t;\ \sqrt{\bar\alpha_t}\,x_0,\ (1-\bar\alpha_t)I\big)$$
+<em>Why</em>：把 $\alpha_t = 1-\beta_t$、$\bar\alpha_t=\prod_{s\leq t}\alpha_s$ 一路递推，相当于把 1000 个独立高斯叠成一个高斯。<strong>这是训练能并行的关键</strong>——你不必跑 1000 步前向，给定 $x_0$ 和随机 $t$，一行就能采出 $x_t$。
+</div>
+
+<div class="callout callout-tip">
+💡 <strong>这条等式的"硬通货"地位</strong>：本章后面所有的转换（$\mu \leftrightarrow \epsilon \leftrightarrow x_0$、simple loss 的来源、采样公式），都靠"魔法 2"。背下它，比背任何东西都重要：<strong>$x_t = \sqrt{\bar\alpha_t}\,x_0 + \sqrt{1-\bar\alpha_t}\,\epsilon$</strong>。
+</div>
+
+<h2>四、训练目标的三种等价参数化</h2>
+
+<p>反向过程要学一个高斯 $p_\theta(x_{t-1}|x_t)=\mathcal{N}(\mu_\theta(x_t,t),\Sigma_t)$，其中方差 $\Sigma_t$ 通常固定。<strong>只剩 $\mu_\theta$ 要学</strong>——但<em>怎么参数化 $\mu_\theta$</em> 是一个开放选择，并且这个选择对训练稳定性和最终样本质量影响巨大。本节列出三种数学上完全等价、但工程上差异巨大的选项。这一节是 DDPM 工程"工具箱"里最重要的一块，<strong>每个搞 diffusion 的人都得熟练在它们之间换</strong>——读论文、改代码、调超参全靠它。</p>
+
+<h3>4.1 选项 A：直接预测 $x_0$（"我猜原图长啥样"）</h3>
+
+<p>最直观的想法：网络直接输出"我猜原图是哪张"。记为 $x_{0,\theta}(x_t, t)$。然后由"魔法 2 反解"得到 $\mu$。第 6 章已经推过——这里只写结论：</p>
+
+$$\mu_\theta(x_t, t) = \frac{\sqrt{\bar\alpha_{t-1}}\,\beta_t}{1-\bar\alpha_t}\,x_{0,\theta}(x_t, t) + \frac{\sqrt{\alpha_t}\,(1-\bar\alpha_{t-1})}{1-\bar\alpha_t}\,x_t$$
+
+<p>损失就是简单的 MSE：</p>
+
+$$L_{x_0} = \mathbb{E}_{t,x_0,\epsilon}\big[\|x_0 - x_{0,\theta}(x_t, t)\|^2\big]$$
+
+<p><strong>问题</strong>：当 $t$ 很大（$x_t$ 几乎是纯噪声），网络要"凭空想象出"一张干净图。这就像让一个人看着雪花屏猜原视频内容——理论上没问题，实践中梯度极不稳定。更具体地说：在 $t \to T$ 这个区段，输入 $x_t \approx \mathcal{N}(0,I)$，几乎不含任何 $x_0$ 的信息；网络只能输出"训练集的平均图"，这相当于<em>把所有 mode 全部融在一起</em>——产生"灰雾"。这正是早期 score matching 的 Yang Song 团队、和 VAE 派系都吃过的亏。</p>
+
+<h3>4.2 选项 B：预测 $\epsilon$（"我猜你加的噪声长啥样"）</h3>
+
+<p>把"魔法 2"反解出来：</p>
+
+$$x_0 = \frac{x_t - \sqrt{1-\bar\alpha_t}\,\epsilon}{\sqrt{\bar\alpha_t}}$$
+
+<p>如果网络能猜准噪声 $\epsilon_\theta(x_t, t)$，把它代进上面的式子就能还原 $x_0$。代入 $\mu$ 公式（代数稍长，省略中间步骤）得到 Ho 2020 那个著名的形式：</p>
+
+$$\boxed{\mu_\theta(x_t, t) = \frac{1}{\sqrt{\alpha_t}}\!\left(x_t - \frac{\beta_t}{\sqrt{1-\bar\alpha_t}}\,\epsilon_\theta(x_t, t)\right)}$$
+
+<p>对应的损失变成"预测噪声的 MSE"：</p>
+
+$$L_\epsilon = \mathbb{E}_{t,x_0,\epsilon}\big[\|\epsilon - \epsilon_\theta(x_t, t)\|^2\big]$$
+
+<div class="callout callout-info">
+🔎 <strong>三个参数化是同一损失的换皮</strong>：因为 $x_t, x_0, \epsilon$ 之间靠"魔法 2"线性绑死，给定 $x_t$ 和 $t$，知道其中任一个就能算出另外两个。所以预测哪一个本质相同——但<em>残差结构不同</em>，导致优化难易度不同。
+</div>
+
+<h3>4.3 选项 C：预测 $v$（velocity，"我猜的混合速度方向"）</h3>
+
+<p>Salimans &amp; Ho 2022 在 Progressive Distillation 论文里引入了 <strong>$v$-prediction</strong>：</p>
+
+$$v_t = \sqrt{\bar\alpha_t}\,\epsilon - \sqrt{1-\bar\alpha_t}\,x_0$$
+
+<p>它是 $\epsilon$ 和 $x_0$ 的"旋转线性组合"。在 $t$ 很大时 $v\approx\epsilon$（退化为 $\epsilon$-prediction），在 $t$ 很小时 $v\approx -x_0$（退化为 $x_0$-prediction）。<strong>$v$ 自动在两者之间插值</strong>，因此在 $t$ 的整个范围里都保持"合适的难度"。Imagen Video / Stable Video Diffusion 都用 $v$-prediction。</p>
+
+<div class="my-addition">
+🟡 <strong>教材外补充</strong>：源 chunk 在 Lecture 3 里只展开了 $\epsilon$-prediction（Ho 2020 的选择）。$v$-prediction 是 2022 年的进展，源讲师没讲。但在现代 DDPM 工程里它是<em>事实标准</em>，因此放在这里点一下；详细推导可参 Salimans &amp; Ho 2022（Section 3）以及 EDM (Karras 2022) 的 preconditioning 视角。
+</div>
+
+<h2>五、为什么 $\epsilon$-prediction 实际更好</h2>
+
+<p>这一点 Vizuara 和 CMU 都没在源 chunk 里展开（Lecture 3 的开场被"VAE 复习"占了大半篇幅），但<a href="/video-to-notebook/textbook/6/">第 6 章</a>讲师在白板上提到过两条直觉。这里把它们放在一起。</p>
+
+<h3>5.1 残差学习（residual learning）的直觉</h3>
+
+<p>$x_t = \sqrt{\bar\alpha_t}\,x_0 + \sqrt{1-\bar\alpha_t}\,\epsilon$ 把 $x_t$ 写成"信号 + 噪声"两块。$\epsilon$-prediction 就是<strong>从 $x_t$ 里减去信号、只剩噪声那一块</strong>——这跟 ResNet 学残差是一个套路。网络只需要学"输入里哪部分是噪声"，而不必学"完整地重建一张图"。</p>
+
+<p>用更具体的话说：在 $t$ 很小时（$x_t$ 几乎等于 $x_0$，只有极少的扰动），如果让网络预测 $x_0$，它会发现"<em>原图就在我眼前</em>"，最优解几乎是 identity——梯度极小、学不到信号；而 $\epsilon$-prediction 让它"放大那一点扰动"，目标永远是一个标准正态的单位向量，<em>训练信号始终饱满</em>。在 $t$ 很大时（$x_t$ 几乎是纯噪声），让网络猜 $x_0$ 等于让它在迷雾里凭空捏一张图；而预测 $\epsilon$ 等于"输入是什么、输出大致也是什么"，<em>始终是一个稳定的回归任务</em>。两端都站得住脚，这是 $\epsilon$-prediction 的隐藏好处。</p>
+
+<h3>5.2 输入输出量纲一致 / 尺度不变</h3>
+
+<p>$\epsilon \sim \mathcal{N}(0,I)$ 永远是<strong>单位方差</strong>的——不管 $t=1$ 还是 $t=999$。<em>预测目标的尺度恒定</em>。而 $x_0$ 的尺度是数据原本的尺度（MNIST 在 $[-1,1]$，自然图像也大体一致），<em>但训练损失的 weighting</em> 因 $\bar\alpha_t$ 变化会导致 $t$ 不同步骤的梯度量级差几十倍。$\epsilon$-prediction 让每一步的"靶子大小"一致，<strong>使训练稳定、不需要按 $t$ 调 loss 权重</strong>。这一点直接呼应下一节"simple loss"——把所有 $t$ 的权重设成 1 之所以"能 work"，本质上就是因为 $\epsilon$ 的尺度已经被"自然标准化"了。</p>
+
+<div class="callout callout-quote">
+讲师 Dr. Raj 在 Lecture 3 复习章节（chunk #16）提到过这种"VAE 输出模糊"的痛点：每步预测一个完整图像（像 VAE 一次过 decoder）会导致<strong>模糊</strong>；而预测残差／噪声 = 把任务<em>切到</em> "微调一档"——清晰度由前向链本身保证，网络只负责"擦掉噪声"。
+</div>
+
+<h3>5.3 经验证据</h3>
+
+<p>Ho 2020 论文里对比过 $x_0$ 和 $\epsilon$ 两种参数化（Table 2）：在 CIFAR-10 上，$\epsilon$-prediction + $L_\text{simple}$ 拿到 FID = 3.17，而 $x_0$-prediction 明显更差。这是<strong>整篇论文最重要的 ablation</strong>——它让"预测噪声"成了 DDPM 的标志性选择。</p>
+
+<h2>六、Simple Loss：把 ELBO 简化成一行</h2>
+
+<p>第 3 章已经把 DDPM 的 ELBO 拆成 $T$ 个 KL：</p>
+
+$$L_\text{vlb} = \underbrace{D_\text{KL}\!\big(q(x_T|x_0)\|p(x_T)\big)}_{L_T,\ \approx 0} + \sum_{t=2}^{T}\underbrace{\mathbb{E}_q D_\text{KL}\!\big(q(x_{t-1}|x_t,x_0)\|p_\theta(x_{t-1}|x_t)\big)}_{L_{t-1}} - \underbrace{\mathbb{E}_q[\log p_\theta(x_0|x_1)]}_{L_0}$$
+
+<p>对每一步 KL（两个高斯之间）有解析公式。把它代入并把 $\mu_\theta$ 用 $\epsilon$-prediction 写出来，第 6 章给出了：</p>
+
+<div class="deriv-step">
+<strong>步骤 1：每步 KL 化为加权 MSE</strong>
+$$L_{t-1} = \mathbb{E}_{x_0,\epsilon}\!\left[\frac{\beta_t^2}{2\sigma_t^2\,\alpha_t\,(1-\bar\alpha_t)}\,\|\epsilon - \epsilon_\theta(x_t, t)\|^2\right]$$
+<em>Why</em>：两个高斯 KL = "(均值差)² / (2 方差)" 那个公式；用 $\mu_\theta$ ↔ $\epsilon_\theta$ 的代换把它整理出来。
+</div>
+
+<div class="deriv-step">
+<strong>步骤 2：扔掉 $t$-依赖的权重</strong>
+$$L_\text{simple} = \mathbb{E}_{t,x_0,\epsilon}\big[\|\epsilon - \epsilon_\theta(x_t, t)\|^2\big]$$
+<em>Why</em>：把那个跟 $t$ 有关的复杂系数<strong>统一设成 1</strong>。
+<em>Cost</em>：这不再是严格的 ELBO，但 Ho 等人在 §3.4 实验里发现，<strong>它训练更稳定、采样质量更好</strong>。直觉：原 ELBO 在小 $t$ 步给了过大的权重（那里图像几乎是干净的、网络很容易学），把权重压平等于<em>把训练算力更均匀地分到所有 $t$</em>。
+</div>
+
+<p>所以 $L_\text{simple}$ 是 ELBO 的一个<strong>"重新加权"版本</strong>（reweighted ELBO）。它不再下界 $\log p(x)$，但样本质量更好——这是论文里"the simple loss"这个词的来历。Ho 在原文 §3.4 总结：</p>
+
+<div class="callout callout-quote">
+"We found it beneficial to sample quality (and simpler to implement) to train on the following variant of the variational bound." —— Ho et al. 2020, eq. (14)
+</div>
+
+<h3>6.1 为什么"扔掉权重"反而更好</h3>
+
+<p>原 ELBO 权重 $\frac{\beta_t^2}{2\sigma_t^2 \alpha_t (1-\bar\alpha_t)}$ 在小 $t$ 时<em>非常大</em>，在大 $t$ 时<em>很小</em>。直觉上：</p>
+
+<ul>
+  <li>小 $t$（图像几乎干净）：这一步去噪太容易了——网络只要稍微减一点噪声就行；ELBO 却给它<em>极高</em>的 loss 权重，迫使网络把大部分算力花在"几乎不必学"的步骤上。</li>
+  <li>大 $t$（图像接近纯噪声）：这一步去噪非常难——网络要从一团雾里"猜结构"；ELBO 却给它<em>很小</em>的权重，导致这部分"难学的步骤"反而被忽略。</li>
+</ul>
+
+<p>$L_\text{simple}$ 把权重压平 = <strong>把训练资源更均匀地分到所有 $t$</strong>，尤其是补偿了那些"难学的大 $t$ 步骤"。结果是采样质量显著上升，FID 从原 ELBO 训出的 13.5 跌到 3.17（Ho 2020 Table 2）。</p>
+
+<h3>6.2 这是不是"丢了 likelihood"？</h3>
+
+<p>是。$L_\text{simple}$ 训出的模型在 NLL（bits/dim）上略逊一些（Ho 2020 报 3.75 vs 3.70）。但 NLL 跟<em>采样质量</em>是两件事——FID 衡量样本看上去像不像，NLL 衡量模型把<em>真实样本</em>的概率密度估得多准。Ho 2020 显示二者可以脱钩——而对生成任务来说，FID 才是用户体验。<strong>"用 ELBO 的反例换 FID 的胜利"</strong>就是 simple loss 的取舍。</p>
+
+<h2>七、把"$\mu \leftrightarrow \epsilon \leftrightarrow x_0$"互换公式钉死</h2>
+
+<p>这是 DDPM 学习曲线上最容易卡住的一块。把三种"输出"在白板上一起列出来，永远记得查表。给定 $(x_t, t)$ 和模型输出：</p>
+
+<div class="callout callout-info">
+<strong>📐 三参数化互换表</strong>
+<ul>
+  <li>已知 $\epsilon_\theta$：<br>
+      $x_{0,\theta} = \dfrac{x_t - \sqrt{1-\bar\alpha_t}\,\epsilon_\theta}{\sqrt{\bar\alpha_t}}$</li>
+  <li>已知 $x_{0,\theta}$：<br>
+      $\epsilon_\theta = \dfrac{x_t - \sqrt{\bar\alpha_t}\,x_{0,\theta}}{\sqrt{1-\bar\alpha_t}}$</li>
+  <li>反向均值（$\epsilon$ 视角）：<br>
+      $\mu_\theta = \dfrac{1}{\sqrt{\alpha_t}}\!\left(x_t - \dfrac{\beta_t}{\sqrt{1-\bar\alpha_t}}\epsilon_\theta\right)$</li>
+  <li>反向均值（$x_0$ 视角）：<br>
+      $\mu_\theta = \dfrac{\sqrt{\bar\alpha_{t-1}}\,\beta_t}{1-\bar\alpha_t}\,x_{0,\theta} + \dfrac{\sqrt{\alpha_t}\,(1-\bar\alpha_{t-1})}{1-\bar\alpha_t}\,x_t$</li>
+</ul>
+</div>
+
+<p>训练时你选哪种参数化，损失就用对应的 MSE；采样时不管选哪种，都把它转回 $\mu_\theta$ 再加上一点 $\sigma_t \cdot z$ 的随机性。这一点不要混淆。</p>
+
+<h2>八、训练算法：DDPM 训练循环</h2>
+
+<p>Ho 2020 论文 Algorithm 1（"Training"）只有 5 行。下面给一份可直接跑通的 PyTorch 骨架——读它和读伪代码是一回事，所以伪代码就略了。</p>
+
+<pre><code>import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+# ───── 噪声调度：β_t 线性从 1e-4 到 0.02（Ho 2020 默认）─────
+T = 1000
+betas = torch.linspace(1e-4, 0.02, T)        # β_t
+alphas = 1.0 - betas                         # α_t
+alpha_bars = torch.cumprod(alphas, dim=0)    # ᾱ_t = Π α_s
+
+def q_sample(x0, t, eps):
+    # ===== 魔法 2：一步直达 x_t =====
+    # x_t = sqrt(ᾱ_t) * x_0 + sqrt(1-ᾱ_t) * ε
+    ab = alpha_bars[t].view(-1, 1, 1, 1)     # broadcast 到 (B,1,1,1)
+    return ab.sqrt() * x0 + (1 - ab).sqrt() * eps
+
+def train_step(model, x0, optimizer):
+    B = x0.shape[0]
+    # 1) 随机采一个 t ∈ {0, ..., T-1}
+    t = torch.randint(0, T, (B,), device=x0.device)
+    # 2) 采一个 ε ~ N(0, I)，跟 x0 同 shape
+    eps = torch.randn_like(x0)
+    # 3) 一步加噪得到 x_t
+    xt = q_sample(x0, t, eps)
+    # 4) 让网络预测 ε_θ(x_t, t)
+    eps_pred = model(xt, t)
+    # 5) MSE 损失 = L_simple
+    loss = F.mse_loss(eps_pred, eps)
+    optimizer.zero_grad()
+    loss.backward()
+    optimizer.step()
+    return loss.item()</code></pre>
+
+<div class="callout callout-tip">
+💡 <strong>"5 行训练"</strong>：每次迭代里，<em>每张图都跳到不同的随机 $t$</em>。一个 batch 内有的图加了一点点噪声、有的几乎是纯噪声——网络在所有 $t$ 上同时学。<strong>这就是 $\mathbb{E}_t[\cdot]$ 那个外层期望的实现方式</strong>。无需展开循环 1000 次——多亏了"魔法 2"。
+</div>
+
+<h3>8.1 训练时的几个隐形坑</h3>
+
+<p>这五行看起来朴素，但里面藏着几个坑。讲师 Dr. Raj 在 Lecture 4 用整整一节课走完 MNIST 的实战实现，把这些坑挨个踩了一遍。</p>
+
+<ul>
+  <li><strong>$t$ 的采样要均匀</strong>：上面代码用 <code>randint(0, T, (B,))</code> 把每个 sample 独立采 $t$，这是标准做法。如果你<em>手贱</em>把 $t$ 设成常数或者从某个非均匀分布采，相当于训练不了某些步骤——采样链上会出现明显瑕疵。Importance sampling（按 loss 大小给 $t$ 加权）是一种进阶选项，但 Ho 2020 没用，留给后续论文（Nichol &amp; Dhariwal 2021）。</li>
+  <li><strong>数据归一化到 $[-1, 1]$</strong>：MNIST 默认是 $[0, 1]$。如果不归一化，前向链最后一步 $x_T$ 的均值会偏离 0，反向链的"采 $x_T \sim \mathcal{N}(0,I)$"假设就崩了。代码里 <code>transforms.Normalize(0.5, 0.5)</code> 就是干这个。</li>
+  <li><strong>EMA 是几乎必备的工程加分项</strong>：保留一份网络参数的 exponential moving average（衰减率 0.9999），<em>采样时用 EMA 权重</em>。FID 通常能从 5 跌到 3.5 左右——白送的收益。Ho 2020 用了 EMA。</li>
+  <li><strong>梯度裁剪</strong>：训练初期 loss 偶尔会爆，对 grad norm 做 clip（≤1.0）几乎是标配。</li>
+</ul>
+
+<h2>九、采样算法：从纯噪声一步步还原</h2>
+
+<p>Ho 2020 Algorithm 2（"Sampling"）。从 $x_T \sim \mathcal{N}(0,I)$ 开始，跑 $T \to 0$ 循环。每步：用 $\epsilon_\theta$ 算出 $\mu_\theta$，再加一点 $\sigma_t \cdot z$ 的随机扰动（最后一步 $t=0$ 不加）。</p>
+
+<pre><code>@torch.no_grad()
+def sample(model, shape, device):
+    # x_T ~ N(0, I)
+    x = torch.randn(shape, device=device)
+    for t in reversed(range(T)):
+        # 1) 把 t 打成 batch 大小的 long tensor
+        t_batch = torch.full((shape[0],), t, device=device, dtype=torch.long)
+        # 2) 让网络预测此刻的 ε
+        eps_pred = model(x, t_batch)
+        # 3) 取 schedule 系数
+        alpha     = alphas[t]
+        alpha_bar = alpha_bars[t]
+        beta      = betas[t]
+        # 4) 用 ε 视角的 μ_θ 公式（见 §7 互换表）
+        coef = beta / (1 - alpha_bar).sqrt()
+        mu = (x - coef * eps_pred) / alpha.sqrt()
+        # 5) 加噪：最后一步 (t=0) 不加
+        if t > 0:
+            z = torch.randn_like(x)
+            sigma = beta.sqrt()              # σ_t = √β_t（Ho 2020 的 "fixedlarge"）
+            x = mu + sigma * z
+        else:
+            x = mu
+    return x</code></pre>
+
+<div class="callout callout-warning">
+⚠️ <strong>$\sigma_t$ 有两种常见选择</strong>：<br>
+• <strong>fixedlarge</strong>：$\sigma_t = \sqrt{\beta_t}$（上面代码用的）—— Ho 2020 实验里它和 fixedsmall 几乎一样好；<br>
+• <strong>fixedsmall</strong>：$\sigma_t = \sqrt{\tilde\beta_t}$，其中 $\tilde\beta_t = \frac{1-\bar\alpha_{t-1}}{1-\bar\alpha_t}\beta_t$——这是真后验 $q(x_{t-1}|x_t,x_0)$ 在没有 $x_0$ 信息时的"最佳"方差。<br>
+不要忘了：<strong>最后一步 $t=0$ 不加噪</strong>，否则你的"最终样本"会比"还差一步"那张更糊。
+</div>
+
+<h3>9.1 一个常被误解的点：采样为什么"看上去能 work"</h3>
+
+<p>这一步值得停下来想一会儿。前向是<em>明确的、闭式的</em> 高斯——给定 $x_0$，你能写出 $x_t$ 的精确分布。但反向<strong>真正的分布</strong> $q(x_{t-1}|x_t)$ <em>不是</em>高斯——它是个多模态的复杂玩意（同一个 $x_t$ 可以来自很多不同的 $x_0$）。我们却假设反向也是高斯：$p_\theta(x_{t-1}|x_t) = \mathcal{N}(\mu_\theta, \Sigma_t)$——这<em>显然是错的</em>。为什么它仍然 work？</p>
+
+<p>关键在<strong>"小步"</strong>：当 $\beta_t$ 足够小时，单步的反向分布<em>近似</em> 高斯（这是 Sohl-Dickstein 2015 原 paper 的核心数学论证）。$T=1000$ 步、$\beta_T = 0.02$ 这个调度恰好让每一步的 $\beta_t$ 都足够小、高斯近似有效。如果你强行把 $T$ 减到 50，单步 $\beta$ 暴增，高斯假设崩盘——采样质量直线下降。<em>DDIM 等加速采样不是简单缩 $T$，而是用 ODE 视角重新推导，绕过了这个问题</em>。</p>
+
+<div class="callout callout-info">
+🔎 <strong>讲师在 Lecture 6 的延伸（chunk #6, 7）</strong>："In fact, this conditioning technique also appears in the variational view of the diffusion models in DDPM and it's one of the most common tricks that we see in deep generative modeling which suddenly makes everything tractable."（chunk #6）—— 这里说的"trick"就是<em>条件 $x_0$ 已知</em> 的那个 cheat：真后验 $q(x_{t-1}|x_t,x_0)$ 是闭式高斯，所以可以拿它做训练 target。这个 trick 是 DDPM 从 Sohl-Dickstein 框架往可训练方向走的关键一步。
+</div>
+
+<h2>十、U-Net + Time Embedding：网络架构一瞥</h2>
+
+<p>$\epsilon_\theta(x_t, t)$ 通常实现成一个<strong>带时间条件的 U-Net</strong>。这一节不深入，只把<em>形状</em>和<em>必须存在的两件事</em>说清。</p>
+
+<h3>10.1 U-Net 骨架</h3>
+
+<ul>
+  <li><strong>输入</strong>：$x_t$，形状 $(B, C, H, W)$（比如 MNIST 是 $(B, 1, 28, 28)$）；</li>
+  <li><strong>下采样路径</strong>：若干层 $\text{ResBlock} + \text{Downsample}$，把分辨率从 $H\!\times\!W$ 压到 $H/16\!\times\!W/16$；通道数从 64 升到 512；</li>
+  <li><strong>瓶颈</strong>：在最低分辨率上叠几个带 self-attention 的 ResBlock；</li>
+  <li><strong>上采样路径</strong>：对称地还原分辨率，每层通过 skip-connection 接到下采样对应层；</li>
+  <li><strong>输出</strong>：跟输入<em>同 shape</em> 的 $(B, C, H, W)$，每个像素对应一个 $\epsilon$ 通道的预测。</li>
+</ul>
+
+<h3>10.2 Time Embedding：把"现在第几步"告诉网络</h3>
+
+<p>网络共享所有 $t$ 的参数，所以必须有办法<em>告诉它 t 是几</em>。Ho 2020 借用了 Transformer 的 sinusoidal embedding：</p>
+
+<pre><code>def timestep_embedding(t, dim):
+    # t: (B,) long; dim: embed 维度
+    half = dim // 2
+    freqs = torch.exp(-math.log(10000) * torch.arange(half) / half).to(t.device)
+    args = t.float().unsqueeze(1) * freqs.unsqueeze(0)
+    return torch.cat([torch.cos(args), torch.sin(args)], dim=-1)  # (B, dim)
+
+class TimedResBlock(nn.Module):
+    def __init__(self, in_ch, out_ch, t_dim):
+        super().__init__()
+        self.conv1 = nn.Conv2d(in_ch, out_ch, 3, padding=1)
+        self.conv2 = nn.Conv2d(out_ch, out_ch, 3, padding=1)
+        # ===== 把 t-embedding 投到 out_ch 维，加进 feature map =====
+        self.t_proj = nn.Linear(t_dim, out_ch)
+        self.norm1 = nn.GroupNorm(8, out_ch)
+        self.norm2 = nn.GroupNorm(8, out_ch)
+        self.skip  = nn.Conv2d(in_ch, out_ch, 1) if in_ch != out_ch else nn.Identity()
+
+    def forward(self, x, t_emb):
+        h = F.silu(self.norm1(self.conv1(x)))
+        # broadcast 加到每个空间位置上：等于"用 t 调制 feature scale"
+        h = h + self.t_proj(F.silu(t_emb))[:, :, None, None]
+        h = F.silu(self.norm2(self.conv2(h)))
+        return h + self.skip(x)</code></pre>
+
+<p>关键是 <code>self.t_proj(t_emb)[:, :, None, None]</code> 这一行——把一个 batch 的标量 $t$ 转成 $(B,\text{out\_ch})$ 的向量，再 broadcast 加到 feature map 的<em>每个空间位置</em>。这相当于：</p>
+
+<blockquote>"嗨网络，我现在告诉你这张图在去噪轨道的哪个位置，你把每个通道的激活按这个位置稍微平移一下。"</blockquote>
+
+<div class="callout callout-note">
+🛠️ <strong>工程细节</strong>：实际 DDPM 实现里 time embedding 还会接一层 MLP（<code>Linear→SiLU→Linear</code>）做特征转换。激活函数普遍用 <strong>SiLU / Swish</strong>，比 ReLU 在生成任务上稳。Group Normalization 替代 BatchNorm——因为 batch 内不同 $t$ 的样本统计量差异巨大，BN 会爆。
+</div>
+
+<h2>十一、DDPM = T 步 hierarchical VAE（把第 2、3 章的桥接上）</h2>
+
+<p>现在揭示<strong>真正的统一视角</strong>。Dr. Raj 在 Lecture 3 chunk #0 一上来就花了 15 分钟复习 VAE，不是为了凑时间——而是因为<strong>DDPM 在数学上就是 VAE 的 T 步推广</strong>。讲师在 Lecture 3 反复说过的话（chunk #10–13）：</p>
+
+<blockquote class="source-quote">「Latent space 的直觉是它捕捉了变化的隐藏因素... 当你把数据压成 latent 时一定会丢东西，但思想是只要捕捉到必要信息就够了... encoder 把数据映到 latent space 的某个<em>区域</em> 而不是单一点；这就是为什么叫 <strong>variational</strong>。」（chunk #10–13 综述）</blockquote>
+
+<p>把这段话里的 "latent space" 替换成 "$x_T$ 那层纯高斯空间"，把 "encoder" 替换成"前向加噪链"，整段话就是 DDPM 的描述。</p>
+
+<h3>11.1 一一对应</h3>
+
+<table style="width:100%; border-collapse:collapse; margin:1rem 0;">
+  <thead>
+    <tr style="background:var(--surface-soft);">
+      <th style="text-align:left; padding:0.4rem; border-bottom:1px solid var(--border);">VAE（第 2 章）</th>
+      <th style="text-align:left; padding:0.4rem; border-bottom:1px solid var(--border);">DDPM（本章）</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr><td style="padding:0.4rem;">单个 latent $z$</td><td style="padding:0.4rem;">链式 latent $x_1, x_2, \dots, x_T$</td></tr>
+    <tr><td style="padding:0.4rem;">encoder $q_\phi(z|x)$（学的）</td><td style="padding:0.4rem;">前向 $q(x_t|x_{t-1})$（固定）</td></tr>
+    <tr><td style="padding:0.4rem;">decoder $p_\theta(x|z)$（学的）</td><td style="padding:0.4rem;">反向 $p_\theta(x_{t-1}|x_t)$（学的，T 步共享）</td></tr>
+    <tr><td style="padding:0.4rem;">prior $p(z)=\mathcal{N}(0,I)$</td><td style="padding:0.4rem;">$p(x_T)=\mathcal{N}(0,I)$（前向天然到这）</td></tr>
+    <tr><td style="padding:0.4rem;">ELBO = 重构 − KL</td><td style="padding:0.4rem;">ELBO = $L_T + \sum L_{t-1} + L_0$（$T$ 个 KL）</td></tr>
+    <tr><td style="padding:0.4rem;">重参数化 $z=\mu+\sigma\epsilon$</td><td style="padding:0.4rem;">每步采样都用重参数化</td></tr>
+  </tbody>
+</table>
+
+<p>所以你<strong>不用学新数学</strong>——你只是在 VAE 的脚手架上把 latent 链拉长，把"$T$ 个 KL 项"拼起来。</p>
+
+<h3>11.2 DDPM 比 VAE 好在哪？三点</h3>
+
+<p>Dr. Raj 在 Lecture 3 chunk #16-17 列出 VAE 的两大遗憾——本章把它们和 DDPM 的对治放一起：</p>
+
+<ol>
+  <li><strong>VAE 输出模糊</strong> → DDPM 用<em>小步去噪</em>而非"一次解码"，每步只需要"擦亮一档"，最终输出清晰。</li>
+  <li><strong>VAE 要 encoder + decoder 联合训练</strong>（"两个网络互相打架"）→ DDPM 前向无参，<em>只需训一个网络</em>。</li>
+  <li><strong>VAE 的 latent space 不可解释、无层级</strong> → DDPM 的"latent 链"具有<em>多尺度自然层级</em>：大 $t$ 抓粗粒度（轮廓），小 $t$ 抓细粒度（纹理）。这一点把 DDPM 跟 Cascaded VAE 区分开。</li>
+</ol>
+
+<div class="callout callout-quote">
+讲师在 Lecture 3 chunk #19 用了一个 Vizuara 风格的<strong>"Earth-to-Mars teleport"</strong> 比喻——把 VAE 想成"把整只猫的原子打包发送"，DDPM 则是"把一连串渐变近似传过去，每步只发送一点点差异"。后者更稳健、更易训练。原话："we want to teleport a cat from Earth to Mars. We can't just teleport every single atom in the cat—it's a lot of data. So then what we do is we have a latent code or a recipe where we preserve all the important information in this latent code and then we transfer this latent code to Mars."（chunk #19）
+</div>
+
+<h3>11.3 为什么"链"比"单点"更强：层级特征的自然涌现</h3>
+
+<p>把 latent 从单点变成 1000 步的链，最关键的好处是<strong>多尺度</strong>。当你在采样链 $x_T \to x_0$ 上观察任意一步的"已生成图像"：</p>
+
+<ul>
+  <li>$t \approx T$：图像几乎全是噪声，但模型已经在<em>勾勒粗粒度的能量分布</em>——这一阶段的网络决策对应"图像里哪个区域要亮、哪个要暗"，即<strong>构图层级</strong>；</li>
+  <li>$t \approx T/2$：低频结构出现了——能看出一个大致的物体轮廓、姿态、配色，但细节还很模糊。这是<strong>形状层级</strong>；</li>
+  <li>$t \approx 0$：网络在做<em>细节抛光</em>——眼神、纹理、毛发——这是<strong>纹理层级</strong>。</li>
+</ul>
+
+<p>这就是为什么 DDPM 在生成大图（512×512、1024×1024）时仍然保持惊人的全局一致性——它<em>不需要把所有层级一次解决</em>，而是把"先大后小"的策略硬编码进了 $t$ 这个维度。VAE 因为只有一步，必须在<em>同一个 decoder 输出</em> 里同时解决所有层级，结果哪个都做不好——这就是讲师反复强调的 "VAE 输出模糊" 的根本原因。</p>
+
+<h2>十二、跑通 MNIST：从零到一张数字</h2>
+
+<p>把以上零件接起来，下面这段是<strong>能跑</strong>的最小 MNIST DDPM 主循环骨架（U-Net 的具体结构请用任意现成 <code>nn.Module</code> 替换，比如 <code>diffusers</code> 里的 <code>UNet2DModel</code> 或自己写的小 U-Net）。</p>
+
+<pre><code>import torch
+from torch.utils.data import DataLoader
+from torchvision import datasets, transforms
+
+# ===== 数据 =====
+ds = datasets.MNIST('./data', train=True, download=True,
+    transform=transforms.Compose([
+        transforms.ToTensor(),
+        transforms.Normalize(0.5, 0.5),   # 把像素拉到 [-1, 1]，DDPM 标准做法
+    ]))
+loader = DataLoader(ds, batch_size=128, shuffle=True, num_workers=2)
+
+# ===== 模型与优化器 =====
+device = 'cuda' if torch.cuda.is_available() else 'cpu'
+model = MyTinyUNet(in_ch=1, base_ch=64, t_dim=128).to(device)
+opt = torch.optim.Adam(model.parameters(), lr=2e-4)
+betas, alphas, alpha_bars = make_schedule(T=1000, device=device)
+
+# ===== 训练 =====
+for epoch in range(50):
+    for x0, _ in loader:
+        x0 = x0.to(device)
+        loss = train_step(model, x0, opt)        # 见 §8
+    # 每个 epoch 末采 8 张图验收
+    samples = sample(model, (8, 1, 28, 28), device)  # 见 §9
+
+# 现在 samples ∈ [-1, 1]，反归一化到 [0, 1] 即可可视化</code></pre>
+
+<p>跑 50 个 epoch（一张 RTX 3090 约 40 分钟）就能看到从纯噪声慢慢长出可识别的 MNIST 数字。这是<strong>验证你 DDPM 实现正确性的最便宜的实验</strong>——比 CIFAR-10 快十倍，比直接调论文超参省心十倍。</p>
+
+<h2>十三、Ho 2020 论文的关键经验数字</h2>
+
+<p>把 Ho 2020 论文里有<em>定量价值</em>的数字钉在这里。它们既能帮你<em>校准期望</em>，也能在自己复现时<em>判断是否走对路</em>。一个常见的失败模式是"你训出来的 FID 是 40 而不是 3"——多半是哪里出了问题，对着这张表能快速定位。</p>
+
+<ul>
+  <li><strong>步数</strong> $T = 1000$；</li>
+  <li><strong>$\beta_t$ schedule</strong>：线性，$\beta_1 = 10^{-4}$，$\beta_T = 2\times 10^{-2}$；</li>
+  <li><strong>CIFAR-10 FID</strong>：3.17（unconditional 当时 SOTA）；</li>
+  <li><strong>CIFAR-10 NLL</strong>：3.70 bits/dim（用真 $L_\text{vlb}$）；</li>
+  <li><strong>LSUN-256（church）FID</strong>：7.89；</li>
+  <li><strong>采样耗时</strong>：1000 步串行，CIFAR-32 上约 10s/sample（一张 V100）——<em>这就是后来 DDIM / Consistency Models / Distillation 要解决的"速度问题"的起点</em>；</li>
+  <li><strong>训练步数</strong>：CIFAR-10 训了 800K steps（batch 128），约 10 GPU-days；LSUN-256 训了 2.4M steps；</li>
+  <li><strong>$L_\text{simple}$ vs $L_\text{vlb}$</strong>：simple loss 训出 FID 3.17 / NLL 3.75；vlb 训出 FID 13.51 / NLL 3.70——验证了 §6.2 的取舍。</li>
+</ul>
+
+<div class="my-addition">
+🟡 <strong>教材外补充</strong>：源 chunk #5 提到一个 anecdote——Jonathan Ho（DDPM 一作）后来还做了 Progressive Distillation（chunk: "developed by the same guy who developed DDPM"）。这条线一路引到 Consistency Models（也是 Ho 团队），最终成为现在 1-步、4-步 diffusion 采样的主流。本课程后面 <a href="/video-to-notebook/textbook/19/">第 19 章</a>会回到这条线。
+</div>
+
+<figure class="clip-frame">
+  <iframe src="https://www.youtube.com/embed/Dx-1agEjlJs?start=5" title="Vizuara Lecture 3 开场：从 VAE 跨到 DDPM" allowfullscreen></iframe>
+  <figcaption>📺 Vizuara《Principles of Diffusion Models》Lecture 3 开场——讲师 Dr. Raj 复述 VAE 架构，然后跨入 DDPM</figcaption>
+</figure>
+
+<svg viewBox="0 0 720 200" role="img" aria-label="ε-prediction 训练 + 采样循环示意">
+  <defs>
+    <marker id="loop-arrow" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+      <path d="M0,0 L6,3 L0,6 Z" fill="#6f4dd0"/>
+    </marker>
+  </defs>
+  <g font-family="ui-sans-serif" font-size="11" fill="var(--text)">
+    <!-- 训练块 -->
+    <rect x="20" y="20" width="320" height="160" rx="8" fill="#f3f0fa" stroke="#6f4dd0"/>
+    <text x="180" y="40" text-anchor="middle" font-weight="600" fill="#6f4dd0">训练循环（§8）</text>
+    <text x="180" y="65" text-anchor="middle">1. 采 t ∈ [1, T]，ε ~ N(0,I)</text>
+    <text x="180" y="85" text-anchor="middle">2. x_t = √ᾱ_t·x_0 + √(1−ᾱ_t)·ε</text>
+    <text x="180" y="105" text-anchor="middle">3. ε_θ = UNet(x_t, t)</text>
+    <text x="180" y="125" text-anchor="middle" font-weight="600">4. L = ‖ε − ε_θ‖²</text>
+    <text x="180" y="145" text-anchor="middle">5. backward + step</text>
+    <text x="180" y="170" text-anchor="middle" fill="var(--text-muted)" font-size="10">每个 batch 都跑这 5 步</text>
+
+    <!-- 采样块 -->
+    <rect x="380" y="20" width="320" height="160" rx="8" fill="#e8f5e9" stroke="#0b5"/>
+    <text x="540" y="40" text-anchor="middle" font-weight="600" fill="#0b5">采样循环（§9）</text>
+    <text x="540" y="65" text-anchor="middle">x_T ~ N(0, I)</text>
+    <text x="540" y="85" text-anchor="middle">for t = T, T-1, ..., 1:</text>
+    <text x="540" y="105" text-anchor="middle">  μ_θ = (1/√α_t)·(x_t − β_t/√(1−ᾱ_t)·ε_θ)</text>
+    <text x="540" y="125" text-anchor="middle">  x_{t-1} = μ_θ + σ_t · z  (t=1 不加噪)</text>
+    <text x="540" y="150" text-anchor="middle" font-weight="600">→ 输出 x_0</text>
+    <text x="540" y="170" text-anchor="middle" fill="var(--text-muted)" font-size="10">每张图跑 T=1000 次（DDIM 可缩到 50）</text>
+  </g>
+</svg>
+
+<h2>十四、与下一章的承接：DDPM 还有哪些"洞"</h2>
+
+<p>本章把 Ho 2020 的"标准 DDPM"讲完了。但 2020 → 现在这五年里，社区在每一处都找到了改进点：</p>
+
+<ul>
+  <li><strong>$T=1000$ 太慢</strong> → <a href="/video-to-notebook/textbook/9/">DDIM</a>（Song 2021）改写采样为 ODE，50 步出图；</li>
+  <li><strong>$\beta_t$ 线性 schedule</strong> 在 $t$ 大时噪声<em>来太快</em> → <a href="/video-to-notebook/textbook/8/">cosine schedule</a>（Nichol &amp; Dhariwal 2021）；</li>
+  <li><strong>简化损失"扔掉权重"</strong> 是一种工程取舍 → EDM (Karras 2022) 重新把权重拣回来、用 preconditioning；</li>
+  <li><strong>条件生成</strong>（输入 prompt） → <a href="/video-to-notebook/textbook/11/">classifier-free guidance</a>；</li>
+  <li><strong>在像素空间训太贵</strong> → <a href="/video-to-notebook/textbook/18/">Latent Diffusion / Stable Diffusion</a>，把 DDPM 套在 VAE 的 latent 上跑。</li>
+</ul>
+
+<p>所有这些"洞"都建立在<strong>本章这副骨架</strong>之上。把这副骨架背熟，后面每一处改进都只是"换一块螺丝"。</p>
+
+<div class="takeaways">
+  <h3>本章要记住的（讲师亲口给的核心 + 论文核心数字）</h3>
+  <ol>
+    <li><strong>魔法 2 是命门</strong>：$x_t = \sqrt{\bar\alpha_t}\,x_0 + \sqrt{1-\bar\alpha_t}\,\epsilon$——训练能并行、loss 能化简、采样能反推，都靠它。</li>
+    <li><strong>三种参数化等价</strong>：$x_0$ / $\epsilon$ / $v$ 是同一损失的换皮；记互换表（§7），别混淆。</li>
+    <li><strong>$\epsilon$-prediction 工程上更稳</strong>：残差视角 + 输出尺度恒为 1，是 Ho 2020 选它的两大理由——CIFAR-10 FID 从"难训"跌到 3.17。</li>
+    <li><strong>$L_\text{simple}=\|\epsilon-\epsilon_\theta\|^2$</strong> 是<em>重新加权</em>的 ELBO（不是新损失）。把每步 KL 前的系数拉平 = 把训练算力均匀分到所有 $t$。</li>
+    <li><strong>训练 5 行、采样 6 行</strong>：背下 §8、§9 两段伪代码，你就能从零写一份 MNIST DDPM。</li>
+    <li><strong>U-Net + time embedding</strong>：网络共享所有 $t$ 的参数，时间通过 sinusoidal embedding + MLP 投影后<em>逐通道加</em>到 feature map。GroupNorm 不要换 BatchNorm。</li>
+    <li><strong>DDPM = T 步 hierarchical VAE</strong>（讲师"Earth-to-Mars"比喻）。本章的所有数学都是<a href="/video-to-notebook/textbook/2/">第 2 章 VAE</a>的延伸——把 latent 链拉长到 1000 步，仅此而已。</li>
+  </ol>
+</div>
+
+</article>

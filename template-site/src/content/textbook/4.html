@@ -1,0 +1,658 @@
+<style>
+  .forward-ch { line-height: 1.75; }
+  .forward-ch svg { display: block; margin: 1.2rem auto; max-width: 100%; height: auto; }
+  .forward-ch .clip-frame { max-width: 720px; margin: 1.4rem auto; }
+  .forward-ch .clip-frame iframe { width: 100%; aspect-ratio: 16/9; border: 0; border-radius: 6px; }
+  .forward-ch .clip-frame figcaption { color: var(--text-muted); font-size: 0.85rem; margin-top: 0.4rem; text-align: center; }
+  .forward-ch .tldr { background: var(--surface-soft); border-left: 4px solid var(--module-accent); padding: 1rem 1.2rem; border-radius: 0 6px 6px 0; margin: 1.4rem 0; }
+  .forward-ch .tldr h2 { margin-top: 0; font-size: 1.05rem; }
+  .forward-ch .callout { padding: 0.7rem 1rem; margin: 1rem 0; border-radius: 0 6px 6px 0; }
+  .forward-ch .callout-info { background: #eef6fc; border-left: 4px solid #2b80c4; }
+  .forward-ch .callout-note { background: #f3f0fa; border-left: 4px solid #6f4dd0; }
+  .forward-ch .callout-warning { background: #fff6e0; border-left: 4px solid #d4a017; }
+  .forward-ch .callout-tip { background: #e8f5e9; border-left: 4px solid #0b5; }
+  .forward-ch .callout-quote { background: var(--surface-soft); border-left: 3px solid var(--border-strong); padding: 0.5rem 1rem; margin: 0.8rem 0; font-style: italic; color: var(--text-muted); }
+  .forward-ch .my-addition { background: #fff7d6; border-left: 4px solid #b8860b; padding: 0.7rem 1rem; margin: 1rem 0; border-radius: 0 6px 6px 0; }
+  .forward-ch pre { background: #1f1f1f; color: #f6f4ee; padding: 1rem; border-radius: 6px; font-size: 0.86rem; line-height: 1.55; overflow-x: auto; }
+  .forward-ch code:not(pre code) { background: var(--surface-soft); padding: 0.1rem 0.35rem; border-radius: 3px; font-size: 0.9em; }
+  .forward-ch h2 { border-bottom: 1px solid var(--border); padding-bottom: 0.3rem; margin-top: 2.4rem; }
+  .forward-ch h3 { color: var(--module-accent); margin-top: 1.6rem; }
+  .forward-ch .deriv-step { margin: 0.8rem 0; padding: 0.6rem 0.8rem; background: var(--surface-soft); border-radius: 4px; }
+  .forward-ch .deriv-step strong { color: var(--module-accent); }
+  @keyframes noise-fade {
+    0%   { opacity: 0.05; }
+    50%  { opacity: 0.85; }
+    100% { opacity: 0.05; }
+  }
+  .forward-ch .noise-layer { animation: noise-fade 5s ease-in-out infinite; }
+</style>
+
+<article class="forward-ch">
+
+<h1>4. 前向扩散：把数据慢慢推向噪声</h1>
+
+<p style="font-size:0.95rem; color:var(--text-muted);">主源：Vizuara《Principles of Diffusion Models》Lecture 3（讲师 Dr. Raj Dandekar，<a href="https://www.youtube.com/watch?v=Dx-1agEjlJs">YouTube</a>，从 VAE 过渡到 DDPM 的关键一讲）；副源：CMU 10-799 S26 Lecture 2（讲师 Yilun Du，<a href="https://www.youtube.com/watch?v=H-RbhdiWzto">YouTube</a>）；Vizuara《Diffusion Models for Image Generation》Lecture 4（噪声-去噪范式）。</p>
+
+<div class="tldr">
+  <h2>📌 TL;DR</h2>
+  <p><strong>前向扩散 = 在你的真实图像 $x_0$ 上，分 $T$ 步、每一步加一点点高斯噪声，最终把它变成纯噪声 $x_T \sim \mathcal{N}(0, I)$。</strong>这是一条<em>固定的、不需要训练</em>的马尔可夫链，是 DDPM 唯一"事先写死"的部分。</p>
+  <p>单步定义：</p>
+  $$x_t = \sqrt{\alpha_t}\, x_{t-1} + \sqrt{1-\alpha_t}\, \epsilon, \qquad \epsilon \sim \mathcal{N}(0, I)$$
+  <p>这条链有一个<strong>魔术性质</strong>——你不需要真的跑 $t$ 步，可以从 $x_0$ <em>一跳到底</em>，跳到任意 $t$：</p>
+  $$\boxed{x_t = \sqrt{\bar\alpha_t}\, x_0 + \sqrt{1-\bar\alpha_t}\, \epsilon, \qquad \bar\alpha_t = \prod_{s=1}^t \alpha_s}$$
+  <p>记号约定：DDPM 原论文用 $\beta_t \in (0, 1)$ 作为<em>本步噪声强度</em>，$\alpha_t = 1 - \beta_t$，$\bar\alpha_t = \prod_{s\le t}\alpha_s$ 是<em>累计信号留存率</em>。当 $T = 1000$、$\beta_t$ 从 $10^{-4}$ 线性涨到 $0.02$ 时，$\bar\alpha_T \approx 4 \times 10^{-5}$，所以 $x_T$ 基本就是纯噪声，<em>跟 $x_0$ 长什么样几乎无关</em>。</p>
+  <p><strong>为什么本章这样开篇？</strong>因为整个 DDPM 训练只做一件事——<em>反向解构这条前向链</em>。如果你不熟前向链的每一个齿轮（$\alpha_t / \beta_t / \bar\alpha_t$ 的关系、闭式跳跃公式、$x_T \to \mathcal{N}(0, I)$ 的极限），后面看反向过程时所有的损失公式都会像"突然冒出来的天书"。</p>
+</div>
+
+<h2>一、为什么开篇要先讲「加噪」，而不是先讲「去噪」？</h2>
+
+<p>这一章的标题听起来怪——明明 diffusion model 的目的是<strong>生成图像</strong>（去噪），为什么我们花一整章讲<strong>怎么把图像毁掉</strong>（加噪）？</p>
+
+<p>Dr. Raj 在 Lecture 3 开头给出了非常清晰的动机（chunk #663-#665，paraphrase）：DDPM 论文（Ho et al., 2020，<em>"Denoising Diffusion Probabilistic Models"</em>）之所以能引爆图像生成革命，就是因为它"把这件事拆成了一组<em>极其简单</em>的步骤"——而这组步骤的<strong>第一块砖</strong>就是前向过程。</p>
+
+<div class="callout-quote">
+讲师原话（paraphrased from chunk #664）：「这篇论文有 30,000+ 次引用，它的美在于<em>提出了一套实用的、研究者可以照着实现的 recipe</em>。在它之前，diffusion 模型存在，但没人证明它能生成真实图像。」
+</div>
+
+<p>逻辑顺序是这样的：</p>
+
+<ol>
+  <li><strong>前向过程（forward / diffusion / noising）</strong> — 一条<em>固定的、无参数的</em>马尔可夫链，把数据推向噪声。本章的全部内容。</li>
+  <li><strong>反向过程（reverse / denoising）</strong> — 一个<em>需要训练的神经网络</em>，学着把噪声推回数据。第 5–7 章。</li>
+  <li><strong>训练目标</strong> — 让反向链尽量像前向链的<em>真实反演</em>。第 8 章。</li>
+</ol>
+
+<p>所以："先讲前向"不是<em>顺序问题</em>，是<em>结构问题</em>——反向过程在结构上完全依赖前向链给出的"路标"。先把前向链刻好，反向链才有目标可以瞄。</p>
+
+<div class="callout callout-tip">
+💡 <strong>讲师埋下的伏笔</strong>：第 7 章会看到，反向过程的"训练目标"几乎就是<em>预测前向链每一步加上去的那个 $\epsilon$</em>。也就是说，<strong>前向链定义了什么</strong>——反向网络就<strong>被迫学什么</strong>。这一章的所有符号，下一章会原封不动复用。
+</div>
+
+<h2>二、Vizuara 的范式锚点：「从噪声游走到数据流形」</h2>
+
+<p>Vizuara 在 Diffusion 课的另一讲（chunk #37, Lecture 4）给了一个非常具象的画面，帮你建立"为什么这个过程合理"的直觉：</p>
+
+<div class="callout-quote">
+"假设我们要生成熊猫或熊的图像，这些图像<em>住在概率分布的某一片区域</em>。Diffusion model 的工作方式是：<strong>从纯噪声开始</strong>——在概率分布空间的某个随机位置——然后<em>一步步走向数据真正聚集的那片区域</em>。"
+</div>
+
+<p>这就是 diffusion 的核心隐喻：</p>
+
+<ul>
+  <li>把所有可能的图像看成一个高维空间（28×28 灰度图 = 784 维）；</li>
+  <li>真实图像（熊猫、数字 7、人脸）<em>聚集在</em>这个空间里一片<strong>非常薄、非常稀疏</strong>的"流形"上；</li>
+  <li>纯高斯噪声 $\mathcal{N}(0, I)$ 散布在<strong>整个空间</strong>里，几乎不沾流形；</li>
+  <li><strong>前向过程</strong> = 从流形上的一点 $x_0$，顺着一条<em>逐渐离开流形</em>的轨迹走到 $x_T$（纯噪声）；</li>
+  <li><strong>反向过程</strong> = 学着<em>从噪声沿着相反的轨迹回到流形</em>。</li>
+</ul>
+
+<p>关键观察：<strong>一旦我们能<em>构造</em>从流形走到噪声的轨迹，就<em>规定</em>了从噪声走回流形的目标</strong>——后者是个学习问题，但前者完全是我们设计的。</p>
+
+<p>这里有一个常被忽略的微妙之处：为什么我们要<em>主动</em>把数据推离流形？因为<strong>真实的图像流形太薄了</strong>。如果你试图直接学一个 $\mathcal{N}(0, I) \to \text{图像}$ 的映射（这就是 GAN 的思路），训练时大部分噪声样本根本"不知道该往哪走"——它们离任何真实图像都太远，梯度信号极弱。Diffusion 巧妙地<em>把这个超远距离切成 1000 个小段</em>，每一段都只需要去噪一点点。这就是"分而治之"的力量。</p>
+
+<svg viewBox="0 0 640 220" role="img" aria-label="数据流形 vs 噪声空间">
+  <g font-family="ui-sans-serif" font-size="11">
+    <rect x="0" y="0" width="640" height="220" fill="#fafbfc" rx="6"/>
+    <text x="320" y="20" text-anchor="middle" font-weight="600" font-size="13">前向扩散 = 从数据流形「漂移」到噪声海洋</text>
+
+    <!-- Data manifold (thin curve) -->
+    <path d="M 60 130 Q 140 100, 200 130 T 320 150 T 460 130 T 580 140"
+          fill="none" stroke="#0b5" stroke-width="3" opacity="0.6"/>
+    <text x="100" y="105" fill="#0b5" font-size="11" font-weight="600">数据流形 (薄、稀疏)</text>
+
+    <!-- Noise cloud (full plane) -->
+    <ellipse cx="320" cy="120" rx="280" ry="80" fill="#6f4dd0" opacity="0.06"/>
+    <text x="520" y="195" fill="#6f4dd0" font-size="11" font-weight="600">高斯噪声海洋</text>
+
+    <!-- Trajectory dots, x_0 -> x_T -->
+    <circle cx="120" cy="125" r="6" fill="#d4a017"/>
+    <text x="120" y="115" text-anchor="middle" font-size="10">x_0</text>
+    <circle cx="180" cy="130" r="5" fill="#d4a017" opacity="0.85"/>
+    <text x="180" y="118" text-anchor="middle" font-size="10">x_1</text>
+    <circle cx="250" cy="120" r="5" fill="#d4a017" opacity="0.7"/>
+    <text x="250" y="108" text-anchor="middle" font-size="10">x_2</text>
+    <circle cx="330" cy="105" r="5" fill="#d4a017" opacity="0.55"/>
+    <text x="330" y="95" text-anchor="middle" font-size="10">x_t</text>
+    <circle cx="430" cy="80" r="5" fill="#d4a017" opacity="0.35" class="noise-layer"/>
+    <text x="430" y="70" text-anchor="middle" font-size="10">…</text>
+    <circle cx="530" cy="60" r="6" fill="#d4a017" opacity="0.2" class="noise-layer"/>
+    <text x="530" y="50" text-anchor="middle" font-size="10">x_T ~ N(0, I)</text>
+
+    <!-- Arrows -->
+    <path d="M 130 125 L 175 130" stroke="#d4a017" stroke-width="1" marker-end="url(#arr)"/>
+    <path d="M 190 130 L 245 122" stroke="#d4a017" stroke-width="1" marker-end="url(#arr)"/>
+    <path d="M 260 119 L 325 108" stroke="#d4a017" stroke-width="1" marker-end="url(#arr)"/>
+    <path d="M 340 103 L 425 82" stroke="#d4a017" stroke-width="1" marker-end="url(#arr)"/>
+    <path d="M 440 78 L 525 62" stroke="#d4a017" stroke-width="1" marker-end="url(#arr)"/>
+
+    <defs>
+      <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+        <path d="M 0 0 L 10 5 L 0 10 z" fill="#d4a017"/>
+      </marker>
+    </defs>
+  </g>
+</svg>
+
+<h2>三、和上一章 VAE 的对照：DDPM 是「时间展开版 VAE」</h2>
+
+<p>Dr. Raj 在 Lecture 3 几乎花了一半时间在 recap VAE（chunk #648–#663），不是为了凑时间，而是为了让你看清：<strong>DDPM 不是另一种东西，它就是把 VAE 的"1 步压缩"换成了"$T$ 步逐渐加噪"</strong>。</p>
+
+<p>把两者的"潜变量序列"画到一起：</p>
+
+<table style="width:100%; border-collapse:collapse; margin:1rem 0;">
+  <thead>
+    <tr style="background:var(--surface-soft);">
+      <th style="text-align:left; padding:0.4rem 0.7rem; border-bottom:1px solid var(--border);">维度</th>
+      <th style="text-align:left; padding:0.4rem 0.7rem; border-bottom:1px solid var(--border);">VAE</th>
+      <th style="text-align:left; padding:0.4rem 0.7rem; border-bottom:1px solid var(--border);">DDPM</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr><td style="padding:0.4rem 0.7rem;">潜变量层数</td><td>1（单个 $z$）</td><td>$T$（通常 1000）</td></tr>
+    <tr><td style="padding:0.4rem 0.7rem;">encoder 是否学</td><td>学（$q_\phi(z\mid x)$）</td><td><strong>不学</strong>，固定为加噪过程 $q(x_t\mid x_{t-1})$</td></tr>
+    <tr><td style="padding:0.4rem 0.7rem;">decoder 是否学</td><td>学（$p_\theta(x\mid z)$）</td><td>学（$p_\theta(x_{t-1}\mid x_t)$）</td></tr>
+    <tr><td style="padding:0.4rem 0.7rem;">先验</td><td>$\mathcal{N}(0, I)$</td><td>$\mathcal{N}(0, I)$（$x_T$ 的极限分布）</td></tr>
+    <tr><td style="padding:0.4rem 0.7rem;">维度</td><td>低维 latent</td><td><strong>同维潜变量</strong>（$x_t$ 和 $x_0$ 同 shape）</td></tr>
+  </tbody>
+</table>
+
+<div class="callout callout-note">
+🧭 <strong>关键差别一：encoder 不需要学</strong>。VAE 里我们要训练 encoder 去找 $q_\phi(z\mid x)$，DDPM 里 encoder 就是<em>一锤定音的加噪规则</em>——所有人共享同一份"打码方式"。这<strong>砍掉了一半的训练负担</strong>，也消除了 VAE "两个网络联训不稳定"的著名痛点（讲师在 chunk #663 提到："VAE 把 reconstruction loss 和 regularization loss 绑在两个不同的网络上，实践中很麻烦"）。
+</div>
+
+<div class="callout callout-note">
+🧭 <strong>关键差别二：潜变量保留原始维度</strong>。VAE 把 784 维压成 2 维（信息瓶颈，所以输出糊），DDPM 的每个 $x_t$ 仍是 784 维。<em>信息没被压瓶颈强行扔掉，而是被噪声"涂抹掉"</em>。这也解释了为什么 DDPM 的生成质量碾压 VAE——没有 VAE 那种"瓶颈过窄导致模糊"的根本限制（讲师在 chunk #662 反复批评 VAE "produces blurry outputs"）。
+</div>
+
+<h2>四、单步加噪：$q(x_t \mid x_{t-1})$ 长什么样</h2>
+
+<p>正式定义（DDPM 原论文 Eq. 2）：</p>
+
+$$q(x_t \mid x_{t-1}) = \mathcal{N}\!\big(x_t;\ \sqrt{1-\beta_t}\, x_{t-1},\ \beta_t I\big)$$
+
+<p>等价的"采样形式"——后面所有推导都基于这一行：</p>
+
+$$\boxed{x_t = \sqrt{1-\beta_t}\, x_{t-1} + \sqrt{\beta_t}\, \epsilon_t, \qquad \epsilon_t \sim \mathcal{N}(0, I)}$$
+
+<p>把它<em>每一项</em>拆开看：</p>
+
+<ul>
+  <li><strong>$\beta_t \in (0, 1)$</strong>：第 $t$ 步加多少噪声。这是<em>一个固定的、提前定好的小数</em>，不是网络参数。叫做 <strong>variance schedule</strong>（方差时间表）。第 5 章会专门讲怎么选；这里只要知道它是<em>小的</em>（典型从 $10^{-4}$ 到 $0.02$）。</li>
+  <li><strong>$\sqrt{1-\beta_t}\,x_{t-1}$</strong>：把上一步的图像<em>稍微缩小一点点</em>。如果 $\beta_t = 0.01$，那 $\sqrt{0.99} \approx 0.995$——你看到的图像几乎没变化。</li>
+  <li><strong>$\sqrt{\beta_t}\,\epsilon_t$</strong>：在这张稍微变暗的图像上<em>泼一勺高斯噪声</em>，泼的量也是 $\sqrt{\beta_t} \approx 0.1$ 这种小尺度。</li>
+</ul>
+
+<p>用一个数字感受一下：取 $\beta_t = 0.01$，假设你某个像素 $x_{t-1} = 0.6$，且抽到 $\epsilon_t = 1.5$，那：</p>
+
+$$x_t = \sqrt{0.99}\cdot 0.6 + \sqrt{0.01}\cdot 1.5 = 0.597 + 0.15 = 0.747$$
+
+<p>这一步的变化是 $+0.147$——肉眼几乎看不出来。但是<strong>累计 1000 步</strong>，就足够把任何信号洗成纯噪声。</p>
+
+<div class="my-addition">
+🟡 <strong>教材外补充：为什么是 $\sqrt{1-\beta_t}$ 而不是 $1 - \beta_t$ 或 $1$？</strong><br>
+这是个非常容易看漏的细节。这个系数选成<em>$\sqrt{1-\beta_t}$（而不是 1）</em>有一个目的：<strong>保方差</strong>。如果 $x_{t-1}$ 的方差是 1，那：
+$$\mathrm{Var}(x_t) = (1-\beta_t)\cdot\mathrm{Var}(x_{t-1}) + \beta_t = (1-\beta_t)\cdot 1 + \beta_t = 1$$
+不管走多少步，方差始终是 1。这叫做 <strong>variance-preserving (VP) SDE</strong>。Yang Song 2021 的另一种公式 <em>variance-exploding (VE)</em> 让方差爆炸增长——两种 schedule 等价但工程含义不同。DDPM 选 VP 是为了让 $x_t$ 的数值范围一直可控、可输入网络。
+</div>
+
+<h2>五、为什么偏偏选高斯噪声？</h2>
+
+<p>这是讲师在 VAE 那章就<em>埋下的伏笔</em>（chunk #656-#657）：</p>
+
+<div class="callout-quote">
+"我的直觉是，每一个驱动数据变化的<em>隐藏因素</em>，本身都服从高斯分布。看你们班同学的字迹整洁度——少数人字非常工整，少数人字非常潦草，<strong>大多数人都在平均值附近</strong>。这是一个高斯。我们看到的真实分布里，大多数 hidden factor 都是这样。"
+</div>
+
+<p>但这只是直觉的一半。为什么 DDPM 把<em>加噪</em>也选成高斯？三个硬核原因：</p>
+
+<h3>5.1 中心极限定理（CLT）的味道</h3>
+
+<p>不管单步噪声是什么分布，<strong>累计很多步后的总噪声会逼近高斯</strong>（这是 CLT）。既然终点必然像高斯，<em>那干脆每一步都用高斯</em>——既符合极限直觉，又让中间步骤都易于分析。</p>
+
+<h3>5.2 重参数化的可微采样</h3>
+
+<p>高斯是<em>唯一</em>能写成 $\mu + \sigma\cdot\epsilon$ 形式的常用分布（$\epsilon \sim \mathcal{N}(0, I)$）。第 2 章我们讲过<strong>重参数化技巧</strong>——把随机性挤到一个和参数无关的 $\epsilon$ 里，让梯度能流过采样操作。DDPM 训练时，反向过程需要从一个高斯分布采样、且要反传——所以前向也必须是高斯。</p>
+
+<h3>5.3 高斯的"代数封闭性"——本章的核心魔术</h3>
+
+<p>下面这一行是<em>整个 DDPM 数学体系的钥匙</em>，请背下来：</p>
+
+<div class="callout callout-tip">
+💡 <strong>两个独立高斯的和还是高斯</strong>：若 $X \sim \mathcal{N}(\mu_1, \sigma_1^2)$、$Y \sim \mathcal{N}(\mu_2, \sigma_2^2)$、且 $X \perp Y$，则
+$$X + Y \sim \mathcal{N}(\mu_1 + \mu_2,\ \sigma_1^2 + \sigma_2^2)$$
+方差是<em>相加</em>的，不是平均也不是相乘。这条性质让我们能把 $t$ 步加噪压缩成 1 行公式——这就是下一节要推的"闭式跳跃"。
+</div>
+
+<p>如果前向噪声不是高斯（比如均匀分布、Laplace 分布），这条性质都不成立——你就不能写出闭式形式 $x_t = f(x_0, \epsilon)$，整个训练效率会暴跌。<strong>高斯不是哲学选择，是数学便宜的选择。</strong></p>
+
+<h3>5.4 一个反直觉的强调</h3>
+
+<p>请注意上面 5.1 和 5.3 在<em>不同的层级</em>说话：</p>
+
+<ul>
+  <li>5.1 是<strong>分布选择的合理性</strong>：CLT 告诉我们"反正终点是高斯"，所以中间用高斯不亏；</li>
+  <li>5.3 是<strong>计算上的便利</strong>：高斯之和还是高斯，所以中间步可以<em>合并</em>而非<em>叠加</em>。</li>
+</ul>
+
+<p>这两点合起来就解释了一个有趣的现象：理论上你可以用<em>任意分布</em>设计前向链（确实有"非高斯 diffusion"的工作，如离散 D3PM、泊松 diffusion），但<strong>工程上没人这么做</strong>，因为一旦放弃高斯，你就要重新设计训练循环、放弃闭式跳跃、面对采样方差爆炸。<em>"用高斯"是 80% 的工程红利来源。</em></p>
+
+<h2>六、闭式跳跃：从 $x_0$ 一步到 $x_t$（本章数学之心）</h2>
+
+<p>到这里我们有了单步公式 $x_t = \sqrt{\alpha_t}\,x_{t-1} + \sqrt{1-\alpha_t}\,\epsilon_t$（用 $\alpha_t = 1-\beta_t$ 让写起来更干净）。问题：</p>
+
+<blockquote>训练时我们要随机选一个 $t \in \{1, \dots, 1000\}$ 算 loss。难道每次都要从 $x_0$ 真跑 1000 步加噪、积累 1000 个 $\epsilon$ 才能得到 $x_{1000}$？那训练速度会慢到没法用。</blockquote>
+
+<p><strong>答案：不需要。</strong>因为"两个独立高斯的和还是高斯"，我们能把 $t$ 步加噪<em>压缩成一行</em>——这是 DDPM 训练高效的根本原因。下面是<strong>逐步推导</strong>，每一步都给"Why"。</p>
+
+<div class="deriv-step">
+<strong>步骤 1：写出 $x_1$</strong>
+$$x_1 = \sqrt{\alpha_1}\,x_0 + \sqrt{1-\alpha_1}\,\epsilon_1$$
+<em>Why</em>：直接用定义。$\epsilon_1 \sim \mathcal{N}(0, I)$。
+</div>
+
+<div class="deriv-step">
+<strong>步骤 2：写出 $x_2$</strong>
+$$x_2 = \sqrt{\alpha_2}\,x_1 + \sqrt{1-\alpha_2}\,\epsilon_2$$
+把 $x_1$ 代入：
+$$x_2 = \sqrt{\alpha_2}\Big(\sqrt{\alpha_1}\,x_0 + \sqrt{1-\alpha_1}\,\epsilon_1\Big) + \sqrt{1-\alpha_2}\,\epsilon_2$$
+$$= \sqrt{\alpha_1\alpha_2}\,x_0 + \sqrt{\alpha_2(1-\alpha_1)}\,\epsilon_1 + \sqrt{1-\alpha_2}\,\epsilon_2$$
+<em>Why</em>：纯代数展开。注意 $x_0$ 系数已经出现 $\alpha_1\alpha_2$ 的<em>累乘</em>结构。
+</div>
+
+<div class="deriv-step">
+<strong>步骤 3：合并两个独立高斯（关键的一步！）</strong>
+$\epsilon_1$ 和 $\epsilon_2$ 是<em>独立的</em>标准高斯。所以
+$$\sqrt{\alpha_2(1-\alpha_1)}\,\epsilon_1 + \sqrt{1-\alpha_2}\,\epsilon_2 \sim \mathcal{N}\!\big(0,\ \alpha_2(1-\alpha_1) + (1-\alpha_2)\big)$$
+计算方差：
+$$\alpha_2(1-\alpha_1) + (1-\alpha_2) = \alpha_2 - \alpha_1\alpha_2 + 1 - \alpha_2 = 1 - \alpha_1\alpha_2$$
+所以这两个噪声项的和可以写成 <strong>一个</strong> 标准高斯乘上 $\sqrt{1-\alpha_1\alpha_2}$：
+$$x_2 = \sqrt{\alpha_1\alpha_2}\,x_0 + \sqrt{1-\alpha_1\alpha_2}\,\bar\epsilon, \quad \bar\epsilon \sim \mathcal{N}(0, I)$$
+<em>Why</em>：用"独立高斯之和方差相加"。<strong>这一步是整章魔法的来源</strong>——两步噪声合成一步噪声，没有信息损失。
+</div>
+
+<div class="deriv-step">
+<strong>步骤 4：归纳到任意 $t$</strong>
+定义累积积：
+$$\bar\alpha_t = \prod_{s=1}^t \alpha_s = \alpha_1 \alpha_2 \cdots \alpha_t$$
+重复步骤 3 的合并 $t$ 次，我们得到：
+$$\boxed{x_t = \sqrt{\bar\alpha_t}\, x_0 + \sqrt{1-\bar\alpha_t}\,\epsilon, \qquad \epsilon \sim \mathcal{N}(0, I)}$$
+等价地：
+$$q(x_t \mid x_0) = \mathcal{N}\!\big(x_t;\ \sqrt{\bar\alpha_t}\,x_0,\ (1-\bar\alpha_t) I\big)$$
+<em>Why</em>：归纳。把任何 $t$ 步加噪折叠成"一个 $x_0$ 项 + 一个 $\bar\epsilon$ 项"。
+</div>
+
+<div class="callout callout-tip">
+💡 <strong>这一行的工程意义</strong>：训练 DDPM 时，每个 batch 我们：(1) 随机抽一个真实图 $x_0$；(2) 均匀抽一个 $t \sim \mathrm{Uniform}\{1, \dots, T\}$；(3) 抽一个 $\epsilon \sim \mathcal{N}(0, I)$；(4) <strong>直接用上面这一行算出 $x_t$</strong>，不跑任何 for 循环。这就是 DDPM 训练能在<em>合理时间内</em>跑完的关键。
+</div>
+
+<svg viewBox="0 0 640 280" role="img" aria-label="闭式跳跃示意">
+  <g font-family="ui-sans-serif" font-size="11">
+    <rect x="0" y="0" width="640" height="280" fill="#fafbfc" rx="6"/>
+    <text x="320" y="22" text-anchor="middle" font-weight="600" font-size="13">朴素链式（上）vs 闭式跳跃（下）</text>
+
+    <!-- top: chain -->
+    <g transform="translate(20, 50)">
+      <rect x="0" y="0" width="60" height="40" fill="#0b5" opacity="0.2" stroke="#0b5"/>
+      <text x="30" y="25" text-anchor="middle">x_0</text>
+      <path d="M 60 20 L 95 20" stroke="#666" marker-end="url(#arr2)"/>
+      <text x="78" y="14" font-size="9" text-anchor="middle">+ε_1</text>
+
+      <rect x="95" y="0" width="60" height="40" fill="#0b5" opacity="0.15" stroke="#0b5"/>
+      <text x="125" y="25" text-anchor="middle">x_1</text>
+      <path d="M 155 20 L 190 20" stroke="#666" marker-end="url(#arr2)"/>
+      <text x="173" y="14" font-size="9" text-anchor="middle">+ε_2</text>
+
+      <rect x="190" y="0" width="60" height="40" fill="#0b5" opacity="0.10" stroke="#0b5"/>
+      <text x="220" y="25" text-anchor="middle">x_2</text>
+      <text x="280" y="25" text-anchor="middle">⋯</text>
+      <path d="M 305 20 L 340 20" stroke="#666" marker-end="url(#arr2)"/>
+      <text x="323" y="14" font-size="9" text-anchor="middle">+ε_t</text>
+
+      <rect x="340" y="0" width="60" height="40" fill="#6f4dd0" opacity="0.2" stroke="#6f4dd0"/>
+      <text x="370" y="25" text-anchor="middle">x_t</text>
+
+      <text x="500" y="25" fill="#d33" font-size="11">代价：$t$ 次采样</text>
+    </g>
+
+    <!-- bottom: closed form -->
+    <g transform="translate(20, 160)">
+      <rect x="0" y="0" width="60" height="40" fill="#0b5" opacity="0.2" stroke="#0b5"/>
+      <text x="30" y="25" text-anchor="middle">x_0</text>
+      <path d="M 60 20 Q 200 -20, 340 20" fill="none" stroke="#d4a017" stroke-width="2" marker-end="url(#arr2)"/>
+      <text x="200" y="-10" text-anchor="middle" fill="#d4a017" font-weight="600" font-size="11">
+        x_t = √ᾱₜ · x_0 + √(1-ᾱₜ) · ε
+      </text>
+      <rect x="340" y="0" width="60" height="40" fill="#6f4dd0" opacity="0.2" stroke="#6f4dd0"/>
+      <text x="370" y="25" text-anchor="middle">x_t</text>
+
+      <text x="500" y="25" fill="#0b5" font-size="11">代价：1 次采样</text>
+    </g>
+
+    <defs>
+      <marker id="arr2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+        <path d="M 0 0 L 10 5 L 0 10 z" fill="#666"/>
+      </marker>
+    </defs>
+  </g>
+</svg>
+
+<h2>七、信号与噪声的预算：$\sqrt{\bar\alpha_t}$ 与 $\sqrt{1-\bar\alpha_t}$ 的几何</h2>
+
+<p>盯住闭式公式：</p>
+
+$$x_t = \underbrace{\sqrt{\bar\alpha_t}}_{\text{信号系数}}\cdot x_0 + \underbrace{\sqrt{1-\bar\alpha_t}}_{\text{噪声系数}}\cdot \epsilon$$
+
+<p>这两个系数加起来不是 1，<strong>但它们的<em>平方</em>加起来是 1</strong>：</p>
+
+$$(\sqrt{\bar\alpha_t})^2 + (\sqrt{1-\bar\alpha_t})^2 = \bar\alpha_t + (1-\bar\alpha_t) = 1$$
+
+<p>所以你可以把 $(\sqrt{\bar\alpha_t}, \sqrt{1-\bar\alpha_t})$ 想成<strong>单位圆上的一个点</strong>——$t$ 从 0 走到 $T$，这个点从 $(1, 0)$ 慢慢转到 $(0, 1)$。"信号预算"逐步交给"噪声预算"。</p>
+
+<p>用一张图刻画整个 schedule：</p>
+
+<svg viewBox="0 0 640 260" role="img" aria-label="信号噪声 schedule">
+  <g font-family="ui-sans-serif" font-size="11">
+    <rect x="0" y="0" width="640" height="260" fill="#fafbfc" rx="6"/>
+    <text x="320" y="22" text-anchor="middle" font-weight="600" font-size="13">信号 √ᾱₜ vs 噪声 √(1-ᾱₜ) 随 t 演化（T=1000, linear β）</text>
+
+    <!-- axes -->
+    <line x1="60" y1="220" x2="600" y2="220" stroke="#333"/>
+    <line x1="60" y1="220" x2="60" y2="50" stroke="#333"/>
+    <text x="40" y="55" font-size="10">1.0</text>
+    <text x="40" y="225" font-size="10">0.0</text>
+    <text x="60" y="240" text-anchor="middle" font-size="10">t=0</text>
+    <text x="330" y="240" text-anchor="middle" font-size="10">t=500</text>
+    <text x="600" y="240" text-anchor="middle" font-size="10">t=1000</text>
+
+    <!-- signal curve sqrt(alphabar) - starts at 1, smoothly decays to ~0 -->
+    <path d="M 60 50 Q 200 55, 330 130 T 600 218" fill="none" stroke="#0b5" stroke-width="2.5"/>
+    <text x="180" y="78" fill="#0b5" font-weight="600">√ᾱₜ (信号留存)</text>
+
+    <!-- noise curve sqrt(1 - alphabar) - mirror -->
+    <path d="M 60 218 Q 200 215, 330 140 T 600 50" fill="none" stroke="#6f4dd0" stroke-width="2.5"/>
+    <text x="450" y="78" fill="#6f4dd0" font-weight="600">√(1-ᾱₜ) (噪声占比)</text>
+
+    <!-- crossover -->
+    <circle cx="330" cy="135" r="4" fill="#d4a017"/>
+    <text x="345" y="135" font-size="10" fill="#d4a017">≈ t=500 是分水岭</text>
+
+    <!-- vertical guide at T -->
+    <line x1="600" y1="50" x2="600" y2="220" stroke="#aaa" stroke-dasharray="3,3"/>
+  </g>
+</svg>
+
+<p>读这张图：</p>
+
+<ul>
+  <li><strong>$t = 0$</strong>：$\sqrt{\bar\alpha_0} = 1$、$\sqrt{1-\bar\alpha_0} = 0$ → $x_0$ 就是原图。</li>
+  <li><strong>$t \approx 500$</strong>：两条线交叉。信号和噪声<em>各占一半</em>。这是直觉上"半残图"——能看出轮廓，但细节已经被啃光。</li>
+  <li><strong>$t = T = 1000$</strong>：$\sqrt{\bar\alpha_T} \approx 0.006$、$\sqrt{1-\bar\alpha_T} \approx 0.9999$ → $x_T$ 几乎纯噪声。</li>
+</ul>
+
+<div class="callout callout-info">
+ℹ️ <strong>"分水岭"对训练的隐含意义</strong>：第 7 章会看到，反向网络在不同 $t$ 上"难度"很不一样——<em>$t$ 接近 0 时</em>主要在做细节填充（hard）；<em>$t$ 接近 $T$ 时</em>主要在做粗结构生成（easier）。所以有的工作（如 Karras 2022 的 EDM）会<strong>对不同 $t$ 做加权采样</strong>而非均匀采样。这是后话，但根源在这条曲线。
+</div>
+
+<h2>八、极限性质：$T \to \infty$ 时 $x_T$ 收敛到什么？</h2>
+
+<p>看闭式公式 $x_t = \sqrt{\bar\alpha_t}\,x_0 + \sqrt{1-\bar\alpha_t}\,\epsilon$，问：</p>
+
+<blockquote>当 $t$ 足够大、$\bar\alpha_t \to 0$ 时，$x_t$ 服从什么分布？</blockquote>
+
+<div class="deriv-step">
+<strong>极限分析</strong>：当 $\bar\alpha_t \to 0$，
+$$\sqrt{\bar\alpha_t}\,x_0 \to 0, \qquad \sqrt{1-\bar\alpha_t}\,\epsilon \to \epsilon$$
+所以
+$$x_t \xrightarrow{t \to \infty} \epsilon \sim \mathcal{N}(0, I)$$
+<em>Why</em>：累积积 $\bar\alpha_t = \prod_s(1-\beta_s)$ 是一串小于 1 的数连乘，会指数衰减到 0。一旦信号系数归零，$x_t$ 就完全由噪声决定。<br>
+<em>关键</em>：<strong>这个极限和 $x_0$ 无关</strong>。无论你起点是熊猫照片、人脸还是 MNIST 数字 7，$T$ 步后都是同一个 $\mathcal{N}(0, I)$。
+</div>
+
+<p>这个性质<strong>极其重要</strong>：它意味着 DDPM 生成时，可以<em>不知道目标是什么</em>，直接从 $\mathcal{N}(0, I)$ 抽一个噪声向量当起点。<em>所有的语义都来自反向网络的逐步去噪</em>。</p>
+
+<div class="callout callout-warning">
+⚠️ <strong>"和 $x_0$ 无关"是一个理想极限</strong>。实际 $T = 1000$ 时 $\bar\alpha_T \approx 4 \times 10^{-5}$，所以 $\sqrt{\bar\alpha_T}\cdot x_0 \approx 0.006\cdot x_0$——有一丝丝原图的痕迹残留在 $x_T$ 里。后续会看到，DDPM 的反向起点假定 $x_T \sim \mathcal{N}(0, I)$（忽略这一丝残留）—— 这是 schedule 设计要保证的"数值上够远"的要求。第 5 章 cosine schedule 就是为了让这个残留<em>更小</em>。
+</div>
+
+<h2>九、$\beta_t$ schedule 预览（详见下一章）</h2>
+
+<p>下一章会专门讲 schedule，这里先<strong>建立直觉</strong>。三种主流选择：</p>
+
+<ul>
+  <li><strong>线性 schedule（DDPM 原论文）</strong>：$\beta_t$ 在 $[10^{-4}, 0.02]$ 之间线性插值。简单粗暴，能用。</li>
+  <li><strong>余弦 schedule（Improved DDPM，Nichol & Dhariwal 2021）</strong>：让 $\bar\alpha_t = \cos^2\!\left(\frac{t/T + s}{1 + s}\cdot\frac{\pi}{2}\right)$，其中 $s = 0.008$ 是一个小偏移。优点：在 $t$ 接近 0 时变化更平缓，避免一上来就把信号砸碎太多。</li>
+  <li><strong>Sigmoid / 可学习 schedule</strong>：更晚的工作，作为超参或者通过 KL 最小化学出来。</li>
+</ul>
+
+<p>三种 schedule 共享的<strong>不变约束</strong>：</p>
+
+<ol>
+  <li>$\beta_t \in (0, 1)$ 单调递增（噪声逐步加强）；</li>
+  <li>$\bar\alpha_T$ 要足够小（让 $x_T$ 充分接近 $\mathcal{N}(0, I)$）；</li>
+  <li>$\bar\alpha_0 = 1$（起点完全没噪声）。</li>
+</ol>
+
+<div class="my-addition">
+🟡 <strong>教材外补充：余弦的 $s = 0.008$ 是什么？</strong><br>
+Nichol & Dhariwal 论文里这个小偏移有具体目的：<em>避免 $t=0$ 附近 $\bar\alpha_t$ 离 1 太近导致网络看不到任何噪声</em>。$s$ 越大、起点的"轻噪声段"越平滑，但太大会让早期信号留存太多。0.008 是论文实验出来的甜点值——对 $T = 1000$ 大致最优。一般实现可以照抄不改。
+</div>
+
+<h2>九点五、一个具体的数值演练（建立物理直觉）</h2>
+
+<p>纯抽象公式不够；让我们手算一遍，看看噪声怎么"一步步吃掉"信号。</p>
+
+<p>设 $T = 1000$、线性 schedule：$\beta_t$ 在 $[10^{-4}, 0.02]$ 之间线性插值。对应的 $\bar\alpha_t$ 用 <code>numpy.cumprod(1 - betas)</code> 算出来：</p>
+
+<table style="width:100%; border-collapse:collapse; margin:1rem 0; font-size:0.92rem;">
+  <thead>
+    <tr style="background:var(--surface-soft);">
+      <th style="text-align:left; padding:0.4rem 0.7rem; border-bottom:1px solid var(--border);">$t$</th>
+      <th style="text-align:left; padding:0.4rem 0.7rem; border-bottom:1px solid var(--border);">$\beta_t$</th>
+      <th style="text-align:left; padding:0.4rem 0.7rem; border-bottom:1px solid var(--border);">$\bar\alpha_t$</th>
+      <th style="text-align:left; padding:0.4rem 0.7rem; border-bottom:1px solid var(--border);">$\sqrt{\bar\alpha_t}$</th>
+      <th style="text-align:left; padding:0.4rem 0.7rem; border-bottom:1px solid var(--border);">$\sqrt{1-\bar\alpha_t}$</th>
+      <th style="text-align:left; padding:0.4rem 0.7rem; border-bottom:1px solid var(--border);">直观状态</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr><td style="padding:0.4rem 0.7rem;">0</td><td>—</td><td>1.0</td><td>1.0</td><td>0.0</td><td>原图，无噪</td></tr>
+    <tr><td style="padding:0.4rem 0.7rem;">100</td><td>0.002</td><td>≈ 0.910</td><td>0.954</td><td>0.300</td><td>能看清，纹理略糊</td></tr>
+    <tr><td style="padding:0.4rem 0.7rem;">300</td><td>0.006</td><td>≈ 0.591</td><td>0.769</td><td>0.640</td><td>结构清晰、细节丢失</td></tr>
+    <tr><td style="padding:0.4rem 0.7rem;">500</td><td>0.010</td><td>≈ 0.221</td><td>0.470</td><td>0.882</td><td>能猜出轮廓，强烈噪点</td></tr>
+    <tr><td style="padding:0.4rem 0.7rem;">700</td><td>0.014</td><td>≈ 0.041</td><td>0.203</td><td>0.979</td><td>几乎看不出原图</td></tr>
+    <tr><td style="padding:0.4rem 0.7rem;">1000</td><td>0.02</td><td>≈ 4e-5</td><td>0.006</td><td>1.0</td><td>纯噪声</td></tr>
+  </tbody>
+</table>
+
+<p>读这张表的两个观察：</p>
+
+<ol>
+  <li><strong>$\bar\alpha_t$ 衰减"前慢后快再慢"</strong>。前 100 步还留住 91% 信号，500 步掉到 22%，900 步只剩 ~1%。这是<em>累积积</em>的几何性——小幅修剪 1000 次后，乘积塌缩很快。</li>
+  <li><strong>"分水岭"在 $t \approx 500$</strong>。$\sqrt{\bar\alpha_t}$ 和 $\sqrt{1-\bar\alpha_t}$ 在 500 步附近相交（都 ≈ 0.7）。再往后 50 步图像就已经几乎认不出了。<em>感知意义上的中点远早于 $T/2$</em>——这是 cosine schedule 想修正的地方。</li>
+</ol>
+
+<h2>十、为什么 $T = 1000$？这个数字是怎么来的</h2>
+
+<p>DDPM 原论文用 $T = 1000$。这个数字看起来很"魔数"，其实有理由：</p>
+
+<ul>
+  <li><strong>太小（$T = 100$）</strong>：每步噪声太大、$\beta_t$ 不能很小，<em>$q(x_t\mid x_{t-1})$ 偏离高斯太多</em>，反向高斯近似失效，质量崩。</li>
+  <li><strong>太大（$T = 10000$）</strong>：训练时无所谓（闭式跳跃），但<strong>生成时每张图要跑 10000 次网络</strong>，慢到没法用。</li>
+  <li><strong>$T = 1000$</strong>：平衡点。让 $\beta_t$ 足够小（每步 ~0.005 量级）使高斯近似有效，且生成成本可接受。</li>
+</ul>
+
+<div class="callout callout-info">
+ℹ️ <strong>后续发展</strong>：DDIM（Song et al. 2020）发现可以<em>跳着采样</em>——训练时仍用 $T = 1000$，生成时只跑 50 步、20 步甚至 10 步。这背离了 DDPM 的马尔可夫假设，但给出了等价的非马尔可夫前向链。后面第 12-14 章会讲。所以 $T = 1000$ 是 DDPM<em>训练</em>的常用值，<em>生成</em>步数现在通常远小于此。
+</div>
+
+<h2>十一、把符号系统拢一下（必背记号表）</h2>
+
+<p>本章用了一堆相互纠缠的符号，整理成表方便回查：</p>
+
+<table style="width:100%; border-collapse:collapse; margin:1rem 0; font-size:0.95rem;">
+  <thead>
+    <tr style="background:var(--surface-soft);">
+      <th style="text-align:left; padding:0.45rem 0.7rem; border-bottom:1px solid var(--border);">符号</th>
+      <th style="text-align:left; padding:0.45rem 0.7rem; border-bottom:1px solid var(--border);">含义</th>
+      <th style="text-align:left; padding:0.45rem 0.7rem; border-bottom:1px solid var(--border);">取值范围 (典型 T=1000)</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr><td style="padding:0.45rem 0.7rem;"><code>$\beta_t$</code></td><td>第 $t$ 步加噪强度（方差）</td><td>$10^{-4} \to 0.02$（线性）</td></tr>
+    <tr><td style="padding:0.45rem 0.7rem;"><code>$\alpha_t$</code></td><td>$1 - \beta_t$，本步信号留存率</td><td>$0.9998 \to 0.98$</td></tr>
+    <tr><td style="padding:0.45rem 0.7rem;"><code>$\bar\alpha_t$</code></td><td>$\prod_{s\le t}\alpha_s$，累计信号留存率</td><td>$1 \to \approx 4\times 10^{-5}$</td></tr>
+    <tr><td style="padding:0.45rem 0.7rem;"><code>$\sqrt{\bar\alpha_t}$</code></td><td>闭式公式里 $x_0$ 的系数</td><td>$1 \to 0.006$</td></tr>
+    <tr><td style="padding:0.45rem 0.7rem;"><code>$\sqrt{1-\bar\alpha_t}$</code></td><td>闭式公式里 $\epsilon$ 的系数</td><td>$0 \to 0.9999$</td></tr>
+    <tr><td style="padding:0.45rem 0.7rem;"><code>$\epsilon_t$</code></td><td>第 $t$ 步加的噪声（在链式形式里）</td><td>$\sim \mathcal{N}(0, I)$</td></tr>
+    <tr><td style="padding:0.45rem 0.7rem;"><code>$\epsilon$</code></td><td>闭式形式里的等价"汇总噪声"</td><td>$\sim \mathcal{N}(0, I)$</td></tr>
+    <tr><td style="padding:0.45rem 0.7rem;"><code>$x_0$</code></td><td>原始数据样本</td><td>真实图像（如归一化到 [-1, 1]）</td></tr>
+    <tr><td style="padding:0.45rem 0.7rem;"><code>$x_t$</code></td><td>$t$ 步加噪后的样本</td><td>同维潜变量</td></tr>
+    <tr><td style="padding:0.45rem 0.7rem;"><code>$x_T$</code></td><td>终点样本，≈ 纯噪声</td><td>$\approx \mathcal{N}(0, I)$</td></tr>
+  </tbody>
+</table>
+
+<div class="callout callout-warning">
+⚠️ <strong>易混点</strong>：$\alpha_t$ vs $\bar\alpha_t$ 一字之差。$\alpha_t$ 是<em>单步</em>留存率（接近 1），$\bar\alpha_t$ 是<em>累积</em>留存率（从 1 一路掉到接近 0）。所有 DDPM 代码里这两个都是预先 cache 好的张量 <code>alphas</code> 和 <code>alpha_bars</code>，混用会立刻导致训练完全跑偏。
+</div>
+
+<h2>十二、PyTorch 实现骨架：前向加噪 = 1 行代码</h2>
+
+<p>把上面所有数学落到代码上：</p>
+
+<pre><code>import torch
+
+def make_schedule(T=1000, beta_start=1e-4, beta_end=0.02):
+    """预先 cache 所有 t 对应的系数。"""
+    betas = torch.linspace(beta_start, beta_end, T)        # β_t (T,)
+    alphas = 1.0 - betas                                    # α_t = 1 - β_t
+    alpha_bars = torch.cumprod(alphas, dim=0)               # ᾱ_t = ∏ α_s
+    sqrt_alpha_bars = torch.sqrt(alpha_bars)                # √ᾱ_t
+    sqrt_one_minus_alpha_bars = torch.sqrt(1.0 - alpha_bars)  # √(1-ᾱ_t)
+    return {
+        "betas": betas,
+        "alphas": alphas,
+        "alpha_bars": alpha_bars,
+        "sqrt_alpha_bars": sqrt_alpha_bars,
+        "sqrt_one_minus_alpha_bars": sqrt_one_minus_alpha_bars,
+    }
+
+
+def q_sample(x_0, t, schedule, noise=None):
+    """
+    前向加噪的闭式实现：x_t = √ᾱ_t · x_0 + √(1-ᾱ_t) · ε
+    Args:
+        x_0:  (B, C, H, W) 真实图像，已归一化到 [-1, 1]
+        t:    (B,) int64，每个样本的时间步 0 ≤ t &lt; T
+        schedule: make_schedule() 的返回字典
+        noise: (B, C, H, W) 可选，默认从 N(0, I) 采样
+    Returns:
+        x_t:  (B, C, H, W) 加噪后的样本
+        noise: (B, C, H, W) 实际加上去的 ε（训练时网络要预测它）
+    """
+    if noise is None:
+        noise = torch.randn_like(x_0)
+
+    # 把 schedule 的标量按 t 取出，并 broadcast 到 image shape
+    sqrt_ab = schedule["sqrt_alpha_bars"][t].view(-1, 1, 1, 1)
+    sqrt_omab = schedule["sqrt_one_minus_alpha_bars"][t].view(-1, 1, 1, 1)
+
+    # ★ 整个 DDPM 训练的核心一行 ★
+    x_t = sqrt_ab * x_0 + sqrt_omab * noise
+    return x_t, noise
+
+
+# === 用法示例 ===
+sched = make_schedule(T=1000)
+x_0 = torch.randn(8, 3, 32, 32)                # batch of "images"
+t = torch.randint(0, 1000, (8,))               # 每个样本一个独立 t
+x_t, noise = q_sample(x_0, t, sched)
+# x_t.shape == x_0.shape，noise 就是要训练 U-Net 去预测的目标</code></pre>
+
+<div class="callout callout-note">
+📝 <strong>读这段代码时注意</strong>：
+<ul>
+  <li>整个"加噪"实质上就是 <code>sqrt_ab * x_0 + sqrt_omab * noise</code> 这<strong>一行</strong>——之前所有数学都是为了证明这一行合法且无信息损失。</li>
+  <li>每个样本独立采一个 $t$（<code>randint(0, 1000, (B,))</code>）。这等价于<strong>对所有 $t$ 做均匀加权</strong>的训练损失。后续 EDM 等会改成非均匀。</li>
+  <li>返回值同时给出 <code>noise</code>——因为反向网络的训练目标就是 $\epsilon$，必须把这个真值带出来算 loss。下一章你会看到 <code>F.mse_loss(net(x_t, t), noise)</code> 这种极简训练循环。</li>
+</ul>
+</div>
+
+<h2>十三、Markov 性质 vs 闭式跳跃：是不是矛盾？</h2>
+
+<p>讲到这里你可能有一个疑问：</p>
+
+<blockquote>前向过程被定义为<strong>马尔可夫链</strong>（$x_t$ 只依赖 $x_{t-1}$）。但我们又说可以从 $x_0$ 一步跳到 $x_t$——这岂不是<em>跳过了中间所有状态</em>？还是 Markov 吗？</blockquote>
+
+<p>答案：<strong>两者完全相容</strong>。区分两个东西：</p>
+
+<ul>
+  <li><strong>过程的定义</strong>是 Markov 的——$q(x_t\mid x_{t-1}, x_{t-2}, \dots) = q(x_t\mid x_{t-1})$。这是<em>结构</em>。</li>
+  <li><strong>闭式跳跃</strong>给出的是 $q(x_t\mid x_0)$ ——这是把 $t$ 步 Markov 转移积分掉中间变量后的<em>边际分布</em>。它不<em>违反</em> Markov 性质，只是<em>利用</em>了高斯的良好代数性质把积分算出来了。</li>
+</ul>
+
+<p>类比：你扔 100 次硬币得到正面次数的分布，是二项分布 $\mathrm{Binomial}(100, 0.5)$——这是个一步公式。但<em>每一次扔硬币</em>仍然是独立的伯努利过程。两者完全相容。前向扩散就是连续值版的同一件事。</p>
+
+<h2>十四、本章的「微妙之处」与下一章的钩子</h2>
+
+<p>有几个常被踩的坑，要在这里点破：</p>
+
+<div class="callout callout-warning">
+⚠️ <strong>坑 1：前向链没有可学参数</strong>。整个 $q(x_{1:T}\mid x_0)$ 是<em>事先写死</em>的——只取决于你选的 $\beta_t$ schedule。<strong>它不参与训练</strong>。新手常常以为 forward 和 reverse 都是神经网络。
+</div>
+
+<div class="callout callout-warning">
+⚠️ <strong>坑 2：闭式 $q(x_t\mid x_0)$ ≠ 真正的"反向条件分布"</strong>。我们能写出 $q(x_t\mid x_0)$，但<em>反向所需要的是 $q(x_{t-1}\mid x_t, x_0)$ 或 $q(x_{t-1}\mid x_t)$</em>——后者才是反向网络要逼近的。下一章会讲到 $q(x_{t-1}\mid x_t, x_0)$ 也<strong>有闭式</strong>（继续靠高斯共轭性），且这正是 DDPM loss 的 KL 项的核心。
+</div>
+
+<div class="callout callout-warning">
+⚠️ <strong>坑 3：$x_T \sim \mathcal{N}(0, I)$ 是"近似"，不是"精确"</strong>。准确地说 $q(x_T\mid x_0) = \mathcal{N}(\sqrt{\bar\alpha_T}\,x_0, (1-\bar\alpha_T) I)$——只是 $\bar\alpha_T$ 太小，所以工程上当 $\mathcal{N}(0, I)$ 用。生成时反向链假设 $x_T \sim \mathcal{N}(0, I)$ 不依赖 $x_0$——这是 DDPM 的近似边界条件之一。
+</div>
+
+<div class="callout callout-tip">
+💡 <strong>下一章预告</strong>：第 5 章会推导<strong>反向条件分布 $q(x_{t-1}\mid x_t, x_0)$ 的闭式</strong>——它仍是高斯，且均值是 $x_t$ 和 $x_0$ 的<em>凸组合</em>、方差只依赖于 schedule。这个分布是反向网络<em>必须模仿</em>的对象。再下一章我们就会看到，"训练网络预测 $\epsilon$"是这个 KL 散度的<em>等价简化形式</em>——所谓 DDPM 的"simple loss"。
+</div>
+
+<h2>十五、嵌入视频片段：讲师亲手在白板推导</h2>
+
+<figure class="clip-frame">
+  <iframe src="https://www.youtube.com/embed/Dx-1agEjlJs?start=995" title="Vizuara L3: Dr. Raj 介绍 DDPM 的整体框架" allowfullscreen></iframe>
+  <figcaption>📺 Vizuara《Principles of Diffusion Models》Lecture 3（16:36 处）—— Dr. Raj 引入 DDPM，从 VAE 过渡到前向链的关键转场。注意他强调"这篇论文的美在于把一切拆成简单可实现的步骤"。</figcaption>
+</figure>
+
+<figure class="clip-frame">
+  <iframe src="https://www.youtube.com/embed/rngYBa46AXY?start=2" title="Vizuara L4: 噪声-去噪范式的直觉" allowfullscreen></iframe>
+  <figcaption>📺 Vizuara《Diffusion Models for Image Generation》Lecture 4 开场 —— "从纯噪声出发，逐步走向数据流形"的范式锚点（chunk #37）。</figcaption>
+</figure>
+
+<div class="my-addition">
+🟡 <strong>教材外补充：本章源材料的局限性</strong><br>
+本章的 20 个 source_chunks 里，前 16 个其实是 Vizuara Lecture 3 对 VAE 的<em>详细回顾</em>（chunk #648-#663），讲师在 chunk #663 才正式从 VAE 过渡到 DDPM；chunk #664-#665 介绍了 DDPM 论文的历史地位但<em>没有展开前向链的数学</em>。因此本章的<strong>前向闭式跳跃推导（第 6 节）和 schedule 工程细节</strong>是我（textbook author）根据 DDPM 原论文（Ho et al. 2020 Eq. 2-4）补充的——这是讲师在<em>下一节</em>白板演算才会展开的内容。如果你想看讲师亲手推 $\bar\alpha_t$，请关注 Vizuara Lecture 3 的后半段（视频 ~20:00 之后）。CMU 10-799 Lecture 2（chunk #1073）的相应推导风格更代数化，可作互补阅读。
+</div>
+
+<h2>十六、回到一开始的问题：「为什么要把数据毁掉？」</h2>
+
+<p>读到这里，那个看似怪异的问题应该有答案了：</p>
+
+<ol>
+  <li>因为<strong>生成 = 反向</strong>。要学会生成，先得有一条<em>已知答案的</em>反向训练目标。</li>
+  <li>因为<strong>噪声是"普适语言"</strong>。$\mathcal{N}(0, I)$ 不依赖于数据集——所以训完模型后，<em>从噪声采样就是从模型采样</em>。</li>
+  <li>因为<strong>前向链的每一步都给反向链留下了"路标"</strong>。$\epsilon_t$（真实噪声）就是反向网络在第 $t$ 步要预测的目标。前向链<em>制造了无穷多的训练数据对</em> $(x_t, \epsilon)$。</li>
+  <li>因为<strong>高斯让数学变得可解</strong>。两个高斯的和还是高斯——这一条让 $t$ 步前向能折叠成 1 行公式，让训练高效；同样的代数也会让反向条件分布有闭式，让 loss 简单。</li>
+</ol>
+
+<p>这就是为什么 DDPM 论文的标题里两个词排序是 <em>"Denoising Diffusion"</em>——<strong>先扩散、后去噪</strong>。扩散把数据"毁掉"是为了去噪有目标可学。</p>
+
+<div class="takeaways" style="background:#0b5; color:#fff; padding:1.4rem; border-radius:8px; margin-top:2rem;">
+  <h3 style="margin-top:0; color:#fff;">本章要记住的（讲师亲口给的核心 + 推导锚点）</h3>
+  <ol>
+    <li><strong>前向扩散是固定的、不需要训练</strong>。整条 $q(x_{1:T}\mid x_0)$ 只取决于 $\beta_t$ schedule——这是 DDPM 比 VAE 简化的关键差别（讲师 chunk #663 的"VAE 双网络联训痛点"得到根治）。</li>
+    <li><strong>单步公式</strong>：$x_t = \sqrt{1-\beta_t}\,x_{t-1} + \sqrt{\beta_t}\,\epsilon_t$。$\sqrt{1-\beta_t}$（而非 1）的选择是为了 variance-preserving——方差始终 = 1。</li>
+    <li><strong>本章数学之心：闭式跳跃</strong> $x_t = \sqrt{\bar\alpha_t}\,x_0 + \sqrt{1-\bar\alpha_t}\,\epsilon$。靠"两独立高斯之和方差相加"6 步推出。这一行让训练不需要 for 循环展开 1000 步。</li>
+    <li><strong>信号-噪声预算守恒</strong>：$(\sqrt{\bar\alpha_t})^2 + (\sqrt{1-\bar\alpha_t})^2 = 1$。$t$ 从 0 到 $T$ 就是单位圆上从"全信号"转到"全噪声"的角度变化。$t \approx 500$ 是分水岭。</li>
+    <li><strong>极限</strong>：$T \to \infty$ 时 $x_T \to \mathcal{N}(0, I)$，<em>和 $x_0$ 无关</em>。这是反向链能用 $\mathcal{N}(0, I)$ 作为起点采样的理论基础。</li>
+    <li><strong>为什么必须是高斯</strong>：①CLT 极限暗示；②重参数化可微采样；③两高斯之和是高斯（代数封闭性）。三者缺一不可。</li>
+    <li><strong>必背记号</strong>：$\beta_t / \alpha_t = 1-\beta_t / \bar\alpha_t = \prod\alpha_s$。<em>$\alpha_t$ 和 $\bar\alpha_t$ 一字之差，混用直接训崩</em>。代码里始终是 <code>alphas</code> 和 <code>alpha_bars</code> 两个独立张量。</li>
+  </ol>
+</div>
+
+</article>

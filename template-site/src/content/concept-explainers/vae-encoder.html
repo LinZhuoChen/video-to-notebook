@@ -5,8 +5,17 @@
 .ve-svg{display:block;margin:1.2rem auto;max-width:100%;height:auto;}
 .ve-pitfalls ol{padding-left:1.4rem;} .ve-pitfalls li{margin:0.5rem 0;}
 .ve-source{font-style:italic;color:var(--text-muted);border-left:2px solid var(--border);padding:0.2rem 0.8rem;margin:0.5rem 0;font-size:0.9rem;}
+.ve-callout{background:var(--module-accent-soft);border-left:3px solid var(--module-accent);padding:0.6rem 0.9rem;margin:0.9rem 0;border-radius:0 4px 4px 0;font-size:0.92rem;}
+.ve-callout-red{background:var(--red-soft);border-left:3px solid var(--red);padding:0.6rem 0.9rem;margin:0.9rem 0;border-radius:0 4px 4px 0;font-size:0.92rem;}
+.my-addition{display:inline-block;background:var(--accent-soft);color:var(--text);padding:0.15rem 0.5rem;border-radius:3px;font-size:0.85rem;margin:0.3rem 0;}
 @keyframes ve-pulse{0%,100%{r:6;}50%{r:9;}}
+@keyframes ve-sample{0%{transform:translate(0,0);opacity:0;}20%{opacity:1;}80%{opacity:1;}100%{transform:translate(40px,-15px);opacity:0;}}
 .ve-z-dot{animation:ve-pulse 2s ease-in-out infinite;}
+.ve-sample-dot{animation:ve-sample 3s ease-in-out infinite;transform-origin:center;}
+.ve-sample-dot:nth-child(2){animation-delay:0.6s;}
+.ve-sample-dot:nth-child(3){animation-delay:1.2s;}
+.ve-sample-dot:nth-child(4){animation-delay:1.8s;}
+.ve-sample-dot:nth-child(5){animation-delay:2.4s;}
 </style>
 
 <article class="concept-entry">
@@ -17,77 +26,202 @@
   </header>
 
   <aside class="ve-quickref">
-    <div><strong>定义</strong> · 网络输出 $\mu(x), \sigma(x)$ 参数化 $q(z|x) = \mathcal{N}(\mu(x), \sigma(x)^2)$。</div>
-    <div><strong>公式</strong> · loss = 重建 + $\beta \cdot D_{\mathrm{KL}}(q(z|x) \| \mathcal{N}(0, I))$。</div>
+    <div><strong>定义</strong> · 网络输出 $\mu_\phi(x), \sigma_\phi(x)$ 参数化 $q_\phi(z|x) = \mathcal{N}(\mu_\phi(x), \sigma_\phi(x)^2)$。</div>
+    <div><strong>公式</strong> · $\mathcal{L} = \mathbb{E}_q[-\log p(x|z)] + \beta \cdot D_{\mathrm{KL}}(q(z|x) \| \mathcal{N}(0, I))$。</div>
     <div><strong>易错</strong> · 不是 autoencoder 的"加正则版"——目的是从先验采样新数据，不是压缩。</div>
+    <div><strong>溯源</strong> · Kingma & Welling, ICLR 2014 (<em>Auto-Encoding Variational Bayes</em>)。</div>
   </aside>
 
   <section class="concept-intuition">
-    <p>Vizuara 的 Dr. Raj 在《Principles of Diffusion Models》Lecture 2 用一个特别朴实的比喻把 VAE 讲清楚——<strong>古董魔术机：两个旋钮（slantness + neatness）→ 输出 hello 字体</strong>。问的核心问题：班里 100 个学生写 hello，造一台机器，按一下按钮就吐一张新字体。这是 generative modeling 而不是 autoencoder。</p>
-    <div class="ve-source">「想象班里 100 个学生，每人写 hello。给我造一台机器——按一下吐一个『某学生写的 hello』。」—— Vizuara L9</div>
-    <p>训练里 encoder 对应：网络输入 $x$、输出 $\mu, \sigma$，从 Gaussian 采 $z$（reparameterization），送 decoder，算重建 + KL。</p>
+    <p>很多人第一次见到 VAE 都以为它就是<strong>「autoencoder + KL 正则项」</strong>——把瓶颈层多套一层惩罚，让 latent code 长得"更规整"一点。这是教科书最常见的误解。<strong>VAE encoder 真正的不同是：它输出的不是一个点，而是一个分布 $q_\phi(z|x)$</strong>，这样你才能从先验 $\mathcal{N}(0, I)$ 里采 z 去解码出"从没见过、但风格合理"的新样本。换言之，AE 学的是压缩，VAE 学的是<em>采样</em>。</p>
+
+    <p>Vizuara 的 Dr. Raj 在《Principles of Diffusion Models》Lecture 2 用一个特别朴实的比喻把这件事讲清楚——<strong>古董魔术机</strong>。问题是这样的：班里 100 个学生每人写一次 "hello"，你要造一台机器，按一下按钮就吐出一张"像某个学生写的 hello"。注意"像某个学生"——不是复制某张已有图片，而是<em>从手写风格分布里抽一张新样本</em>。这才是 generative modeling 的核心问题，跟 AE 的"重建训练集"完全不同。</p>
+
+    <div class="ve-source">「想象班里 100 个学生，每人写 hello。给我造一台机器——按一下吐一个『某学生写的 hello』。」—— Vizuara L9 @02:19</div>
+
+    <p>Dr. Raj 在 chunk #14 进一步把这个机器拆开：每个学生的字之所以长那样，是因为有一组<strong>隐藏因素</strong>——笔压、倾斜角、字宽、书写速度、整洁度。他把这五个因素叫做"<strong>secret recipe</strong>"。如果你能猜到 secret recipe，就能反推手写。这五个数字就是<strong>latent variable</strong> $z$。VAE encoder 的工作，是从 $x$（一张 hello 图）里反推 $z$ 的<em>分布</em>——为什么是分布？因为光看一张图你不能笃定"该学生笔压一定是 0.5"，只能说"在 0.3 到 0.7 之间，均值 0.5、标准差 0.2 比较像"。这个"均值 + 标准差"就是 $q_\phi(z|x)$。</p>
+
+    <p>CMU 10-799 的 Kelly 在 Lecture 1 给了第二个比喻：把生成模型想成"<strong>对一群学生身高的概率分布</strong>"——你有几个朋友的身高样本，但不知道整个学校的真实分布。生成模型的目的就是<em>从样本推回分布</em>，然后从分布采新样本。两个比喻指向同一件事：generative modeling 是"分布近似 + 分布采样"的组合，不是单纯的记忆。VAE 是其中一种实现，给"采样"配上了一个可微的、用神经网络参数化的 latent 通道。</p>
+
+    <p>在训练里，encoder 对应一段神经网络：输入 $x$、输出 $\mu_\phi(x), \sigma_\phi(x)$，从 Gaussian 采 $z = \mu + \sigma \cdot \epsilon$（reparameterization trick，见 §Deep dive），送进 decoder 算重建 + KL。整套架构最早由 <strong>Kingma & Welling (2014)</strong> 在 <em>Auto-Encoding Variational Bayes</em> 一文里写下来。</p>
+
+    <div class="my-addition">🟡 教材外补充：</div>
+    <p>Vizuara 把 VAE 当成"独立目标"来教；但在 2026 年的实际工程里，VAE encoder 几乎只剩一种用法——给 <strong>Latent Diffusion (Stable Diffusion)</strong> 当"感知压缩器"。它先在大规模图像上预训练，<em>训完冻住</em>，然后扩散模型在它的 latent 上跑去噪。所以现在工程师看到"VAE encoder"四个字，脑子里浮现的不是"采样新数据的生成模型"，而是"把 512×512×3 像素压到 64×64×4 latent 的固定函数"。Vizuara 的 hello 机器讲的是 VAE 的<em>初心</em>；现代用法是它的<em>转世</em>。两个视角都要熟。</p>
   </section>
 
   <section class="concept-deepdive">
-    <h2>关键改动：输出分布、不是点</h2>
-    <p>普通 AE: encoder 是 $f: x \to z$。<strong>VAE encoder: $g: x \to (\mu, \sigma)$</strong>，输出一个分布 $q(z|x)$，然后<em>采样</em>。"采样" 让 KL 项有意义、让训练目标统一在 ELBO 下。</p>
-    <p>Dr. Raj 在 L9 chunk #14 把它叫 "secret recipe"——同一个学生的笔压 + 倾斜 + 速度 + 整洁度等隐藏因素，组合起来定义其字体。这些"隐藏因素"就是 latent variable $z$。</p>
+    <h2>关键改动：输出分布，不是点</h2>
+    <p>普通 AE 的 encoder 是一个确定性映射 $f_\theta: x \mapsto z$，一张图进、一个向量出。<strong>VAE encoder 是一个随机映射 $g_\phi: x \mapsto (\mu, \sigma) \mapsto q_\phi(z|x) = \mathcal{N}(\mu, \sigma^2)$</strong>，输出的是一个分布的<em>参数</em>，真正用到 $z$ 时要从这个分布里采一下。这一步"采样"不是工程上的可选项，它让 KL 项有意义，也让训练目标统一在 <strong>ELBO</strong> 框架下：
 
-    <svg class="ve-svg" viewBox="0 0 600 200" role="img" aria-label="VAE encoder 输出分布">
+    $$\log p(x) \geq \mathbb{E}_{q_\phi(z|x)}[\log p_\theta(x|z)] - D_{\mathrm{KL}}\!\left(q_\phi(z|x) \,\|\, p(z)\right)$$
+
+    右边就是 VAE 的目标函数。<strong>第一项</strong>是重建（"采一个 z 解码，看离 x 多远"），<strong>第二项</strong>是 KL，把后验 $q_\phi(z|x)$ 拉向先验 $p(z) = \mathcal{N}(0, I)$。最大化 ELBO 等价于：在不知道真实 $p(x)$ 的前提下，<em>从下方</em>把 log-likelihood 撑上去。</p>
+
+    <p><strong>Why 重建项？</strong>没有它，encoder 可以摆烂——直接输出 $\mu = 0, \sigma = 1$，KL = 0，但 $z$ 跟 $x$ 无关，decoder 解出来全是均值脸。重建项强制 $z$ <em>携带 $x$ 的信息</em>。</p>
+
+    <p><strong>Why KL 项？</strong>没有它，encoder 可以把每张图映射到 latent 空间里一个孤立的小点（$\sigma \to 0$），整个 latent space 全是洞，从先验采一个 $z$ 几乎肯定落到洞里、decoder 解出垃圾。KL 把所有 $q_\phi(z|x)$ <em>整体推向</em> 标准正态，让 latent 空间被"填满"、连续无洞。这是 VAE 能"从先验采样新数据"的关键。</p>
+
+    <h2>Reparameterization trick（前向指针 → 见单独条目）</h2>
+    <p>采样 $z \sim \mathcal{N}(\mu, \sigma^2)$ 是不可导的——你不能对"随机数"求梯度。<strong>Kingma 的 trick</strong>：把随机性外置——$\epsilon \sim \mathcal{N}(0, I)$，然后 $z = \mu + \sigma \cdot \epsilon$。这样 $\mu, \sigma$ 是可微的，$\epsilon$ 是外部噪声、不需要梯度，整条计算图就 backprop 通了。工程实现上还有个稳定性细节：</p>
+
+    <div class="ve-callout"><strong>工程细节</strong>：网络通常输出 $\log \sigma^2$ 而不是 $\sigma$，原因有二——(1) $\sigma > 0$ 的约束自动满足（指数化）；(2) 数值上 $\log \sigma^2$ 在 $\sigma$ 趋于 0 时表现稳定，不会爆梯度。</div>
+
+    <svg class="ve-svg" viewBox="0 0 600 220" role="img" aria-label="VAE encoder 输出分布并 reparam 采样到 decoder">
       <g font-family="ui-sans-serif" font-size="11" fill="var(--text)">
-        <rect x="20" y="70" width="80" height="60" rx="4" fill="var(--surface-soft)" stroke="var(--border)"/>
-        <text x="60" y="105" text-anchor="middle">x（hello）</text>
-        <path d="M 105 100 L 195 100" stroke="var(--text-muted)"/>
-        <rect x="200" y="50" width="80" height="40" rx="4" fill="var(--module-accent)"/>
-        <text x="240" y="75" text-anchor="middle" fill="var(--surface)">μ(x)</text>
-        <rect x="200" y="110" width="80" height="40" rx="4" fill="var(--module-accent)"/>
-        <text x="240" y="135" text-anchor="middle" fill="var(--surface)">σ(x)</text>
-        <path d="M 285 70 L 340 95" stroke="var(--text-muted)"/>
-        <path d="M 285 130 L 340 105" stroke="var(--text-muted)"/>
-        <circle cx="370" cy="100" r="20" fill="var(--blue)" class="ve-z-dot"/>
-        <text x="370" y="105" text-anchor="middle" fill="var(--surface)" font-size="10">z ~ N(μ, σ²)</text>
-        <text x="370" y="160" text-anchor="middle" font-size="10" fill="var(--text-muted)">z = μ + σε（reparam）</text>
-        <path d="M 395 100 L 460 100" stroke="var(--text-muted)"/>
-        <rect x="470" y="70" width="80" height="60" rx="4" fill="var(--surface-soft)" stroke="var(--border)"/>
-        <text x="510" y="105" text-anchor="middle">x̂</text>
+        <rect x="20" y="80" width="80" height="60" rx="4" fill="var(--surface-soft)" stroke="var(--border)"/>
+        <text x="60" y="115" text-anchor="middle">x（hello）</text>
+        <path d="M 105 110 L 195 110" stroke="var(--text-muted)" marker-end="url(#ve-arr)"/>
+        <rect x="200" y="60" width="80" height="40" rx="4" fill="var(--module-accent)"/>
+        <text x="240" y="85" text-anchor="middle" fill="var(--surface)">μ_φ(x)</text>
+        <rect x="200" y="120" width="80" height="40" rx="4" fill="var(--module-accent)"/>
+        <text x="240" y="145" text-anchor="middle" fill="var(--surface)">log σ²_φ(x)</text>
+        <path d="M 285 80 L 340 105" stroke="var(--text-muted)"/>
+        <path d="M 285 140 L 340 115" stroke="var(--text-muted)"/>
+        <circle cx="370" cy="110" r="20" fill="var(--blue)" class="ve-z-dot"/>
+        <text x="370" y="115" text-anchor="middle" fill="var(--surface)" font-size="10">z = μ+σε</text>
+        <text x="370" y="170" text-anchor="middle" font-size="10" fill="var(--text-muted)">ε ~ N(0, I)</text>
+        <path d="M 395 110 L 460 110" stroke="var(--text-muted)" marker-end="url(#ve-arr)"/>
+        <rect x="470" y="80" width="80" height="60" rx="4" fill="var(--surface-soft)" stroke="var(--border)"/>
+        <text x="510" y="115" text-anchor="middle">x̂</text>
+        <text x="60" y="40" font-size="10" fill="var(--text-muted)">encoder g_φ</text>
+        <text x="510" y="40" font-size="10" fill="var(--text-muted)">decoder p_θ(x|z)</text>
+        <defs><marker id="ve-arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 z" fill="var(--text-muted)"/></marker></defs>
       </g>
     </svg>
 
-    <h2>KL 项的作用</h2>
-    <p>把所有 $q(z|x)$ 整体拉向 $\mathcal{N}(0, I)$——让 z 空间"被填满"、连续无洞。这样从先验采的任意 z 都能 decode 出合理样本。这是 VAE 能"采样新数据"的关键。</p>
+    <h2>KL 项展开（解析解）</h2>
+    <p>当 $q = \mathcal{N}(\mu, \sigma^2)$、$p = \mathcal{N}(0, 1)$ 时，KL 有闭式：
+
+    $$D_{\mathrm{KL}}\!\left(\mathcal{N}(\mu, \sigma^2) \,\|\, \mathcal{N}(0, 1)\right) = \tfrac{1}{2}\left(\mu^2 + \sigma^2 - 1 - \log \sigma^2\right)$$
+
+    <strong>Why 这个形式？</strong>KL 衡量两个分布的差距：</p>
+    <ul>
+      <li>$\mu^2$ 惩罚均值偏离 0；</li>
+      <li>$\sigma^2 - \log \sigma^2 - 1$ 是 $\sigma^2$ 在 1 处的极小值（求导 $1 - 1/\sigma^2 = 0 \Rightarrow \sigma^2 = 1$），惩罚方差偏离 1（无论太大太小）。</li>
+    </ul>
+    <p>多维情形对每个维度独立求和。代码里通常是一行：<code>kl = 0.5 * torch.sum(mu**2 + logvar.exp() - 1 - logvar)</code>。注意 <code>reduction='sum'</code> 还是 <code>'mean'</code>——前者会让 KL 权重隐含地随 latent 维数线性增长，是常见的训练失误源。</p>
+
+    <h2>encoder 架构层面：实际网络长什么样</h2>
+    <p>在 MNIST/CelebA 这种小图上，encoder 通常是 3-5 层 CNN（每层下采样 2 倍）+ flatten + 两个并行的全连接层分别输出 $\mu$ 和 $\log \sigma^2$。latent 维度典型选 16-128。在 Stable Diffusion 1.x 里，encoder 是 ResNet-style 的下采样网络，输入 512×512×3，输出 64×64×4（下采样 8 倍，通道数从 3 升到 4，再单独的卷积层产生 $\mu, \log \sigma^2$）。SD 2 / SDXL 用同样架构但训练数据和损失加权不同；Flux 用了一个更深的 VAE，latent 是 64×64×16，给扩散模型更宽的信息带宽。</p>
+
+    <p><strong>Why 卷积而不是全连接？</strong>图像有空间结构——平移、局部相关。卷积的 inductive bias 让 latent 也保持空间结构（一个 64×64 的 latent 图，每个像素仍然对应原图的一个局部区域）。这对扩散模型很关键——U-Net 也是空间结构网络，二者匹配。如果用全连接 VAE encoder 把图压成 1D 向量，扩散模型就没法用 U-Net 了。</p>
+
+    <h2>β-VAE 与 disentangling</h2>
+    <p>Higgins 等 (2017) 的 <strong>β-VAE</strong> 把 KL 系数从 1 改成可调的 $\beta$：
+
+    $$\mathcal{L}_\beta = \mathbb{E}_q[-\log p(x|z)] + \beta \cdot D_{\mathrm{KL}}(q(z|x) \| p(z))$$
+
+    <strong>Why?</strong> 当 $\beta > 1$，KL 压得更紧，每个 latent 维度的"信息预算"变小，网络被迫把信息<em>分摊</em>到不同维度上——这逼出了"<strong>disentangled latent</strong>"：一个维度对应"光照"，另一个对应"角度"，互不耦合。代价是重建变模糊（信息总量被限制了）。$\beta < 1$ 反过来，重建更清晰但 latent 杂乱。</p>
+
+    <h2>Posterior collapse（失败模式）</h2>
+    <div class="ve-callout-red"><strong>失败模式</strong>：当 decoder 太强（如 PixelCNN、LSTM、Transformer），它能仅凭 $x$ 的局部统计就把 $x$ 重建得很好，根本不需要 $z$。这时 encoder 学到 $q(z|x) \approx p(z) = \mathcal{N}(0, I)$——KL 项被精确压到 0，$z$ 不携带任何信息，VAE 退化为只有 decoder 的自回归模型。这叫 <strong>posterior collapse</strong>，文本 VAE 的经典痛点。缓解：KL annealing（前期 $\beta \to 0$，让 encoder 先学会用 $z$）、free-bits（保留 KL 下限）、限制 decoder 容量。</div>
+
+    <h2>ELBO 完整推导（为什么是这个目标函数）</h2>
+    <p><strong>Why ELBO？</strong>我们想最大化数据似然 $\log p(x)$，但 $p(x) = \int p(x, z) dz$ 是高维积分，算不动。VAE 的做法是引入一个<em>变分后验</em> $q_\phi(z|x)$（也就是 encoder），用它把 $\log p(x)$ 拆开：</p>
+
+    <p>$\log p(x) = \log \int p(x, z) dz = \log \int q(z|x) \cdot \frac{p(x, z)}{q(z|x)} dz$</p>
+
+    <p>用 Jensen 不等式（$\log$ 是凹的，期望往里走）：</p>
+
+    <p>$\log p(x) \geq \mathbb{E}_{q(z|x)}\!\left[\log \frac{p(x, z)}{q(z|x)}\right] = \mathbb{E}_q[\log p(x|z)] + \mathbb{E}_q[\log p(z) - \log q(z|x)]$</p>
+
+    <p>第二项 $\mathbb{E}_q[\log p(z) - \log q(z|x)] = -D_{\mathrm{KL}}(q(z|x) \| p(z))$，于是：</p>
+
+    <p>$\log p(x) \geq \underbrace{\mathbb{E}_q[\log p(x|z)]}_{\text{重建}} - \underbrace{D_{\mathrm{KL}}(q(z|x) \| p(z))}_{\text{KL 拉向先验}}$</p>
+
+    <p>右边就是 ELBO（evidence lower bound）。<strong>Why 这是下界？</strong>因为 Jensen 不等式给的就是下界——它和 $\log p(x)$ 的差恰好等于 $D_{\mathrm{KL}}(q(z|x) \| p(z|x))$（真后验和我们用的变分后验的距离）。当 $q$ 完美贴合真后验时下界紧。所以最大化 ELBO 既在<em>抬</em> $\log p(x)$，也在<em>拉近</em> $q$ 和真后验——两件事一石二鸟。</p>
+
+    <h2>与 DDPM、Latent Diffusion 的关系</h2>
+    <p>这是 v4 版本最关键的延伸——<strong>VAE 不是死技术，它是 diffusion 的祖宗</strong>。</p>
+    <ul>
+      <li><strong>DDPM = T 步分层 VAE</strong>。DDPM 的前向过程 $q(x_t | x_{t-1})$ 是固定的高斯（不学 encoder），反向 $p_\theta(x_{t-1} | x_t)$ 是高斯（学 decoder）。整个链条等价于 $T$ 层的 hierarchical VAE，每一层都用高斯条件分布。VAE 是 $T=1$ 的特例，DDPM 是 $T=1000$ 的极端。把 $T$ 拉开后，每步的"重建"变得极其简单（只需去一点点噪声），训练目标坍缩成 MSE，反而比 VAE 好训。</li>
+      <li><strong>Latent Diffusion (Rombach 2022, Stable Diffusion)</strong>。先用 VAE encoder 把 512×512×3 像素压成 64×64×4 latent，<em>冻住</em>，然后扩散模型在这个 latent 上做。VAE encoder 在这里被重新定位为"<strong>感知压缩器 / perceptual compressor</strong>"——它不再负责采样，只负责把"像素冗余"挤掉，让扩散模型有低维空间可用。训练损失加 LPIPS 和 GAN 项（VQ-GAN 风格），保证 latent 在<em>感知</em>上是可逆的，不是统计上。</li>
+      <li><strong>VQ-VAE / VQ-GAN</strong>（van den Oord 2017、Esser 2021）。把连续 latent 换成离散 codebook：encoder 输出连续向量、最近邻量化到码本里的一个 index。优势：可以接 transformer（图像 token 化）。代价：不可微，要用 straight-through estimator。Stable Diffusion 1.x 用的是连续 VAE，DALL-E 1、Parti、MagViT 用的是 VQ。</li>
+    </ul>
+
+    <div class="my-addition">🟡 教材外补充：</div>
+    <p>2026 年的实际经验是：<strong>Stable Diffusion 的 VAE encoder 完全不是 Kingma 原版 VAE</strong>。它的 KL 权重小到几乎可以忽略（$\beta \approx 10^{-6}$），$\sigma$ 接近 0，几乎是 deterministic AE；保留 VAE 框架只是为了让 latent 不至于完全坍缩到流形上。所以你在 SD 代码里看到 <code>encoder.encode(x).latent_dist.sample()</code>——它有一个 <code>latent_dist</code>，但工程上你直接用 <code>.mode()</code>（取 $\mu$）和 <code>.sample()</code> 几乎没差别。<em>"VAE encoder 在现代 SD 里是 perceptual decompression 的固定函数，不是生成模型的一部分。"</em>这件事 Vizuara 没明说，但对工程师很重要。</p>
+
+    <h2>训练时机与 freeze 策略</h2>
+    <p>Latent Diffusion 的标准训练 pipeline 分两阶段：</p>
+    <ol>
+      <li><strong>阶段一</strong>：单独训 VAE 几十万步，损失 = L1 重建 + LPIPS 感知损失 + GAN 损失（patch discriminator）+ 极小的 KL。这一阶段没有 diffusion 出场，纯粹是把"<em>像素压缩到感知等价的 latent</em>"这件事做扎实。</li>
+      <li><strong>阶段二</strong>：把 VAE encoder 和 decoder 都<em>冻住</em>，扩散模型 U-Net 在 encoder 输出的 latent 上学去噪。冻住的原因：(a) latent 空间一旦动，整个 U-Net 等价于在变化的目标上学习，不收敛；(b) 工程上节省一倍显存。SD 3、Flux 等 2024-2026 模型仍然保留这个范式，只在 VAE 架构细节（channel 数、下采样比例）上做改进。</li>
+    </ol>
+
+    <p>有意思的对比：<strong>VAE 在 DDPM 里是被替代品</strong>（DDPM 自己就是个分层 VAE，不需要单独的 encoder），<strong>VAE 在 LDM 里是基础设施</strong>（不再生成、只压缩）。同一个组件，两种用法。这种"组件功能漂移"是 diffusion 时代很常见的现象，跟早期 GAN 时代的 encoder 用途又完全不同。</p>
   </section>
 
   <section class="concept-interact">
-    <p>蓝色 z 点呼吸——表示它<em>每次 forward 都从 q(z|x) 重采</em>。<strong>不变量</strong>：edge distribution 是 $\mathcal{N}(\mu(x), \sigma(x)^2)$。</p>
+    <p>下面这张图展示一个 latent 平面——每个学生对应一团 Gaussian blob（$q_\phi(z|x_i)$），蓝色 z 点呼吸表示"每次 forward 从 q(z|x) 重采"，浅色小点是从先验 $\mathcal{N}(0, I)$ 采的新样本，它们恰好落在某些 blob 附近——这就是<em>生成新 hello</em> 的瞬间。<strong>不变量</strong>：每条 edge distribution 永远是 $\mathcal{N}(\mu(x), \sigma(x)^2)$，不管 $x$ 怎么变，分布形状（高斯）不变，只有参数变。</p>
+
+    <svg class="ve-svg" viewBox="0 0 600 280" role="img" aria-label="latent 平面上 Gaussian blob 与采样">
+      <g font-family="ui-sans-serif" font-size="10" fill="var(--text)">
+        <rect x="20" y="20" width="560" height="240" rx="6" fill="var(--surface-soft)" stroke="var(--border)"/>
+        <text x="40" y="40" fill="var(--text-muted)">latent 平面 z ∈ ℝ²（每个 blob = 一个学生的 q(z|x)）</text>
+        <ellipse cx="180" cy="120" rx="35" ry="22" fill="var(--module-accent-soft)" stroke="var(--module-accent)" stroke-opacity="0.6"/>
+        <text x="180" y="124" text-anchor="middle">学生₁</text>
+        <ellipse cx="300" cy="100" rx="28" ry="30" fill="var(--module-accent-soft)" stroke="var(--module-accent)" stroke-opacity="0.6"/>
+        <text x="300" y="104" text-anchor="middle">学生₂</text>
+        <ellipse cx="240" cy="180" rx="40" ry="25" fill="var(--module-accent-soft)" stroke="var(--module-accent)" stroke-opacity="0.6"/>
+        <text x="240" y="184" text-anchor="middle">学生₃</text>
+        <ellipse cx="400" cy="160" rx="32" ry="28" fill="var(--module-accent-soft)" stroke="var(--module-accent)" stroke-opacity="0.6"/>
+        <text x="400" y="164" text-anchor="middle">学生₄</text>
+        <ellipse cx="450" cy="80" rx="25" ry="22" fill="var(--module-accent-soft)" stroke="var(--module-accent)" stroke-opacity="0.6"/>
+        <text x="450" y="84" text-anchor="middle">学生₅</text>
+        <ellipse cx="300" cy="140" rx="180" ry="120" fill="none" stroke="var(--text-muted)" stroke-dasharray="4 3" stroke-opacity="0.5"/>
+        <text x="470" y="225" fill="var(--text-muted)">prior N(0, I)</text>
+        <circle cx="200" cy="115" r="6" fill="var(--blue)" class="ve-z-dot"/>
+        <text x="210" y="113" font-size="9" fill="var(--blue)">z₁ 当前采样</text>
+        <circle cx="270" cy="155" r="4" fill="var(--accent)" class="ve-sample-dot"/>
+        <circle cx="380" cy="130" r="4" fill="var(--accent)" class="ve-sample-dot"/>
+        <circle cx="320" cy="200" r="4" fill="var(--accent)" class="ve-sample-dot"/>
+        <circle cx="220" cy="90" r="4" fill="var(--accent)" class="ve-sample-dot"/>
+        <text x="40" y="245" fill="var(--text-muted)">浅色小点 = 从先验采的新 z → decoder → 新 hello</text>
+      </g>
+    </svg>
   </section>
 
   <section class="concept-example">
-    <h2>手算重建 + KL</h2>
-    <p>设 $\mu = 0.5, \sigma = 1.2, x = 1, \epsilon = 0.1$。则 $z = 0.5 + 1.2 \cdot 0.1 = 0.62$。$\hat x = z$（简化 decoder），重建 = $(0.62 - 1)^2 = 0.144$。KL = $\frac{1}{2}(0.25 + 1.44 - 1 - \log 1.44) = \frac{1}{2}(0.69 - 0.365) = 0.16$。total = 0.304。</p>
+    <h2>手算：重建 + KL 一次 forward</h2>
+    <p>设输入 $x = 1$（一维标量为简化）；encoder 输出 $\mu = 0.5$、$\log \sigma^2 = 0.365$（即 $\sigma^2 = 1.44, \sigma = 1.2$）；reparam 噪声 $\epsilon = 0.1$。则：</p>
+
+    <p>$z = \mu + \sigma \cdot \epsilon = 0.5 + 1.2 \cdot 0.1 = 0.62$</p>
+
+    <p>取 $\hat x = z$ 作 trivial decoder（实际是神经网）：</p>
+
+    <p>重建项 $= (\hat x - x)^2 = (0.62 - 1)^2 = (-0.38)^2 = 0.1444$</p>
+
+    <p>KL 项 $= \tfrac{1}{2}(\mu^2 + \sigma^2 - 1 - \log \sigma^2) = \tfrac{1}{2}(0.25 + 1.44 - 1 - 0.365) = \tfrac{1}{2}(0.325) = 0.1625$</p>
+
+    <p>$\mathcal{L} = 0.1444 + 0.1625 = 0.3069$</p>
+
+    <p>反向：$\partial \mathcal{L} / \partial \mu = 2(\hat x - x) \cdot 1 + \mu = -0.76 + 0.5 = -0.26$（重建拉 $\mu$ 上去，KL 拉 $\mu$ 回 0，净效果上推 0.26）；$\partial \mathcal{L} / \partial \sigma = 2(\hat x - x) \cdot \epsilon + \sigma - 1/\sigma = -0.076 + 1.2 - 0.833 = 0.291$（净效果下压 $\sigma$）。注意 $\epsilon$ 只出现在重建项的链式里，KL 项的导数与 $\epsilon$ 无关——这正是 reparam 把"随机"和"可微"分离开的妙处。</p>
   </section>
 
   <section class="concept-pitfalls">
     <h2>常见误区</h2>
     <ol>
-      <li><strong>"VAE 是加正则的 AE"。</strong>反例：重建质量通常比 AE 差（KL 是惩罚）；目的是采样不是压缩。</li>
-      <li><strong>"$\sigma$ 必须接近 1"。</strong>反例：纯白图可能 $\sigma \approx 0.1$，复杂图 $\sigma \approx 1.5$。KL 允许变化。</li>
-      <li><strong>"潜空间训完就是 $\mathcal{N}(0, I)$"。</strong>反例：$q(z) = \int q(z|x)p(x)dx$（aggregate posterior）才是；和先验有 gap，这是 VAE 生成质量瓶颈。</li>
+      <li><strong>"VAE 就是 autoencoder + KL 正则项。"</strong> 反例：把 KL 系数调到 0，你拿到一个普通 AE，重建几乎完美但<em>从先验采 z 解码出来全是噪声</em>——因为 latent 空间全是孤立小点。VAE 的目标是采样不是压缩，KL 是核心不是装饰。VAE 重建质量通常<em>差于</em> AE，这是付的"采样能力"代价。</li>
+      <li><strong>"$\sigma$ 训完都接近 1。"</strong> 反例：CelebA 上训完的 VAE，背景纯色图像 $\sigma \approx 0.1$（信息少、$z$ 取值范围可以小），人脸细节复杂图像某些维度 $\sigma \approx 1.5$（信息多、需要更大变化）。KL 只是把 $\sigma$ "<em>平均</em>"拉向 1，不是强制每张图都是 1。</li>
+      <li><strong>"训完 latent 空间就是 $\mathcal{N}(0, I)$。"</strong> 反例：把所有 $q_\phi(z|x_i)$ 在训练集上聚合得到 <strong>aggregate posterior</strong> $q(z) = \frac{1}{N}\sum_i q_\phi(z|x_i)$，它和先验 $\mathcal{N}(0, I)$ 通常有<em>显著 gap</em>——这就是 VAE 生成的样本比 GAN 模糊的根本原因。后来的 VAE 变体（VQ-VAE、NVAE、Score-based prior）都在补这个 gap。</li>
     </ol>
   </section>
 
   <section class="concept-seealso">
     <h2>相关概念</h2>
     <ul>
-      <li><a href="/video-to-notebook/concepts/variational-lower-bound/">Variational Lower Bound</a></li>
-      <li><a href="/video-to-notebook/concepts/reparameterization-trick/">Reparameterization Trick</a></li>
+      <li><a href="/video-to-notebook/concepts/variational-lower-bound/">Variational Lower Bound</a> — VAE 训练目标的数学来源，ELBO 推导链。</li>
+      <li><a href="/video-to-notebook/concepts/reparameterization-trick/">Reparameterization Trick</a> — 为什么 $z = \mu + \sigma \epsilon$ 能让随机采样可导。</li>
     </ul>
   </section>
 
   <section class="concept-sources">
     <h2>来源</h2>
     <ol>
-      <li><a href="https://www.youtube.com/watch?v=LqQNvuLqyfk&t=139s" target="_blank" rel="noopener">diffusion-principles-vizuara · L9 · 「secret recipe / hello / 古董魔术机」 · (2:19)</a></li>
-      <li><a href="https://www.youtube.com/watch?v=LqQNvuLqyfk&t=1304s" target="_blank" rel="noopener">diffusion-principles-vizuara · L9 · 黄点 latent space 动画 · (21:44)</a></li>
+      <li><a href="https://www.youtube.com/watch?v=Yyir7-OAnlA&t=139s" target="_blank" rel="noopener">diffusion-principles-vizuara · L9 · Lecture 2 - VAE Explained From Scratch · 「hello 古董魔术机」 · (2:19)</a></li>
+      <li><a href="https://www.youtube.com/watch?v=Yyir7-OAnlA&t=405s" target="_blank" rel="noopener">diffusion-principles-vizuara · L9 · 「secret recipe / 五个 hidden factors」 · (6:45)</a></li>
+      <li><a href="https://www.youtube.com/watch?v=p7Q77S_ZhdA&t=2s" target="_blank" rel="noopener">cmu-10799-diffusion-flow · L4 · Basics of Probabilistic & Generative Modeling · (0:02)</a></li>
     </ol>
   </section>
 </article>

@@ -1,0 +1,284 @@
+<style>
+/* prefix: cnf- */
+.cnf-quickref{background:var(--surface-soft);border-left:3px solid var(--module-accent);padding:0.8rem 1rem;border-radius:0 4px 4px 0;margin:1rem 0;font-size:0.92rem;}
+.cnf-quickref div{margin:0.3rem 0;}
+.cnf-pitfalls ol{padding-left:1.4rem;} .cnf-pitfalls li{margin:0.6rem 0;}
+.cnf-source{font-style:italic;color:var(--text-muted);border-left:2px solid var(--module-accent);padding:0.3rem 0.9rem;margin:0.6rem 0;font-size:0.9rem;background:var(--surface-soft);border-radius:0 4px 4px 0;}
+.cnf-svg{display:block;margin:1.2rem auto;max-width:100%;height:auto;}
+.cnf-why{background:var(--accent-soft);border-left:3px solid var(--accent);padding:0.4rem 0.8rem;margin:0.5rem 0;border-radius:0 4px 4px 0;font-size:0.93rem;}
+.cnf-why strong{color:var(--accent);}
+.my-addition{background:var(--module-accent-soft);border-left:3px solid var(--module-accent);padding:0.4rem 0.8rem;margin:0.6rem 0;border-radius:0 4px 4px 0;font-size:0.92rem;}
+.cnf-bridge{background:var(--blue-soft);border:1px dashed var(--blue);padding:0.6rem 0.9rem;margin:0.8rem 0;border-radius:4px;font-size:0.93rem;}
+.cnf-controls{display:flex;flex-wrap:wrap;gap:0.4rem;margin:0.6rem 0;}
+.cnf-controls button{background:var(--surface-soft);border:1px solid var(--border);color:var(--text);padding:0.3rem 0.7rem;border-radius:4px;cursor:pointer;font-size:0.88rem;}
+.cnf-controls button.active{background:var(--module-accent);color:var(--surface);border-color:var(--module-accent);}
+.cnf-stage svg{display:block;margin:0.4rem auto;}
+.cnf-readout{font-size:0.88rem;color:var(--text-muted);text-align:center;min-height:1.4em;margin-top:0.4rem;}
+@keyframes cnf-flow{0%{opacity:0.2;}50%{opacity:1;}100%{opacity:0.2;}}
+.cnf-particle{animation:cnf-flow 3s ease-in-out infinite;}
+</style>
+<article class="concept-entry">
+  <header class="concept-header">
+    <span class="concept-eyebrow">概念 · Module 4: Flow Matching</span>
+    <h1>Continuous Normalizing Flow</h1>
+    <p class="concept-tagline">— 用一条 ODE 把高斯流到数据；用 trace 替代行列式。</p>
+  </header>
+
+  <aside class="cnf-quickref">
+    <div><strong>定义</strong> · 参数化 ODE $dz/dt = v_\theta(z, t)$，把先验 $z(0) \sim \mathcal{N}(0, I)$ 流到数据 $z(1) = x$。</div>
+    <div><strong>密度演化</strong> · $\dfrac{d\log p_t(z(t))}{dt} = -\,\mathrm{tr}\!\left(\nabla v_\theta(z, t)\right)$（瞬时变量替换公式）。</div>
+    <div><strong>训练</strong> · 经典版：最大似然 + ODE 求解器 + adjoint 反传；现代版：flow matching（MSE）跳过似然。</div>
+    <div><strong>易错</strong> · CNF $\ne$ Normalizing Flow，网络<em>不需要</em>可逆；CNF $\ne$ diffusion，但 PF-ODE 是一种特殊 CNF。</div>
+  </aside>
+
+  <section class="concept-intuition">
+    <h2>直觉：风把水从太平洋吹到大西洋</h2>
+    <p>很多人第一次见 CNF 会以为它是「Normalizing Flow 的连续版」——意思好像是网络得设计成可逆的，再让步数趋近无穷。这是<strong>反过来</strong>的理解。CNF 的真正贡献并不是把 NF 的离散步数加密，而是用 ODE 一替代之后，<em>网络可逆性这条枷锁直接消失</em>，并且 Jacobian 行列式被替换成更便宜的 trace。换句话说，CNF 不是「让 NF 更细」，CNF 是「用微积分把 NF 当年绕不过去的两个工程难点同时拆掉」。这两个难点分别是：网络可逆性、Jacobian 可计算性。</p>
+
+    <p>在进入正式定义之前，先把家族关系摆清楚。Normalizing Flow（NF）是离散变换链 $x \to f_1 \to f_2 \to \cdots \to f_K \to z$，要求每个 $f_k$ 可逆、且 $\log|\det J_{f_k}|$ 能在 $O(d)$ 时间内算出。RealNVP、Glow、NICE 都属于 NF，它们都在「让网络好算 Jacobian」上做妥协。CNF 则直接把链条变成连续时间的 ODE，整条链条由一个共享的速度场 $v_\theta$ 决定，可逆性来自 ODE 解的存在唯一性定理，Jacobian 计算从行列式降到 trace。</p>
+
+    <div class="cnf-source">「2018 年有一篇相当 seminal 的论文，叫 continuous normalizing flows 或者 Neural ODE。Ricky（陈天琦）当时是我的 Meta intern mentor，超级传奇。他提出 CNF：把一个初始分布——比如高斯——的样本，通过积分一条 ODE，变换成目标分布，比如图像分布。」<br>—— CMU 10799 L5（07:10–08:06）</div>
+
+    <p>CMU 的讲师给了一个非常直观的物理比喻：<strong>风把水从太平洋（西海岸）吹到大西洋（东海岸）</strong>。每一个时刻、每一个位置，风都有一个速度方向 $v_\theta(z, t)$；水分子（也就是你的样本 $z$）就跟着风一路飘到东岸。「流」这个词的意思就是「沿着速度场往前积分」。这里的水不是单个水分子，而是<em>一整摊水的分布</em>——风改变的不只是某一颗水珠的位置，而是整个分布的形状。</p>
+
+    <div class="cnf-source">「想象风把太平洋的一摊水流向东海岸。为什么这是 normalizing flow？因为<strong>流线永远不会相交</strong>——如果你顺着风走，方向是唯一的，所以这是一个确定性的、可逆的变换。」<br>—— CMU 10799 L5（08:55–09:50）</div>
+
+    <p>"流线永远不会相交" 这句话是整个 CNF 直觉的灵魂。它意味着每个噪声点都对应<em>唯一</em>一个数据点，反过来每个数据点也对应唯一一个噪声点。这就是为什么 CNF 又叫 normalizing flow ——这个变换是双射，密度可以归一化、可以反过来追溯。一旦你接受了「沿着风走轨迹不会交叉」这件事，CNF 的所有数学就只是把它用微分方程的语言重新写一遍。换个说法：CNF 没有发明新的物理现象，它只是把"流体里的概率守恒"这件高中物理课上就出现过的事，用神经网络参数化、用 ODE 求解器跑起来。</p>
+
+    <p>Vizuara 的 Dr. Raj 把整个 flow 家族花了三到四节课讲，他在开场就提醒：</p>
+
+    <div class="cnf-source">「flow models 有意思的地方是同一个主题可以用一节课讲完，也可以用四节课讲完。如果你走难的那条路——四节课——你最后会发现终点其实非常简单。一节课的路也能到终点，只是你不知道为什么。」<br>—— Vizuara Lecture 9（00:00–00:54）</div>
+
+    <p>这两位讲师的取向不同：CMU 直接从 flow matching 的"超简单形式"切入，先讲怎么"线性插值噪声和数据"再回头补 CNF 的数学；Vizuara 走慢路，先把 NF 的可逆性、Jacobian、change-of-variables 一层层铺开，最后才接到 CNF。两条路最后会汇到同一个出口：一条 ODE、一个速度场、一个 trace 公式。</p>
+
+    <div class="my-addition">🟡 教材外补充：在这一页里，<strong>我们沿 CMU 的"反向回溯"线路</strong>——先看 ODE 长什么样，再补为什么它配叫 normalizing flow。这是因为大多数读者来到这一页的时候，是从 diffusion 或 flow matching 反过来追根溯源的，而不是从经典 NF 演化过来的。在机器学习训练里，CNF 对应的位置就是：image / video / 3D 生成模型的<em>积分式骨架</em>——SD3、SORA、Movie Gen、Stable Audio 这些跑的都是 CNF 架构，只是用 flow matching 而不是 MLE 来训。</div>
+  </section>
+
+  <section class="concept-deepdive">
+    <h2>数学：ODE 三件套</h2>
+
+    <p><strong>① 前向 ODE。</strong>给一个时间相关的向量场 $v_\theta(z, t): \mathbb{R}^d \times [0,1] \to \mathbb{R}^d$，CNF 定义</p>
+
+    <p>$$\frac{dz(t)}{dt} = v_\theta(z(t), t), \quad z(0) \sim \mathcal{N}(0, I).$$</p>
+
+    <p>采样时把这条 ODE 从 $t=0$ 积到 $t=1$，得到 $z(1)$ 当作生成样本 $x$。数值积分一般用 Runge–Kutta 4 阶或者更高阶的自适应步长求解器（dopri5、dopri8），步数典型取 $20$–$100$ 之间。生成一张图的成本就是这么多次 forward pass。</p>
+
+    <div class="cnf-why"><strong>Why</strong>：你只规定<em>瞬时方向</em>，不规定路径形状；网络只输出"在 $(z, t)$ 这个时空点上你该往哪走"。任何 MLP / U-Net / Transformer 都能当 $v_\theta$，无需任何结构约束——这就是 CNF 相对 NF 的<strong>头号红利</strong>。RealNVP 的 coupling layer、Glow 的 1x1 卷积都是为了让 Jacobian 容易算才设计的，到了 CNF 这些都不再必要。</div>
+
+    <p><strong>② 瞬时变量替换公式（instantaneous change of variables）。</strong>普通 NF 算密度要 $\log\!\left|\det J\right|$，$d \times d$ 行列式是 $O(d^3)$；维度一大就死。Chen et al. 2018 证明在 ODE 极限下：</p>
+
+    <p>$$\frac{d \log p_t(z(t))}{dt} = -\,\mathrm{tr}\!\left(\frac{\partial v_\theta(z(t), t)}{\partial z}\right).$$</p>
+
+    <p>把 $\log\!\left|\det J\right|$ 这种"全局体积比"换成了 trace——速度场在每个点的<em>瞬时散度</em>。直观上：散度大于 0 表示这一点附近的"水"在膨胀，密度下降；散度小于 0 表示在收缩，密度上升。把这些瞬时变化沿时间积起来，就得到了任意时刻 $t$ 上的 $\log p_t$。</p>
+
+    <div class="cnf-why"><strong>Why</strong>：trace 是 Jacobian 的对角元之和，对 $d=10^6$ 来说显式求所有对角元仍然要算 $d$ 次反传，依然不可行——但 Hutchinson 随机迹估计 $\mathrm{tr}(A) = \mathbb{E}_{\epsilon}[\epsilon^\top A \epsilon]$ 只需要采一个随机向量 $\epsilon$，做一次 Jacobian–向量积（VJP），就得到一个无偏估计。一次反传 $O(d)$ 就够，跟维度线性挂钩。这是 CNF 在高维上能跑起来的关键工程，也是 NF 时代不可能做到的——因为离散 NF 里你必须算精确 Jacobian 行列式，不能用随机估计。</div>
+
+    <p><strong>③ 训练目标（经典 MLE）。</strong>沿 $t: 1 \to 0$ 反向积分 ODE，同时累计 $\log p$：</p>
+
+    <p>$$\log p_1(x) = \log p_0(z(0)) - \int_0^1 \mathrm{tr}\!\left(\nabla v_\theta\right) dt.$$</p>
+
+    <p>$p_0$ 是高斯，logpdf 闭式；$p_1(x)$ 是模型在数据点上的对数似然。最大化它，就是 CNF 的经典最大似然训练。注意这里的<strong>反向积分</strong>：拿到一个数据点 $x$，把它当作 $z(1)$，沿 ODE 反着积到 $t=0$，沿途累计 trace 项，最后用 $z(0)$ 的高斯对数密度算总账。整个过程是端到端可微的，但需要把整条 ODE 轨迹反向再跑一遍。反向传播则用 adjoint sensitivity method 把内存开销从 $O(\text{steps})$ 压到 $O(1)$（代价是再积一次 ODE）。</p>
+
+    <div class="cnf-why"><strong>Why 用 adjoint</strong>：朴素地存下所有中间激活再反传，ODE solver 跑 100 步就要 100 倍内存，图像 batch 一上来就 OOM。Neural ODE 的 adjoint 把反传也写成一条 ODE：定义伴随状态 $a(t) = \partial L / \partial z(t)$，它本身满足 $da/dt = -a^\top \nabla_z v_\theta$，可以从 $t=1$ 反着积到 $t=0$。这样训练时只存终点状态，所有中间状态需要的时候再积一次拿到。这是 2018 论文的核心卖点之一，也是把 ODE 网络写进现代深度学习库的工程基础。</div>
+
+    <h2>为什么叫 "normalizing flow"</h2>
+
+    <p>"Normalizing" 指<strong>归一化变量替换</strong>——经过 $f$ 之后概率密度仍然是概率密度（积分为 1）。"Flow" 指<strong>沿速度场流动</strong>——确定性、轨迹不相交。两条性质合在一起就是：</p>
+
+    <div class="cnf-source">「这个变换之所以叫 normalizing flow，是因为<strong>流线永远不会相交</strong>。流如果是确定性的，它就是<em>可逆的</em>——你可以反着积分回去。所以从任何一个数据点，你都能反推到它对应的那个噪声。」<br>—— CMU 10799 L5（09:30–10:18）</div>
+
+    <p>这一点在 diffusion / flow 整个家族里特别关键：可逆意味着<strong>likelihood 可算、latent 可控、image inversion 可做</strong>。SDS、DDIM inversion、image editing 都靠这条性质——你需要把一张真实图编辑回到 latent，做点操作，再 decode 回来。SDE 路线下需要近似算法才能勉强 invert，而 CNF/ODE 路线下 invert 就是把求解器反着跑一遍，干净利落。</p>
+
+    <h2>训练慢、采样慢：CNF 一度被搁置的原因</h2>
+
+    <p>2018 到 2021 这几年，CNF 的论文不多，主要原因就是<strong>慢</strong>。最大似然训练每一步要：(1) 反向积分 ODE；(2) 沿途算 Hutchinson trace；(3) 通过 adjoint 反传到参数。一个 epoch 跑下来几小时起步，比 GAN、VAE 慢一个量级以上。采样也慢——20 到 100 步 ODE 积分，比 VAE/GAN 的一次 forward 慢不少。这两个慢加起来让 CNF 在生成质量上虽然有理论优势，但实际表现长期被 GAN 压制。</p>
+
+    <p>真正让 CNF 翻身的是 2022 年 Lipman 等人的 Flow Matching：用 MSE 直接回归 velocity，跳过似然，跳过 trace，跳过 adjoint，训练快到和普通监督学习一样。再加上 SD3、SORA 这些大模型把 CNF + FM 推到 SOTA，CNF 这才正式接管 image / video / 3D 生成的主战场。</p>
+
+    <h2>CMU 讲师的"反向重建"线路</h2>
+
+    <p>CMU L5 整堂课的脉络其实是<strong>先给答案再追溯</strong>。讲师先抛出 flow matching 的极简形式——"取一个数据 $x_1$、取一个噪声 $x_0$、线性插值得到 $x_t = (1-t) x_0 + t x_1$、目标 velocity 是 $x_1 - x_0$、网络回归这个 velocity"——然后问："为什么这么简单的东西居然就是合法的生成模型？为什么我们之前要绕一大圈走 SDE、score matching？"</p>
+
+    <div class="cnf-source">「这看起来太简单了——没有数学，没有 SDE，什么都没有。为什么我们之前要做那么多 diffusion 的数学？为什么这居然是合法的？为什么这两种方法是等价的？我们凭什么可以这么做？答案要从历史讲起，2018 年才能讲明白。」<br>—— CMU 10799 L5（06:26–07:10）</div>
+
+    <p>接着讲师把整条历史线拉出来：2018 Neural ODE 提出 CNF 骨架；2019–2021 MLE 训 CNF 慢得没人用；2020 Song 提出 PF-ODE，把 diffusion 和 CNF 连起来；2022 Lipman 提出 flow matching，给了 CNF 一个不依赖似然的训练 shortcut。Flow matching 之所以"看起来太简单"，是因为它<em>站在 CNF 框架上</em>——CNF 把可逆性和密度计算的复杂度都吸收掉了，FM 只需要管 velocity 的回归，自然就显得轻盈。</p>
+
+    <p>这个故事讲完之后，再回头看 flow matching 的 5 行训练代码，你就知道每一行背后都有 CNF 的数学撑着。这是为什么这一页要把 CNF 单独抽出来讲清楚：<strong>它是整个 flow 家族的母架构</strong>，所有后续的训练方法都是它的某种 shortcut。理解了 CNF，diffusion 的 SDE、PF-ODE、score matching、flow matching、rectified flow、consistency models 才能在一张图里看清楚相互的位置。</p>
+
+    <h2>主要图示：向量场把高斯流到数据</h2>
+
+    <svg class="cnf-svg" viewBox="0 0 600 220" role="img" aria-label="CNF 把高斯向量场流到双峰数据分布">
+      <defs>
+        <marker id="cnf-ar" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--module-accent)"/></marker>
+      </defs>
+      <g font-family="ui-sans-serif" font-size="11" fill="var(--text)">
+        <text x="80" y="20" text-anchor="middle" font-weight="600">$t=0$ 高斯</text>
+        <text x="300" y="20" text-anchor="middle" font-weight="600">$v_\theta(z, t)$ 速度场</text>
+        <text x="520" y="20" text-anchor="middle" font-weight="600">$t=1$ 数据双峰</text>
+        <!-- t=0 gaussian dots -->
+        <g class="cnf-particle">
+          <circle cx="60" cy="110" r="4" fill="var(--blue)"/>
+          <circle cx="80" cy="100" r="4" fill="var(--blue)"/>
+          <circle cx="100" cy="115" r="4" fill="var(--blue)"/>
+          <circle cx="70" cy="125" r="4" fill="var(--blue)"/>
+          <circle cx="90" cy="130" r="4" fill="var(--blue)"/>
+          <circle cx="85" cy="90" r="4" fill="var(--blue)"/>
+        </g>
+        <!-- vector field arrows in middle -->
+        <g stroke="var(--module-accent)" fill="none" stroke-width="1.4">
+          <path d="M 180 80 Q 250 60 320 70" marker-end="url(#cnf-ar)"/>
+          <path d="M 180 110 Q 250 110 320 100" marker-end="url(#cnf-ar)"/>
+          <path d="M 180 140 Q 250 160 320 150" marker-end="url(#cnf-ar)"/>
+          <path d="M 200 95 Q 260 80 330 80" marker-end="url(#cnf-ar)" opacity="0.6"/>
+          <path d="M 200 130 Q 260 150 330 140" marker-end="url(#cnf-ar)" opacity="0.6"/>
+        </g>
+        <!-- t=1 bimodal -->
+        <g>
+          <circle cx="500" cy="75" r="5" fill="var(--module-accent)"/>
+          <circle cx="515" cy="65" r="5" fill="var(--module-accent)"/>
+          <circle cx="520" cy="85" r="5" fill="var(--module-accent)"/>
+          <circle cx="540" cy="145" r="5" fill="var(--module-accent)"/>
+          <circle cx="525" cy="155" r="5" fill="var(--module-accent)"/>
+          <circle cx="555" cy="135" r="5" fill="var(--module-accent)"/>
+        </g>
+        <!-- baseline -->
+        <line x1="40" y1="190" x2="560" y2="190" stroke="var(--border)" stroke-dasharray="2,3"/>
+        <text x="40" y="205" font-size="10" fill="var(--text-muted)">$z(0)$</text>
+        <text x="555" y="205" font-size="10" fill="var(--text-muted)">$z(1) = x$</text>
+        <text x="300" y="205" font-size="10" fill="var(--text-muted)">沿 ODE 积分 $\int_0^1 v_\theta \, dt$</text>
+      </g>
+    </svg>
+
+    <p>左侧的蓝色高斯样本，被中间的速度场（橙色箭头）"吹"到右侧的双峰数据分布上。注意：<strong>箭头是 $v_\theta$ 在某些代表点的值，不是粒子轨迹</strong>——真实粒子轨迹是从这些箭头积分出来的曲线。一个粒子在某个位置看到的箭头，决定了它下一瞬该往哪走；下一瞬走到新位置后，又看到新箭头，继续走。把这些瞬时方向连成一条线，就是这个粒子的轨迹。</p>
+
+    <p>另一个值得说清楚的事：<strong>速度场 $v_\theta$ 是同一个网络，时间 $t$ 作为输入</strong>。你不是训 100 个不同的网络管 100 个时刻，而是训一个吃 $(z, t)$ 输出方向的网络。这一点和 NF 不同——NF 是堆叠 $K$ 个不同的可逆层，每层有独立参数。CNF 是 amortized：用时间编码（sinusoidal 或 learnable）把 $t$ 喂进网络，让一个网络管所有时刻。这是参数效率的来源，也是 flow matching 训练 shortcut 能成立的前提。</p>
+  </section>
+
+  <section class="concept-interact">
+    <p>下面有 4 个按钮，依次切换"先验 → 速度场 → 流动中 → 数据"。<strong>不变量</strong>：<em>整体质量守恒</em>——所有蓝点的"总质量"等于所有橙点的"总质量"，因为 ODE 是一一对应的双射，不创造也不销毁概率。</p>
+
+    <div class="cnf-controls">
+      <button data-step="0" class="active">① 先验 $\mathcal{N}(0,I)$</button>
+      <button data-step="1">② 速度场 $v_\theta$</button>
+      <button data-step="2">③ 流动 $t \in (0,1)$</button>
+      <button data-step="3">④ 数据 $p_{\text{data}}$</button>
+    </div>
+
+    <div class="cnf-stage">
+      <svg id="cnf-stage-svg" viewBox="0 0 500 180" role="img" aria-label="CNF 互动流动示意">
+        <defs>
+          <marker id="cnf-iar" markerWidth="5" markerHeight="5" refX="4" refY="2.5" orient="auto"><path d="M0,0 L5,2.5 L0,5 Z" fill="var(--module-accent)"/></marker>
+        </defs>
+        <g id="cnf-g-prior">
+          <circle cx="250" cy="90" r="60" fill="var(--blue-soft)" stroke="var(--blue)" stroke-dasharray="3,3"/>
+          <circle cx="240" cy="85" r="4" fill="var(--blue)"/>
+          <circle cx="265" cy="95" r="4" fill="var(--blue)"/>
+          <circle cx="250" cy="75" r="4" fill="var(--blue)"/>
+          <circle cx="235" cy="100" r="4" fill="var(--blue)"/>
+          <circle cx="260" cy="110" r="4" fill="var(--blue)"/>
+          <circle cx="255" cy="80" r="4" fill="var(--blue)"/>
+        </g>
+        <g id="cnf-g-field" style="display:none;" stroke="var(--module-accent)" fill="none" stroke-width="1.3">
+          <path d="M 100 60 L 140 55" marker-end="url(#cnf-iar)"/>
+          <path d="M 100 90 L 140 90" marker-end="url(#cnf-iar)"/>
+          <path d="M 100 120 L 140 125" marker-end="url(#cnf-iar)"/>
+          <path d="M 200 60 L 240 50" marker-end="url(#cnf-iar)"/>
+          <path d="M 200 90 L 240 85" marker-end="url(#cnf-iar)"/>
+          <path d="M 200 120 L 240 130" marker-end="url(#cnf-iar)"/>
+          <path d="M 300 60 L 340 45" marker-end="url(#cnf-iar)"/>
+          <path d="M 300 90 L 340 85" marker-end="url(#cnf-iar)"/>
+          <path d="M 300 120 L 340 135" marker-end="url(#cnf-iar)"/>
+          <path d="M 400 60 L 440 40" marker-end="url(#cnf-iar)"/>
+          <path d="M 400 90 L 440 80" marker-end="url(#cnf-iar)"/>
+          <path d="M 400 120 L 440 140" marker-end="url(#cnf-iar)"/>
+        </g>
+        <g id="cnf-g-flow" style="display:none;">
+          <path d="M 80 90 Q 200 60 420 50" stroke="var(--module-accent)" fill="none" stroke-dasharray="4,3"/>
+          <path d="M 80 90 Q 200 90 420 90" stroke="var(--module-accent)" fill="none" stroke-dasharray="4,3"/>
+          <path d="M 80 90 Q 200 120 420 140" stroke="var(--module-accent)" fill="none" stroke-dasharray="4,3"/>
+          <circle cx="80" cy="90" r="4" fill="var(--blue)"/>
+          <circle cx="250" cy="75" r="4" fill="var(--blue)"/>
+          <circle cx="250" cy="90" r="4" fill="var(--blue)"/>
+          <circle cx="250" cy="105" r="4" fill="var(--blue)"/>
+          <circle cx="420" cy="50" r="5" fill="var(--module-accent)"/>
+          <circle cx="420" cy="90" r="5" fill="var(--module-accent)"/>
+          <circle cx="420" cy="140" r="5" fill="var(--module-accent)"/>
+        </g>
+        <g id="cnf-g-data" style="display:none;">
+          <ellipse cx="180" cy="80" rx="40" ry="25" fill="var(--module-accent-soft)" stroke="var(--module-accent)"/>
+          <ellipse cx="340" cy="120" rx="40" ry="25" fill="var(--module-accent-soft)" stroke="var(--module-accent)"/>
+          <circle cx="170" cy="75" r="4" fill="var(--module-accent)"/>
+          <circle cx="190" cy="85" r="4" fill="var(--module-accent)"/>
+          <circle cx="185" cy="70" r="4" fill="var(--module-accent)"/>
+          <circle cx="330" cy="115" r="4" fill="var(--module-accent)"/>
+          <circle cx="350" cy="125" r="4" fill="var(--module-accent)"/>
+          <circle cx="345" cy="110" r="4" fill="var(--module-accent)"/>
+        </g>
+      </svg>
+      <div class="cnf-readout" id="cnf-readout">$t=0$：从标准高斯 $\mathcal{N}(0, I)$ 抽蓝点。</div>
+    </div>
+
+    <script>
+      (function () {
+        const btns = document.querySelectorAll('.cnf-controls button');
+        const groups = ['cnf-g-prior', 'cnf-g-field', 'cnf-g-flow', 'cnf-g-data'];
+        const texts = [
+          '$t=0$：从标准高斯 $\\mathcal{N}(0, I)$ 抽蓝点。',
+          '$v_\\theta(z, t)$：神经网络在每个 $(z, t)$ 给一个方向。',
+          '$z(t)$ 沿箭头积分；流线不相交（normalizing 的字面意义）。',
+          '$t=1$：到达双峰 $p_{\\mathrm{data}}$；质量守恒。'
+        ];
+        const readout = document.getElementById('cnf-readout');
+        function show(step) {
+          btns.forEach(b => b.classList.toggle('active', +b.dataset.step === step));
+          groups.forEach((id, i) => {
+            document.getElementById(id).style.display = i === step ? '' : 'none';
+          });
+          readout.textContent = texts[step];
+          if (window.renderMathInElement) {
+            window.renderMathInElement(readout, {delimiters: [{left: '$', right: '$', display: false}]});
+          }
+        }
+        btns.forEach(b => b.addEventListener('click', () => show(+b.dataset.step)));
+        show(0);
+      })();
+    </script>
+  </section>
+
+  <section class="concept-example">
+    <h2>手算：1-D CNF 在一个时刻的密度更新</h2>
+    <p>设 $d=1$，$v_\theta(z, t) = -0.5 z$（朝原点收缩的一个简单线性速度场）。已知 $z(0) = 2$，$\log p_0(z(0)) = -2.92$（标准高斯在 $z=2$ 处的对数密度，等于 $-\frac{1}{2}\log(2\pi) - 2 \approx -2.92$）。用 $\Delta t = 0.1$ 做一步显式 Euler：</p>
+    <p>$$z(0.1) = z(0) + v_\theta(z, 0)\,\Delta t = 2 + (-0.5)(2)(0.1) = 2 - 0.1 = 1.9.$$</p>
+    <p>瞬时散度 $\partial v_\theta / \partial z = -0.5$（这里 $v$ 是 $z$ 的一次函数，导数显然是 $-0.5$），所以瞬时变量替换给出：</p>
+    <p>$$\log p_{0.1}(z(0.1)) = \log p_0(z(0)) - \mathrm{tr}(\nabla v_\theta)\,\Delta t = -2.92 - (-0.5)(0.1) = -2.92 + 0.05 = -2.87.$$</p>
+    <p>密度上升了 0.05——符合直觉，因为收缩场把质量挤向中心，等价点的密度变大。如果速度场是发散的（比如 $v_\theta = +0.5 z$），同样的 Euler 一步会得到 $\log p$ 下降 0.05。这就是 trace 替代行列式后整套机器的样子：你只需要会算速度场对 $z$ 的导数（自动微分一行），不需要算任何 $d \times d$ 行列式。</p>
+  </section>
+
+  <section class="concept-pitfalls">
+    <h2>三大常见误区</h2>
+    <ol>
+      <li><strong>"CNF 就是把 RealNVP 步数趋近无穷的极限。"</strong> 反例：RealNVP 必须用 coupling layer，强行把网络拆成两半交替更新——一半保持不变，另一半被对方调制——这样 Jacobian 就是分块三角，行列式只是对角元乘积。这是一个<em>强结构约束</em>。CNF 的 $v_\theta$ 可以是任意 MLP、U-Net、DiT、Transformer，没有可逆性约束——可逆性是 ODE 解的存在唯一性定理自动赋予的，不是网络结构赋予的。RealNVP 与 CNF 在表达力上不是连续过渡，而是两种不同范式。</li>
+      <li><strong>"CNF $=$ Diffusion。"</strong> 反例：Diffusion 是 SDE（$dx = f\,dt + g\,dW$，含布朗运动 $dW$），轨迹是随机的，同一个起点跑两次终点不同；CNF 是 ODE（无随机项），完全确定，同一个起点跑无数次结果都一样。两者的桥梁是 PF-ODE——Yang Song 2020 证明每个扩散 SDE 都有一条等价的 probability flow ODE，这条 PF-ODE 与原 SDE 在<em>任意时刻 $t$ 的边缘分布</em>相同，<strong>PF-ODE 就是 CNF 的一种特例</strong>。换句话说：diffusion = 一个带 score-matching 训练 shortcut 的 CNF，速度场 $v_\theta$ 由学到的 score $\nabla \log p_t$ 间接构造。</li>
+      <li><strong>"CNF 必须 MLE 训练。"</strong> 反例：MLE 训练慢得让 CNF 一度被搁置整整四年（每步反向积分 + Hutchinson trace + adjoint，单 epoch 几小时起步；图像数据集上很难和 GAN 竞争）。Flow Matching（Lipman 2022）用 MSE 直接回归 velocity 取代 likelihood——给定一条预设的概率路径（高斯到数据），目标 velocity 有闭式解，训练就是普通监督学习。SD3、SORA、Flux 等大模型跑的<em>都是 CNF 架构，但都用 FM 训</em>。FM 是 CNF 的<em>训练 shortcut</em>，不是新模型，不是替代品。</li>
+    </ol>
+  </section>
+
+  <section class="concept-seealso">
+    <h2>相关概念</h2>
+    <div class="cnf-bridge"><strong>桥接 diffusion ↔ flow matching</strong>：CNF 是 diffusion 与 flow matching 共同的<em>积分式骨架</em>。从 diffusion 出发，把 SDE 的随机项扣掉得到 PF-ODE，这条 ODE 在结构上就是 CNF；从 flow matching 出发，预设一条概率路径，直接学 $v_\theta$，得到的也是 CNF。两条不同的路径同一个出口，差别只在<em>怎么训</em>这个 $v_\theta$。这也是为什么近年的论文越来越倾向于把 diffusion 和 flow matching 统一在 CNF 框架下讨论——它们不是两种东西，而是同一种东西的两种训练方法。</div>
+    <ul>
+      <li><a href="/video-to-notebook/concepts/flow-matching/">Flow Matching</a> — CNF 的现代训练 shortcut，用 MSE 直接回归 velocity，跳过似然计算。</li>
+      <li><a href="/video-to-notebook/concepts/velocity-field/">Velocity Field</a> — CNF 的核心可学习对象 $v_\theta(z, t)$，决定了流的形状和速度。</li>
+    </ul>
+  </section>
+
+  <section class="concept-sources">
+    <h2>来源</h2>
+    <ol>
+      <li><a href="https://www.youtube.com/watch?v=_OOITDB2VCY&t=430s" target="_blank" rel="noopener">cmu-10799-diffusion-flow · L5 · "2018 seminal paper / Ricky / Neural ODE" · (07:10)</a></li>
+      <li><a href="https://www.youtube.com/watch?v=_OOITDB2VCY&t=485s" target="_blank" rel="noopener">cmu-10799-diffusion-flow · L5 · "wind transports water, streams never cross" · (08:06)</a></li>
+      <li><a href="https://www.youtube.com/watch?v=_OOITDB2VCY&t=535s" target="_blank" rel="noopener">cmu-10799-diffusion-flow · L5 · "invertible because flow is deterministic" · (08:55)</a></li>
+      <li><a href="https://www.youtube.com/watch?v=qwXaD03IHqw&t=3s" target="_blank" rel="noopener">diffusion-principles-vizuara · L9 · "flow models 两条教学路径" · (00:03)</a></li>
+    </ol>
+  </section>
+</article>

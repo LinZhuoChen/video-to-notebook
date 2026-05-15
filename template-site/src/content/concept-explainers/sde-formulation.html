@@ -1,0 +1,239 @@
+<style>
+/* prefix: sde- */
+.sde-quickref{background:var(--surface-soft);border-left:3px solid var(--module-accent);padding:0.8rem 1rem;border-radius:0 4px 4px 0;margin:1rem 0;font-size:0.92rem;}
+.sde-quickref div{margin:0.3rem 0;}
+.sde-svg{display:block;margin:1.2rem auto;max-width:100%;height:auto;}
+.sde-pitfalls ol{padding-left:1.4rem;} .sde-pitfalls li{margin:0.6rem 0;}
+.sde-source{font-style:italic;color:var(--text-muted);border-left:2px solid var(--border);padding:0.2rem 0.8rem;margin:0.5rem 0;font-size:0.9rem;}
+.callout-quote{font-style:italic;color:var(--text-muted);border-left:2px solid var(--module-accent);padding:0.3rem 0.9rem;margin:0.6rem 0;font-size:0.92rem;background:var(--surface-soft);}
+.sde-callout{background:var(--module-accent-soft);border-left:3px solid var(--module-accent);padding:0.6rem 0.9rem;margin:0.8rem 0;border-radius:0 4px 4px 0;font-size:0.93rem;}
+.sde-why{color:var(--module-accent);font-weight:600;}
+.my-addition{background:var(--accent-soft);border-left:3px solid var(--accent);padding:0.5rem 0.9rem;margin:0.7rem 0;border-radius:0 4px 4px 0;font-size:0.92rem;color:var(--text);}
+.sde-grid{display:grid;grid-template-columns:1fr 1fr;gap:0.8rem;margin:0.8rem 0;}
+.sde-grid > div{background:var(--surface-soft);padding:0.6rem 0.8rem;border-radius:4px;border:1px solid var(--border);font-size:0.91rem;}
+.sde-grid h4{margin:0 0 0.3rem 0;font-size:0.95rem;color:var(--module-accent);}
+.sde-controls{display:flex;gap:0.4rem;flex-wrap:wrap;margin:0.6rem 0;}
+.sde-controls button{padding:0.35rem 0.8rem;border:1px solid var(--border);background:var(--surface-soft);color:var(--text);border-radius:4px;cursor:pointer;font-size:0.88rem;}
+.sde-controls button.active{background:var(--module-accent);color:var(--surface);border-color:var(--module-accent);}
+@keyframes sde-vp-walk{0%{transform:translateY(0);}25%{transform:translateY(-3px);}50%{transform:translateY(2px);}75%{transform:translateY(-1px);}100%{transform:translateY(0);}}
+@keyframes sde-ve-walk{0%{transform:translateY(0) scale(1);}50%{transform:translateY(-10px) scale(1.05);}100%{transform:translateY(0) scale(1);}}
+.sde-vp-dot{animation:sde-vp-walk 2.4s ease-in-out infinite;}
+.sde-ve-dot{animation:sde-ve-walk 3s ease-in-out infinite;}
+</style>
+
+<article class="concept-entry">
+  <header class="concept-header">
+    <span class="concept-eyebrow">概念</span>
+    <h1>SDE Formulation</h1>
+    <p class="concept-tagline">— 把 DDPM / SMLD / Langevin 同时塞进 $dx = f\,dt + g\,dW$ 这<em>一条</em>连续时间方程。</p>
+  </header>
+
+  <aside class="sde-quickref">
+    <div><strong>定义</strong> · Song et al. 2021《Score-Based Generative Modeling Through Stochastic Differential Equations》提出：把扩散过程写成连续时间随机微分方程 $dx = f(x, t)\,dt + g(t)\,dW$，DDPM 与 SMLD 都是它在不同 $f, g$ 下的特例。</div>
+    <div><strong>前向 SDE</strong> · $dx = f(x, t)\,dt + g(t)\,dW$，$W$ 是布朗运动；$dt \to 0$ 即得连续轨迹。</div>
+    <div><strong>反向 SDE (Anderson 1982)</strong> · $dx = [f(x, t) - g(t)^2 \nabla_x \log p_t(x)]\,dt + g(t)\,d\bar W$，唯一未知项是 score $\nabla_x \log p_t(x)$，正是网络要学的东西。</div>
+    <div><strong>易错</strong> · SDE formulation <em>不是</em>一个新模型；它是把已有 DDPM / SMLD 都装进同一个连续时间框架的<strong>视角统一</strong>。理解 SDE 不会让你训练出新的网络，但它给你 ODE solver、自适应步长、PF-ODE deterministic 镜像等所有后续工具的钥匙。</div>
+  </aside>
+
+  <section class="concept-intuition">
+    <p>很多人第一次听说 "SDE formulation" 会以为这是 DDPM 之外的另一种扩散模型——"哦，又有一种新方法叫 SDE"。<strong>这是最大的误读</strong>。SDE formulation 不是一个新模型，它是 <strong>DDPM、SMLD 和 Langevin 动力学的连续时间极限</strong>，把这些原本看起来各自独立的离散方法统一进同一条随机微分方程 $dx = f(x, t)\,dt + g(t)\,dW$ 之下。你在 SDE 视角下不会得到一种"新的扩散模型"，但你会突然看清：DDPM 不过是 VP-SDE 的 Euler-Maruyama 离散；SMLD 不过是 VE-SDE 的离散；Langevin 动力学不过是反向 SDE 在去掉漂移项后的特例。这一统一是 Yang Song 2021 那篇 ICLR best paper 的核心贡献。</p>
+
+    <p>Vizuara 的 Dr. Raj 在 Lecture 8 把这套统一称作"把所有东西串起来的框架"，他在开场就直接把这层身份说出来：</p>
+
+    <div class="callout-quote">"We have so far covered VAEs then DDPMs ... then the energy-based approach which includes score function and noise conditioned score network. Today we are going to look at a framework which unifies everything together." —— Vizuara《Principles of Diffusion Models》L8 @00:05</div>
+
+    <p>注意 Dr. Raj 强调的"unifies everything"——VAE / DDPM / score-based 这三条主线<em>都</em>在 SDE 之下归一。他随后给出本节最重要的物理直觉：</p>
+
+    <div class="callout-quote">"By diffusion we understand that something is spreading in space ... if you have a background in physics or mechanics, particles, fluid mechanics, you'll find this lecture very interesting." —— Vizuara L8 @02:06</div>
+
+    <p>他用一杯水里滴一滴红色染料作为整节课的中央比喻：染料起初是球形，落进水里，慢慢扩散，最终整杯水变红、原来的形状<strong>完全被破坏</strong>。然后他抛出本节真正要回答的问题——<em>能不能反过来？</em>给你这一杯均匀的红水，能不能恢复出原来那滴染料的形状？宏观上不行（时间不可逆），但<strong>微观上的布朗运动是时间可逆的</strong>，这一条物理事实就是整个扩散模型生成的根基。Dr. Raj 把这件事讲得很重：</p>
+
+    <div class="callout-quote">"It turns out that even though macroscopic motions are not time reversible ... at the microscopic level, if you look at these individual tiny particles, ... these motions are exactly reversible. ... this is the only theme which is used in the entire diffusion literature in all the different approaches." —— Vizuara L8 @07:30</div>
+
+    <p>"the only theme"——所有扩散文献都用这一条原理。Anderson 1982 把这条物理事实写成了数学定理：给定前向 SDE $dx = f\,dt + g\,dW$，存在一条对应的反向 SDE，其漂移项里多出一个 $-g^2 \nabla_x \log p_t(x)$，即 <strong>score function</strong>。这就是"网络要学的东西"——score。</p>
+
+    <p>CMU 10-799 那门课在 SDE 视角下走得更形式化，直接从 ODE 出发先讲一遍连续时间的流向，再把布朗噪声叠加进去得到 SDE，最后把 Anderson 反向 SDE 当成必要的桥梁推出 PF-ODE。两门课讲法不同，但<strong>关键身份是一致的</strong>：DDPM / SMLD / Langevin 在 SDE 下变成同一件事的三种离散化。</p>
+
+    <p>在训练里这件事对应：把 DDPM 的 $T = 1000$ 步极限拉到 $T \to \infty$、$\beta_t \to 0$，得到连续时间 VP-SDE；网络的目标依然是预测 score（在 $\epsilon$-prediction 参数化下，score 和 $\epsilon$ 只差一个 $-\sqrt{1-\bar\alpha_t}$ 系数）。SDE 视角不改训练，但它<strong>解放推理</strong>——你可以用任何高阶 SDE/ODE solver、任何步长（甚至自适应），不再被原来 DDPM 的离散链锁死。</p>
+  </section>
+
+  <section class="concept-deepdive">
+    <h2>1. 前向 SDE：一行方程容纳所有扩散</h2>
+    <p>SDE formulation 的全部前向过程写成一条方程：</p>
+    <p>$$dx = f(x, t)\,dt + g(t)\,dW$$</p>
+    <p>其中 $f(x, t)$ 称作<strong>漂移项</strong>（drift），$g(t)$ 称作<strong>扩散系数</strong>（diffusion coefficient），$W$ 是标准布朗运动（Wiener process）。$dt \to 0$ 时这条方程定义了一条连续随机轨迹。当 $f, g$ 取不同形式，就得到不同的扩散模型族。Song et al. 2021 论文里给出两个最重要的特例：</p>
+
+    <h3>1.1 VP-SDE (Variance Preserving)：DDPM 的连续极限</h3>
+    <p>$$f(x, t) = -\tfrac{1}{2}\beta(t)\,x, \qquad g(t) = \sqrt{\beta(t)}$$</p>
+    <p>展开来看：$dx = -\tfrac{1}{2}\beta(t)\,x\,dt + \sqrt{\beta(t)}\,dW$。</p>
+    <p><span class="sde-why">Why "variance preserving"</span>：直接验证一下。如果 $x_0$ 单位方差，$\text{Var}(x_t)$ 在这条 SDE 下的演化由伊藤公式给出 $d\,\text{Var} = (-\beta(t)\,\text{Var} + \beta(t))\,dt = \beta(t)(1 - \text{Var})\,dt$。这是个一阶线性 ODE，平衡点是 $\text{Var} = 1$——也就是说<strong>方差被驱动到 1 并保持</strong>。$t \to T$ 时 $x_T \to \mathcal{N}(0, I)$。这是 DDPM 离散版"$\sqrt{1-\beta_t}$ 系数让总方差守恒"的连续时间镜像。Vizuara 的染料比喻在这里对应：染料的"信号量"被持续磨平，但水的"总体浓度尺度"始终是单位 1。</p>
+
+    <h3>1.2 VE-SDE (Variance Exploding)：SMLD 的连续极限</h3>
+    <p>$$f(x, t) = 0, \qquad g(t) = \sqrt{\frac{d\sigma^2(t)}{dt}}$$</p>
+    <p>展开来看：$dx = \sqrt{d\sigma^2/dt}\,dW$，没有漂移，只有不断累积的噪声。</p>
+    <p><span class="sde-why">Why "variance exploding"</span>：直接积分得到 $\text{Var}(x_t) = \text{Var}(x_0) + \sigma^2(t) - \sigma^2(0)$，方差随时间<strong>无限增长</strong>。Song & Ermon 2019/2020 的 NCSN / SMLD 用一组几何序列 $\sigma_1 < \sigma_2 < \cdots < \sigma_L$（$\sigma_L$ 可大到 50 甚至 80）训一个 noise-conditioned score network。连续极限下就是 VE-SDE。$x_T$ 在 VE-SDE 下不收敛到 $\mathcal{N}(0, I)$，而是变成 $\mathcal{N}(x_0, \sigma_T^2 I)$——一张极其 noisy 的图，几乎跟原图无关。</p>
+
+    <div class="sde-grid">
+      <div>
+        <h4>VP-SDE（DDPM 系）</h4>
+        <p>$f = -\tfrac{1}{2}\beta(t)\,x$，$g = \sqrt{\beta(t)}$。<br>方差驱动到 1。<br>$x_T \approx \mathcal{N}(0, I)$。<br>$\beta(t)$ 是 schedule（DDPM linear / cosine 的连续版本）。</p>
+      </div>
+      <div>
+        <h4>VE-SDE（SMLD 系）</h4>
+        <p>$f = 0$，$g = \sqrt{d\sigma^2/dt}$。<br>方差无限膨胀。<br>$x_T \approx \mathcal{N}(x_0, \sigma_T^2 I)$，$\sigma_T$ 很大。<br>$\sigma(t)$ 通常取 $\sigma_{\min}(\sigma_{\max}/\sigma_{\min})^t$，几何递增。</p>
+      </div>
+    </div>
+
+    <p>论文还给出第三个<strong>sub-VP SDE</strong>，它在 VP 基础上微调 $g(t)$，让中段方差略小，likelihood 表现更好；工程上一般直接用 VP 或 VE，sub-VP 的提升不大。</p>
+
+    <svg class="sde-svg" viewBox="0 0 600 280" role="img" aria-label="VP-SDE 与 VE-SDE 两种前向轨迹对比">
+      <defs>
+        <marker id="sde-arrow-head" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+          <path d="M 0 0 L 10 5 L 0 10 Z" fill="var(--text-muted)"/>
+        </marker>
+      </defs>
+      <g font-family="ui-sans-serif" font-size="11" fill="var(--text)">
+        <text x="300" y="18" text-anchor="middle" font-size="13" font-weight="600">VP-SDE 与 VE-SDE：方差随 t 的不同命运</text>
+
+        <line x1="60" y1="240" x2="540" y2="240" stroke="var(--text-muted)" marker-end="url(#sde-arrow-head)"/>
+        <text x="555" y="244" font-size="10" fill="var(--text-muted)">t</text>
+        <line x1="60" y1="240" x2="60" y2="40" stroke="var(--text-muted)" marker-end="url(#sde-arrow-head)"/>
+        <text x="50" y="35" font-size="10" fill="var(--text-muted)">Var(x_t)</text>
+
+        <line x1="60" y1="140" x2="530" y2="140" stroke="var(--border)" stroke-dasharray="3 3"/>
+        <text x="535" y="143" font-size="9" fill="var(--text-muted)">Var=1</text>
+
+        <path d="M 60 200 Q 200 145, 530 140" fill="none" stroke="var(--module-accent)" stroke-width="2"/>
+        <circle class="sde-vp-dot" cx="200" cy="170" r="5" fill="var(--module-accent)"/>
+        <text x="240" y="165" font-size="10" fill="var(--module-accent)">VP-SDE：方差被拉到 1（信号-噪声此消彼长）</text>
+
+        <path d="M 60 200 Q 200 180, 530 50" fill="none" stroke="var(--red)" stroke-width="2"/>
+        <circle class="sde-ve-dot" cx="380" cy="100" r="5" fill="var(--red)"/>
+        <text x="290" y="80" font-size="10" fill="var(--red)">VE-SDE：方差无限膨胀（只加噪声不缩信号）</text>
+
+        <text x="55" y="255" font-size="9" fill="var(--text-muted)">t=0</text>
+        <text x="525" y="255" font-size="9" fill="var(--text-muted)">t=T</text>
+
+        <g transform="translate(60, 200)">
+          <rect x="-6" y="-6" width="12" height="12" fill="var(--module-accent-soft)" stroke="var(--module-accent)"/>
+        </g>
+        <text x="60" y="220" text-anchor="middle" font-size="9" fill="var(--text-muted)">x_0</text>
+      </g>
+    </svg>
+
+    <h2>2. 反向 SDE：Anderson 1982 的魔法</h2>
+    <p>有了前向 SDE 还不够——生成需要的是<strong>反向过程</strong>：从噪声出发回到数据。Brian Anderson 在 1982 年的论文《Reverse-time diffusion equation models》证明了如下事实：给定任意 Itô SDE $dx = f(x, t)\,dt + g(t)\,dW$，它在时间反演下对应一条<strong>反向 SDE</strong>：</p>
+    <p>$$dx = \left[\,f(x, t) - g(t)^2 \nabla_x \log p_t(x)\,\right] dt + g(t)\,d\bar W$$</p>
+    <p>其中 $\bar W$ 是反向布朗运动，$\nabla_x \log p_t(x)$ 是时间 $t$ 处边际分布 $p_t(x)$ 的<strong>score function</strong>。</p>
+    <p><span class="sde-why">Why this is the entire trick</span>：反向 SDE 里除了 score 之外的所有项都是<em>已知</em>的——$f, g$ 是你自己设计的，$\bar W$ 是随机数。<strong>唯一未知的就是 $\nabla_x \log p_t(x)$</strong>。score 一旦学到，反向 SDE 就完全可执行；生成等价于"在 $t = T$ 起点采 $x_T \sim$ 先验（VP 是 $\mathcal{N}(0, I)$，VE 是大方差高斯），然后离散 Anderson SDE 一路积分到 $t = 0$"。这把"生成"这个抽象任务<strong>规约到了"学一个向量场"</strong>这件具体的事。Dr. Raj 那句"this is the only theme"在这里数学化了——所有扩散模型的生成都来自 Anderson 这一公式。</p>
+
+    <div class="sde-callout">
+      <strong>score 是什么</strong>：$\nabla_x \log p_t(x)$ 是密度函数对位置的对数梯度，它<em>指向密度更高的方向</em>。生成时反向 SDE 顺着 score 走，相当于"沿着数据流形的引力上行"，每一步还叠加一点点反向噪声 $g(t)\,d\bar W$，让样本不收敛到 mode 而保持多样性。
+    </div>
+
+    <h2>3. 从离散到连续：DDPM 即 Euler-Maruyama 离散</h2>
+    <p>SDE 视角真正强大的地方，是它把 DDPM 这个看起来"很离散、链式、$T = 1000$ 步"的算法<strong>识别为</strong> VP-SDE 用最简单的数值方法离散后的版本：</p>
+    <p>$$x_{t+\Delta t} = x_t + f(x_t, t)\,\Delta t + g(t)\,\sqrt{\Delta t}\,z, \qquad z \sim \mathcal{N}(0, I)$$</p>
+    <p>这就是<strong>Euler-Maruyama 方法</strong>——把 $dt$ 替换成有限步长 $\Delta t = 1/T$。代入 VP 的 $f = -\tfrac{1}{2}\beta(t)x$, $g = \sqrt{\beta(t)}$，离散后正好等价于 DDPM 的 $q(x_{t+1}|x_t)$ 一步加噪。</p>
+    <p><span class="sde-why">Why this matters</span>：Euler-Maruyama 是<strong>最低阶</strong>的 SDE 离散方法（一阶强收敛 $O(\sqrt{\Delta t})$）。DDPM 用 $T = 1000$ 步就是因为低阶方法误差大，必须把步长压到 $10^{-3}$ 才能保证精度。一旦你认出 DDPM 是 SDE 的一阶离散，<strong>立刻就能换更好的离散方法</strong>：</p>
+    <ul>
+      <li><strong>Heun / Runge-Kutta（高阶）</strong>：每步多算一次 score，但精度提升让总步数从 1000 降到 30–50（EDM Karras 2022 就走这条线）。</li>
+      <li><strong>DPM-Solver（Lu et al. 2022）</strong>：用 SDE 的半解析解 + 高阶 Taylor 展开，20 步即可逼近 1000 步的质量。</li>
+      <li><strong>自适应步长</strong>：在 $t$ 接近 0（细节关键区）密一些，在 $t$ 接近 $T$（纯噪声区）稀一些。</li>
+    </ul>
+    <p>这些采样器都不需要重新训练——只需要把已经学到的 score 网络换个数值积分器跑一遍。这是 SDE 视角第一个"<strong>免费午餐</strong>"。</p>
+
+    <h2>4. 训练目标：score matching 的连续版本</h2>
+    <p>训练目标在 SDE 视角下统一为 <strong>continuous-time score matching</strong>：</p>
+    <p>$$\mathcal{L}(\theta) = \mathbb{E}_{t \sim \mathcal{U}[0, T]}\left[\lambda(t)\,\mathbb{E}_{x_0, x_t}\big[\,\|s_\theta(x_t, t) - \nabla_{x_t} \log p_t(x_t | x_0)\|^2\,\big]\right]$$</p>
+    <p>其中 $s_\theta$ 是网络（"score network"），$\lambda(t)$ 是 loss 权重（取不同 $\lambda$ 即对应 DDPM 的 simple loss、likelihood weighting、EDM 的精心调权）。<strong>$\nabla \log p_t(x_t | x_0)$ 有闭式</strong>——因为给定 $x_0$，$x_t$ 服从已知的高斯分布（VP / VE 都给了闭式过渡核），所以 score 直接可计算，无需估计 $p_t(x_t)$ 本身。这正是 Vincent 2011 denoising score matching 的连续时间推广。</p>
+
+    <p>在 VP-SDE 下，$x_t = \sqrt{\bar\alpha(t)}\,x_0 + \sqrt{1 - \bar\alpha(t)}\,\epsilon$，于是 $\nabla \log p_t(x_t | x_0) = -\epsilon / \sqrt{1 - \bar\alpha(t)}$。这就直接和 DDPM 的 $\epsilon$-prediction 对应了——score 和 $\epsilon$ 只差一个时间相关的标量系数：</p>
+    <p>$$s_\theta(x_t, t) = -\frac{\epsilon_\theta(x_t, t)}{\sqrt{1 - \bar\alpha(t)}}$$</p>
+    <p><span class="sde-why">Why this is "everything unifies"</span>：DDPM 的 simple loss、SMLD 的 NCSN loss、score matching 的 denoising 形式，<strong>在 SDE 视角下都是同一个目标</strong>——learning the score——只是参数化（$\epsilon$ / $s$ / $x_0$）和权重 $\lambda(t)$ 不同。这就是 Dr. Raj 所说"这一框架把所有东西统一起来"的数学落地。</p>
+
+    <div class="my-addition">🟡 教材外补充：Karras et al. 2022 的 EDM 论文进一步推广这套统一——它指出 parameterization、weighting、preconditioning 是三个<em>独立</em>的设计自由度，过去的 DDPM / SMLD / score matching 只是在这三个自由度的不同角点。EDM 的标准化做法（$\sigma$-parameterization + $w(\sigma)$ weighting + skip connection preconditioner）几乎在所有图像生成 benchmark 上比原 DDPM / SMLD 高 1–2 个 FID 点，是 SDE 视角"统一后再重新选最优"的工程胜利。</div>
+
+    <h2>5. PF-ODE：deterministic 镜像</h2>
+    <p>Song 2021 的另一个核心结果：反向 SDE 有一个<strong>确定性</strong>的双胞胎，叫 <em>probability flow ODE</em>（PF-ODE）：</p>
+    <p>$$\frac{dx}{dt} = f(x, t) - \tfrac{1}{2}\,g(t)^2\,\nabla_x \log p_t(x)$$</p>
+    <p>注意系数变成了 $\tfrac{1}{2}\,g^2$（反向 SDE 是 $g^2$），并且<strong>去掉了 $g\,d\bar W$ 这一项</strong>——整条 ODE 不再有随机性。神奇之处在于：从同一个 $x_T$ 出发，PF-ODE 与反向 SDE 在<strong>边际分布</strong>意义下产生相同的 $p_0$，但 PF-ODE 是确定性的，意味着<strong>同一个噪声种子永远生成同一张图</strong>，可以用任何 ODE solver（RK4、DPM-Solver 等）求解。</p>
+    <p><span class="sde-why">Why two flavors</span>：SDE 反向因为还有噪声项，生成多样性更高、模式覆盖更好；PF-ODE 确定但有时模式坍缩到训练集 mode，多样性略差。<strong>tradeoff</strong>：步数越多（步长越小）越接近真实 SDE / ODE 解；步数少时 SDE 的随机噪声反而能"踢出"误差累积，所以低 NFE（function evaluations）下 SDE 经常优于 ODE。DDIM 就是 PF-ODE 在 VP-SDE 上的一阶离散（Song 2020 的 DDIM 论文先有，2021 SDE 论文之后才完整理解）。</p>
+
+    <h2>6. 与已有方法的身份对照</h2>
+    <p>把所有方法塞进 SDE 视角下的"门牌"：</p>
+    <ul>
+      <li><strong>DDPM (Ho 2020)</strong> = VP-SDE 的 Euler-Maruyama 离散，$T = 1000$，$\epsilon$-parameterization。</li>
+      <li><strong>SMLD / NCSN (Song & Ermon 2019/2020)</strong> = VE-SDE 的离散，几何噪声序列，score-parameterization。</li>
+      <li><strong>Langevin dynamics</strong> = 反向 SDE 在 $f = 0$、固定 $t$（不让 score 随时间变）下的特例：$dx = \tfrac{1}{2}\eta\nabla \log p(x)\,dt + \sqrt{\eta}\,dW$。可以理解为"在每个噪声等级上多走几步 Langevin 来 polish"——NCSN 的 annealed Langevin 采样就是这件事。</li>
+      <li><strong>DDIM (Song 2020)</strong> = PF-ODE 在 VP-SDE 上的一阶离散，deterministic、可少步采样。</li>
+      <li><strong>EDM (Karras 2022)</strong> = SDE 视角下重新选择 parameterization / weighting / preconditioning 的最优组合。</li>
+      <li><strong>Flow Matching / Rectified Flow</strong> = 在 SDE 中令 $g = 0$（退化为 ODE）并直接学 vector field，绕开 score 学习。</li>
+    </ul>
+    <p>这张表是理解 2020–2024 年扩散文献谱系的<strong>关键索引</strong>。每读一篇新论文，先问：它在 $(f, g, \lambda(t), \text{solver})$ 这四个轴上占什么位置？答案出来，定位完成。</p>
+  </section>
+
+  <section class="concept-interact">
+    <p>下面四个按钮把 SDE 视角的核心四步走依次展开。<strong>不变量</strong>：每一步都<em>同时</em>对 VP 和 VE 成立——只是 $f, g$ 的具体形式不同，<strong>整套推理结构是同一个</strong>。这正是 SDE formulation 的统一力所在。</p>
+    <div class="sde-controls">
+      <button data-step="0" class="active">① 前向 SDE</button>
+      <button data-step="1">② Anderson 反向</button>
+      <button data-step="2">③ score 学习</button>
+      <button data-step="3">④ 采样器自由</button>
+    </div>
+    <div id="sde-readout" style="background:var(--surface-soft);border:1px solid var(--border);border-radius:4px;padding:0.8rem 1rem;font-size:0.93rem;min-height:5rem;">
+      <div class="sde-line" data-line="0" style="display:none;">$dx = f(x, t)\,dt + g(t)\,dW$。设计 $f, g$ → 得到 VP（DDPM）或 VE（SMLD）。$f, g$ 是手工选的，<em>无可学习参数</em>。</div>
+      <div class="sde-line" data-line="1" style="display:none;">反向 SDE：$dx = [f - g^2 \nabla_x \log p_t(x)]\,dt + g\,d\bar W$。除了 score $\nabla_x \log p_t$ 全部已知，<strong>score 是唯一要学的东西</strong>。</div>
+      <div class="sde-line" data-line="2" style="display:none;">用 denoising score matching：$\mathcal{L} = \mathbb{E}_t[\lambda(t)\|s_\theta(x_t, t) - \nabla \log p_t(x_t|x_0)\|^2]$。条件 score 有闭式，loss 可计算。</div>
+      <div class="sde-line" data-line="3" style="display:none;">采样 = 数值积分反向 SDE 或 PF-ODE。可换 Euler-Maruyama、Heun、DPM-Solver、自适应步长——<strong>无需重新训练</strong>。</div>
+    </div>
+    <script>
+      (function () {
+        const btns = document.querySelectorAll('.sde-controls button');
+        const lines = document.querySelectorAll('#sde-readout .sde-line');
+        function show(step) {
+          btns.forEach(b => b.classList.toggle('active', +b.dataset.step === step));
+          lines.forEach(l => { l.style.display = (+l.dataset.line === step) ? 'block' : 'none'; });
+        }
+        btns.forEach(b => b.addEventListener('click', () => show(+b.dataset.step)));
+        show(0);
+      })();
+    </script>
+  </section>
+
+  <section class="concept-example">
+    <h2>手算 VP-SDE 一步 Euler-Maruyama</h2>
+    <p>取 VP-SDE $f = -\tfrac{1}{2}\beta(t)\,x$，$g = \sqrt{\beta(t)}$，$\beta(t) = 0.1$（取常数简化），步长 $\Delta t = 0.01$。设当前 $x_t = 0.8$，抽到 $z \sim \mathcal{N}(0, 1)$ 这次拿到 $z = 0.3$：</p>
+    <p>$$x_{t+\Delta t} = x_t + f\,\Delta t + g\,\sqrt{\Delta t}\,z = 0.8 + (-\tfrac{1}{2} \cdot 0.1 \cdot 0.8) \cdot 0.01 + \sqrt{0.1} \cdot \sqrt{0.01} \cdot 0.3$$</p>
+    <p>$$= 0.8 + (-0.04) \cdot 0.01 + 0.316 \cdot 0.1 \cdot 0.3 = 0.8 - 0.0004 + 0.00948 = 0.80908$$</p>
+    <p>注意三件事：(1) 漂移项 $-0.0004$ 把 $x$ 微微往零拉（"收缩信号"）；(2) 扩散项 $+0.00948$ 把它推开一点（"撒胡椒"）；(3) 漂移项 $\propto \Delta t$，扩散项 $\propto \sqrt{\Delta t}$——这就是 SDE 区别于 ODE 的本质，noise 用 $\sqrt{\Delta t}$ 而不是 $\Delta t$ 缩放，因为布朗运动的方差线性增长（变化幅度是其平方根）。这条尺度差异是 Euler-Maruyama 与 Euler 的唯一区别，也是为什么 SDE 离散收敛阶比 ODE 低（$O(\sqrt{\Delta t})$ vs $O(\Delta t)$）。</p>
+    <p>把 $T = 1$、$\Delta t = 0.001$（即 $T_{\text{discrete}} = 1000$ 步）就完全等价于 DDPM 的一步加噪。</p>
+  </section>
+
+  <section class="concept-pitfalls">
+    <h2>常见误区</h2>
+    <ol>
+      <li><strong>"SDE formulation 是另一种新的扩散模型"。</strong>反例：Song 2021 论文里训练的网络<em>跟 DDPM / SMLD 的网络是同一个</em>（NCSN++ / DDPM++ 都用同一架构），只是把训练目标写成连续时间 score matching、把采样写成数值 SDE 积分。FID 提升来自<strong>更好的采样器</strong>（PC sampler、PF-ODE）和<strong>更细的 $\lambda(t)$ weighting</strong>，不是来自"新模型"。把 SDE 当模型而非视角，是初学者最大的概念错位。</li>
+      <li><strong>"VP-SDE 与 VE-SDE 任选一个都行"。</strong>反例：VE-SDE 的 $x_T$ 不是单位高斯而是 $\mathcal{N}(x_0, \sigma_T^2 I)$，$\sigma_T$ 在 NCSN 论文中取 50。采样起点必须从这个<em>大方差</em>高斯采（不是 $\mathcal{N}(0, I)$！），否则 score 网络在训练中没见过这种 scale 的输入，直接崩。Stable Diffusion 用 VP（DDPM 系），EDM 用 VE 的变体，这两类不能混用 checkpoint。</li>
+      <li><strong>"步数越少越好，反正 SDE 可以用高阶 solver"。</strong>反例：tradeoff 真实存在——步数越多越接近真 SDE 解，模式覆盖（diversity）越好；步数太少时高阶 solver 仍有较大局部误差。Karras 2022 实测：CIFAR-10 上 18 步 EDM 达 FID 2.0，但 8 步会回到 FID 4+；模式覆盖（Recall 指标）在 SDE 步数充足时显著高于 deterministic ODE。<strong>步数 = 多样性 vs 速度的旋钮</strong>，不是越少越好。</li>
+    </ol>
+  </section>
+
+  <section class="concept-seealso">
+    <h2>相关概念</h2>
+    <ul>
+      <li><a href="/video-to-notebook/concepts/langevin-dynamics/">Langevin Dynamics</a> — 反向 SDE 在固定时间切片上的特例，NCSN annealed sampling 的核心</li>
+      <li><a href="/video-to-notebook/concepts/probability-flow-ode/">Probability Flow ODE</a> — SDE 的确定性双胞胎，DDIM 的连续视角</li>
+    </ul>
+  </section>
+
+  <section class="concept-sources">
+    <h2>来源</h2>
+    <ol>
+      <li><a href="https://www.youtube.com/watch?v=57EFSTxL_5o&t=5s" target="_blank" rel="noopener">diffusion-principles-vizuara · L8 · Diffusion Models: A Physical Intuition (SDE Framework) — "unifies everything together" · (00:05)</a></li>
+      <li><a href="https://www.youtube.com/watch?v=57EFSTxL_5o&t=126s" target="_blank" rel="noopener">diffusion-principles-vizuara · L8 · 染料扩散物理直觉 + 与 AI 的连接 · (02:06)</a></li>
+      <li><a href="https://www.youtube.com/watch?v=57EFSTxL_5o&t=383s" target="_blank" rel="noopener">diffusion-principles-vizuara · L8 · 布朗运动与微观时间可逆性 · (06:23)</a></li>
+      <li><a href="https://www.youtube.com/watch?v=57EFSTxL_5o&t=509s" target="_blank" rel="noopener">diffusion-principles-vizuara · L8 · "microscopic motions are time reversible" — 整个扩散文献的核心主题 · (08:29)</a></li>
+    </ol>
+  </section>
+</article>

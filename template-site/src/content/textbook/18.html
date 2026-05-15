@@ -1,0 +1,563 @@
+<style>
+  .latent-ch { line-height: 1.75; }
+  .latent-ch svg { display: block; margin: 1.2rem auto; max-width: 100%; height: auto; }
+  .latent-ch .clip-frame { max-width: 720px; margin: 1.4rem auto; }
+  .latent-ch .clip-frame iframe { width: 100%; aspect-ratio: 16/9; border: 0; border-radius: 6px; }
+  .latent-ch .clip-frame figcaption { color: var(--text-muted); font-size: 0.85rem; margin-top: 0.4rem; text-align: center; }
+  .latent-ch .tldr { background: var(--surface-soft); border-left: 4px solid var(--module-accent); padding: 1rem 1.2rem; border-radius: 0 6px 6px 0; margin: 1.4rem 0; }
+  .latent-ch .tldr h2 { margin-top: 0; font-size: 1.05rem; border-bottom: 0; }
+  .latent-ch .callout { padding: 0.7rem 1rem; margin: 1rem 0; border-radius: 0 6px 6px 0; }
+  .latent-ch .callout-info { background: #eef6fc; border-left: 4px solid #2b80c4; }
+  .latent-ch .callout-note { background: #f3f0fa; border-left: 4px solid #6f4dd0; }
+  .latent-ch .callout-warning { background: #fff6e0; border-left: 4px solid #d4a017; }
+  .latent-ch .callout-tip { background: #e8f5e9; border-left: 4px solid #0b5; }
+  .latent-ch .callout-quote { background: var(--surface-soft); border-left: 3px solid var(--border-strong); padding: 0.5rem 1rem; margin: 0.8rem 0; font-style: italic; color: var(--text-muted); }
+  .latent-ch .my-addition { background: #fff7d6; border-left: 4px solid #b8860b; padding: 0.7rem 1rem; margin: 1rem 0; border-radius: 0 6px 6px 0; }
+  .latent-ch pre { background: #1f1f1f; color: #f6f4ee; padding: 1rem; border-radius: 6px; font-size: 0.86rem; line-height: 1.55; overflow-x: auto; }
+  .latent-ch code:not(pre code) { background: var(--surface-soft); padding: 0.1rem 0.35rem; border-radius: 3px; font-size: 0.9em; }
+  .latent-ch h2 { border-bottom: 1px solid var(--border); padding-bottom: 0.3rem; margin-top: 2.4rem; }
+  .latent-ch h3 { color: var(--module-accent); margin-top: 1.6rem; }
+  .latent-ch .deriv-step { margin: 0.8rem 0; padding: 0.6rem 0.8rem; background: var(--surface-soft); border-radius: 4px; }
+  .latent-ch .deriv-step strong { color: var(--module-accent); }
+  @keyframes latent-flow { 0% { stroke-dashoffset: 60; } 100% { stroke-dashoffset: 0; } }
+  .latent-ch .flow-arrow { stroke-dasharray: 6 4; animation: latent-flow 2.2s linear infinite; }
+</style>
+
+<article class="latent-ch">
+
+<h1>18. Latent Diffusion 与视频扩散</h1>
+
+<p style="font-size:0.95rem; color:var(--text-muted);">主源：CMU 10799 S26 Lecture 11《Guest Lecture - Linqi (Alex) Zhou from Luma AI》（chunk #1467–1486，Alex 从 Luma R3 视频模型的成果出发，铺垫"为什么大规模视觉生成都跑在扩散+流匹配上"）。本章前半"Latent Diffusion 架构"为<strong>教材外补充</strong>（来自 Rombach et al. 2022 / Stable Diffusion 原文），用来把 Alex 关于"大模型落地"的现实背景接到具体的工程实现。</p>
+
+<div class="tldr">
+  <h2>📌 TL;DR</h2>
+  <p>到上一章 <a href="/video-to-notebook/textbook/17/">Classifier-Free Guidance</a> 为止，我们已经具备了"在<strong>像素空间</strong>跑条件扩散"的全部理论。但如果你按字面意思训练 512×512×3 像素的 U-Net，单步前向就要在 <strong>786,432 维</strong>的张量上做卷积——训一个文生图模型要几百张 A100、几个月时间。<strong>Stable Diffusion / Latent Diffusion Model（LDM）</strong>的发明就是为了把这笔账砍掉两个数量级。</p>
+
+  <p>核心思想一句话：</p>
+  $$\text{先用 VAE 把 } x \in \mathbb{R}^{512\times 512\times 3} \xrightarrow{E} z \in \mathbb{R}^{64\times 64\times 4} \text{，再在 } z \text{ 上扩散，最后 } D(z_0) \text{ 解码回像素。}$$
+  <p>压缩比 $\tfrac{786432}{16384} \approx 48\times$，U-Net 单步 FLOPs 也跟着掉到 $\sim 1/48$，端到端训练/推理快 <strong>~50 倍</strong>。这就是为什么你 2022 年开始能在一张 RTX 3090 上跑得动 Stable Diffusion。</p>
+
+  <p>本章的故事分三幕：</p>
+  <ol>
+    <li><strong>第一幕 · LDM 架构</strong>：冻结的 VAE 提供 latent space，扩散 U-Net 在 latent 上跑，cross-attention 把文本编码注进来。把 <a href="/video-to-notebook/textbook/2/">第 2 章 VAE</a> 当"压缩工具"用，把扩散当"生成工具"用——两把工具拼起来。</li>
+    <li><strong>第二幕 · 视频扩散</strong>：从单图扩到 $T$ 帧。三种主流配方：3D U-Net + 时序注意力（SVD / Runway）、图像扩散 + 光流动画（Image-as-Frame）、4D 时空 latent（Sora / Veo / Luma R3）。Alex 在课上展示的就是 Luma R3 的视频样本。</li>
+    <li><strong>第三幕 · 现实成本与挑战</strong>：Alex 提示我们，跑这些大模型的真实瓶颈不只是训练，更是推理——一段 5 秒视频要解 50 步 ODE，每步都过一遍 100 亿参数的 U-Net。这就是为什么<a href="/video-to-notebook/textbook/19/">下一章的步数蒸馏 / Consistency Models</a> 会被推上风口。</li>
+  </ol>
+
+  <p>关键句子：<strong>"在像素上做扩散是浪费——大部分笔触/纹理细节，VAE 解码器自己能补回来。扩散模型只需要在'语义分辨率'上工作。"</strong></p>
+</div>
+
+<h2>一、为什么"在像素上扩散"是浪费？</h2>
+
+<p>从第 5 章 DDPM 到第 17 章 CFG，我们写的所有 $\epsilon_\theta(x_t, t, c)$ 都默认 $x_t$ 是一张<strong>真实分辨率的图像</strong>。这在 MNIST（28×28）或 CIFAR-10（32×32）上没问题，但一旦目标分辨率到 512×512×3，问题就严重了：</p>
+
+<ul>
+  <li>单张图像 $786{,}432$ 维；</li>
+  <li>U-Net 每一层卷积都在这个尺寸上做（哪怕中间下采样到 64×64，回到顶层时还得是 512×512）；</li>
+  <li>训练 1 个 batch ≈ 几十 GB 显存；推理 50 步 ≈ 几分钟。</li>
+</ul>
+
+<p>但是停下来想想：一张 512×512 的猫图，<em>真正有信息量的</em>是什么？</p>
+
+<ul>
+  <li>"这是一只橘猫"、"猫在沙发上"、"光从左边来"、"猫眯着眼"——这些是<strong>语义信息</strong>，是你描述给一个盲人朋友时会用到的词；</li>
+  <li>"第 (153, 287) 个像素的 R 通道是 218"——这是<strong>低层纹理细节</strong>，是高频噪声分量，是猫毛上单根毛发反射光的颜色起伏。</li>
+</ul>
+
+<p>而扩散模型本质上在干两件事：学全局分布 + 学每一步去噪。<strong>逐像素纹理</strong>这种"高频细节"，让一个<em>独立训练的解码器</em>去补全足够了——它不需要扩散模型操心。换句话说，给定"这是一张橘猫闭眼侧脸"的语义，你随便找一张高保真渲染器都能把毛发画好；但反过来不行，给一只画得很糙的猫，再厉害的去噪器也救不回猫到底有几条腿这种结构性信息。</p>
+
+<p>Rombach 等人 2022 年的论文里给了个非常贴切的诊断：他们把训练好的像素空间扩散模型在不同噪声水平 $t$ 上分别可视化，发现绝大部分模型容量（参数、计算）<strong>都消耗在 $t$ 很小的"近似干净图像"区间</strong>——这一段干的活就是细化高频纹理。而真正决定生成质量的"语义构图"部分（$t$ 较大、图像近乎噪声的阶段），所占比重反而很小。这是一个清晰的"<em>capacity 错配</em>"信号：模型在错的地方花了大力气。</p>
+
+<div class="callout callout-tip">
+💡 <strong>LDM 的核心 insight</strong>：把"语义生成"和"像素重建"<em>解耦</em>。VAE 解码器负责把低维 latent 渲染回高分辨率像素（高频纹理在这里恢复），扩散模型负责在 latent 上做"语义级别"的随机过程。两件事用两个网络做，各自高效。这种"分而治之"在工程上有个干净的好处：VAE 训一次就锁住，下游所有扩散变种（不同尺寸、不同条件、不同风格的微调）都共享同一套 latent 空间——一次性投入，长期复用。
+</div>
+
+<h2>二、Latent Diffusion 的三件套：E、D、$\epsilon_\theta$</h2>
+
+<p>LDM 的训练流程其实是个<strong>两阶段流水线</strong>。先训 VAE，再训 diffusion，<strong>VAE 在第二阶段是冻结的</strong>。这种"先固化基础设施再训上层模型"的结构在大模型时代非常常见——CLIP 文本编码器、Whisper 语音编码器都是类似的"先训一次，长期复用"的角色。理解 LDM 也最好这么理解：它把"图像 ↔ latent"的接口当成基础设施铺好，然后把扩散模型当成生产应用。</p>
+
+<h3>2.1 第一阶段：训一个高保真 VAE</h3>
+
+<p>不是 <a href="/video-to-notebook/textbook/2/">第 2 章那种用于 MNIST 的小 VAE</a>，而是一个工程精良的"图像压缩 VAE"。LDM 论文里它叫 <strong>VQ-reg</strong> 或 <strong>KL-reg</strong> 两个变体；Stable Diffusion 用的是 <strong>KL-regularised continuous VAE</strong>（连续 latent，不是 VQ-VAE 那种离散码本）。</p>
+
+<p>训练损失是三项之和：</p>
+
+$$L_{\text{VAE}}(E, D) \;=\; \underbrace{L_{\text{rec}}\big(x, D(E(x))\big)}_{\text{L1 + LPIPS 感知损失}} \;+\; \underbrace{\lambda_{\text{KL}} \cdot D_{\mathrm{KL}}\!\big(q(z|x)\,\|\,\mathcal{N}(0,I)\big)}_{\text{弱 KL 正则，}\lambda_{\text{KL}}\sim 10^{-6}} \;+\; \underbrace{\lambda_{\text{adv}} \cdot L_{\text{GAN}}(D(E(x)))}_{\text{PatchGAN 对抗损失}}$$
+
+<div class="deriv-step">
+<strong>Why 三项缺一不可</strong>：
+<ul>
+  <li><strong>$L_{\text{rec}}$（L1 + LPIPS）</strong>：纯 L2 重建会糊（VAE 经典毛病）。LPIPS 用预训练 VGG 特征比对，"看起来一样"而不是"像素一样"——保住语义边缘和纹理。</li>
+  <li><strong>$\lambda_{\text{KL}}$ 取极小（$\sim 10^{-6}$）</strong>：和第 2 章 MNIST VAE 的 $\beta\sim 1$ 完全不同。LDM 的 KL 只要让 latent 大致<em>规则</em>（均值附近、方差有界），不需要严格高斯。因为我们不再从 $\mathcal{N}(0, I)$ 直接采 z，而是<em>用扩散模型学 z 的真实分布</em>。</li>
+  <li><strong>$L_{\text{GAN}}$（PatchGAN）</strong>：判别器逐 patch 判真假，强迫 decoder 输出"看起来真"的纹理——这就是为什么 SD 的 VAE 解码出来能保住毛发、皮肤毛孔这些高频。</li>
+</ul>
+</div>
+
+<div class="callout callout-warning">
+⚠️ <strong>容易混的点：LDM 的 VAE ≠ 用来"采样"的 VAE</strong>。第 2 章 VAE 训完后你可以从 $\mathcal{N}(0, I)$ 采 z 再 decode 直接生图。LDM 的 VAE <em>不能这么用</em>——KL 正则太弱，从先验采 z 出来的 latent 不在数据流形上，解码出来是垃圾。LDM 的 VAE 只用来做"图像 ↔ latent"的<strong>编码-解码</strong>，<em>生成</em>这步交给扩散模型。
+</div>
+
+<h3>2.2 第二阶段：在 latent space 上跑扩散</h3>
+
+<p>VAE 训完冻结。现在你对每张训练图 $x$，预先算好 $z_0 = E(x)$，然后<strong>所有第 5 章学的 DDPM 训练流程原封不动跑在 $z_0$ 上</strong>：</p>
+
+$$z_t \;=\; \sqrt{\bar\alpha_t}\, z_0 \;+\; \sqrt{1-\bar\alpha_t}\, \epsilon, \qquad \epsilon \sim \mathcal{N}(0, I)$$
+
+$$L_{\text{LDM}} \;=\; \mathbb{E}_{z_0, t, \epsilon, c}\!\left[\big\|\epsilon - \epsilon_\theta(z_t, t, c)\big\|^2\right]$$
+
+<p>注意 U-Net 现在的输入张量是 $64 \times 64 \times 4$（不是 $512 \times 512 \times 3$）。同样的 U-Net 拓扑、同样的简单损失——只是张量小了 48 倍。</p>
+
+<h3>2.3 推理：先 latent 再像素</h3>
+
+<p>采样时：</p>
+<ol>
+  <li>从 $\mathcal{N}(0, I)$ 采一个 $z_T \in \mathbb{R}^{64\times 64\times 4}$；</li>
+  <li>跑 50 步（或 DDIM 25 步、DPM-Solver 10 步……）反向扩散得到 $z_0$；</li>
+  <li>过一次 decoder：$x_0 = D(z_0)$，得到 $512\times 512$ 像素图。</li>
+</ol>
+
+<p>整个过程，<strong>VAE 解码器只调用一次</strong>，所以它的"贵"被均摊掉了——50 步扩散全部在小张量上跑。</p>
+
+<svg viewBox="0 0 760 260" role="img" aria-label="LDM 架构总览：encoder → latent diffusion → decoder">
+  <defs>
+    <marker id="ldm-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="var(--module-accent)"/>
+    </marker>
+  </defs>
+  <g font-family="ui-sans-serif" font-size="11" fill="var(--text)">
+    <rect x="20" y="100" width="100" height="60" rx="6" fill="var(--surface-soft)" stroke="var(--border-strong)"/>
+    <text x="70" y="125" text-anchor="middle" font-weight="600">$x_0$</text>
+    <text x="70" y="145" text-anchor="middle" font-size="10" fill="var(--text-muted)">512×512×3</text>
+
+    <rect x="150" y="100" width="80" height="60" rx="6" fill="#eef6fc" stroke="#2b80c4"/>
+    <text x="190" y="125" text-anchor="middle" font-weight="600">Encoder $E$</text>
+    <text x="190" y="145" text-anchor="middle" font-size="10" fill="var(--text-muted)">冻结</text>
+
+    <rect x="260" y="100" width="80" height="60" rx="6" fill="var(--surface-soft)" stroke="var(--border-strong)"/>
+    <text x="300" y="125" text-anchor="middle" font-weight="600">$z_0$</text>
+    <text x="300" y="145" text-anchor="middle" font-size="10" fill="var(--text-muted)">64×64×4</text>
+
+    <rect x="370" y="60" width="160" height="140" rx="8" fill="#f3f0fa" stroke="#6f4dd0" stroke-width="2"/>
+    <text x="450" y="85" text-anchor="middle" font-weight="700">Latent Diffusion</text>
+    <text x="450" y="105" text-anchor="middle" font-size="10">U-Net $\epsilon_\theta(z_t, t, c)$</text>
+    <text x="450" y="125" text-anchor="middle" font-size="10">$z_T \to z_{T-1} \to \dots \to z_0$</text>
+    <text x="450" y="145" text-anchor="middle" font-size="10" fill="var(--text-muted)">~50 步 DDIM</text>
+    <text x="450" y="170" text-anchor="middle" font-size="10">↑ cross-attn 注入</text>
+    <text x="450" y="185" text-anchor="middle" font-size="10">CLIP text emb $c$</text>
+
+    <rect x="560" y="100" width="80" height="60" rx="6" fill="var(--surface-soft)" stroke="var(--border-strong)"/>
+    <text x="600" y="125" text-anchor="middle" font-weight="600">$z_0$</text>
+    <text x="600" y="145" text-anchor="middle" font-size="10" fill="var(--text-muted)">64×64×4</text>
+
+    <rect x="660" y="100" width="80" height="60" rx="6" fill="#eef6fc" stroke="#2b80c4"/>
+    <text x="700" y="125" text-anchor="middle" font-weight="600">Decoder $D$</text>
+    <text x="700" y="145" text-anchor="middle" font-size="10" fill="var(--text-muted)">冻结</text>
+
+    <line x1="120" y1="130" x2="148" y2="130" stroke="var(--module-accent)" stroke-width="2" marker-end="url(#ldm-arrow)"/>
+    <line x1="230" y1="130" x2="258" y2="130" stroke="var(--module-accent)" stroke-width="2" marker-end="url(#ldm-arrow)"/>
+    <line x1="340" y1="130" x2="368" y2="130" stroke="var(--module-accent)" stroke-width="2" marker-end="url(#ldm-arrow)"/>
+    <line x1="530" y1="130" x2="558" y2="130" stroke="var(--module-accent)" stroke-width="2" marker-end="url(#ldm-arrow)"/>
+    <line x1="640" y1="130" x2="658" y2="130" stroke="var(--module-accent)" stroke-width="2" marker-end="url(#ldm-arrow)"/>
+
+    <text x="380" y="230" font-size="10" fill="var(--text-muted)">训练：左半段（图 → latent）</text>
+    <text x="380" y="245" font-size="10" fill="var(--text-muted)">推理：右半段（latent → 图），$z_T$ 从 $\mathcal{N}(0,I)$ 起步</text>
+  </g>
+</svg>
+
+<h2>三、和第 2 章 VAE 的关系：一句话总结</h2>
+
+<div class="callout-quote">
+LDM = "VAE 做压缩" + "Diffusion 做生成"。第 2 章把 VAE 单独训出来既做压缩又做生成（从 $\mathcal{N}(0,I)$ 采 z），结果是糊的；LDM 让 VAE <em>专心做压缩</em>，把"采样 z"的活交给一个真正擅长建模复杂分布的扩散模型。
+</div>
+
+<p>把第 2 章的 ELBO 对照来看：</p>
+
+<ul>
+  <li>VAE 的 $p_\theta(x|z)$（decoder）→ LDM 的 $D$；</li>
+  <li>VAE 的 $q_\phi(z|x)$（encoder）→ LDM 的 $E$；</li>
+  <li>VAE 的 prior $p(z) = \mathcal{N}(0, I)$（强制）→ LDM 改为 <strong>$p_\theta(z)$ 由扩散模型隐式学到</strong>。</li>
+</ul>
+
+<p>这是 VAE 家族的一次重大升级：<strong>prior 不再是写死的高斯，而是一个可学习的复杂分布</strong>。这个分布的复杂度由扩散模型容量决定。把这条线索摊开看，第 2 章我们抱怨过 VAE 的生成结果总是模糊的，那时候我们把锅甩给了 $L_2$ 重建损失。但更深的原因其实是：<em>VAE 强求 $q(z|x) \approx \mathcal{N}(0, I)$ 这个先验本身就太弱</em>——真实数据分布在 latent 空间里压根不是球形高斯，强行往球形高斯上撞，就只能"在球形内部模糊地平均"。LDM 没有改 VAE 的训练目标，只是<strong>把那个写死的球形高斯先验，换成一个可以拟合任意复杂分布的扩散模型</strong>。VAE 的容量没动，但整个系统的表达力被"先验升级"这一步彻底解放。</p>
+
+<p>这个视角还能帮你理解一件事：为什么 LDM 的 VAE 训练里把 $\lambda_{\text{KL}}$ 调到 $10^{-6}$？因为这时候 KL 项的角色不再是"逼 $q$ 像 $\mathcal{N}(0, I)$"，而仅仅是"防止 latent 数值发散"。KL 项的物理意义从"约束先验"退化为"轻量正则"，剩下的真正先验由后面那个扩散模型来扛。</p>
+
+<h2>四、Cross-Attention：把"文字"塞进 U-Net</h2>
+
+<p>无条件 LDM 还不够——你要的是"打字 prompt，吐图"。在第 17 章我们已经学过 classifier-free guidance 怎么把"有条件 / 无条件"两个预测混合起来，但还没解答一个更基础的问题：<strong>条件 $c$ 到底以什么形式喂进 U-Net？</strong> LDM 给出的答案是 <strong>cross-attention</strong>。</p>
+
+<h3>4.1 文本编码器是谁？</h3>
+
+<ul>
+  <li><strong>Stable Diffusion 1.x</strong>：CLIP ViT-L/14（OpenAI 训的，~123M 参数）。</li>
+  <li><strong>SD 2.x</strong>：OpenCLIP ViT-H/14（LAION 训的）。</li>
+  <li><strong>SDXL</strong>：CLIP + OpenCLIP 双编码器 concat。</li>
+  <li><strong>Imagen / DeepFloyd IF</strong>：T5-XXL（Google，<strong>11B</strong>参数）。Imagen 论文的发现：<em>文本编码器大小比扩散模型大小对最终质量影响更显著</em>。</li>
+</ul>
+
+<p>无论哪个，输入 prompt $c$ 出来一组 token 表示 $\tau_\theta(c) \in \mathbb{R}^{L \times d_\text{text}}$（$L$ 是 token 数量，$d_\text{text}$ 是隐藏维度）。</p>
+
+<h3>4.2 Cross-Attention 怎么接</h3>
+
+<p>U-Net 的每个 ResNet block 后面塞一个 cross-attention 层。设 U-Net 当前层特征图展平成 $h \in \mathbb{R}^{N \times d}$（$N$ 是空间位置数），则：</p>
+
+$$Q = h W_Q, \quad K = \tau_\theta(c)\, W_K, \quad V = \tau_\theta(c)\, W_V$$
+
+$$\text{Attention}(Q, K, V) \;=\; \text{softmax}\!\left(\frac{Q K^\top}{\sqrt{d_k}}\right) V$$
+
+<div class="deriv-step">
+<strong>Why 这个设计</strong>：Query 来自<em>图像 latent</em>，Key/Value 来自<em>文本</em>。意思是"图像的每个位置，去文本里查它最关心哪些 token"。比如生成"a corgi wearing sunglasses"时，画到狗脸位置的 token 会强烈关注 "corgi"，画到眼睛位置的 token 会关注 "sunglasses"。这就是 cross-attention 实现"<strong>空间感知的条件控制</strong>"的方式。
+</div>
+
+<div class="callout callout-note">
+🧰 <strong>实践细节</strong>：cross-attention 是 SD 推理时<em>显存大头</em>之一。Memory-efficient attention（xFormers / Flash-Attention）让 $\mathcal{O}(N \cdot L)$ 的注意力矩阵不再显式存储，单卡能跑 1024×1024 全靠这个优化。
+</div>
+
+<h2>五、成本账：48× latent 压缩 = 50× 训练加速</h2>
+
+<p>这一节算笔账，体感会更强。</p>
+
+<table style="width:100%; border-collapse:collapse; margin:1rem 0;">
+  <thead style="background:var(--surface-soft);">
+    <tr>
+      <th style="padding:0.5rem; text-align:left; border:1px solid var(--border);">指标</th>
+      <th style="padding:0.5rem; text-align:right; border:1px solid var(--border);">像素空间扩散</th>
+      <th style="padding:0.5rem; text-align:right; border:1px solid var(--border);">LDM</th>
+      <th style="padding:0.5rem; text-align:right; border:1px solid var(--border);">比值</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td style="padding:0.5rem; border:1px solid var(--border);">张量维度</td>
+      <td style="padding:0.5rem; text-align:right; border:1px solid var(--border);">512×512×3 = 786,432</td>
+      <td style="padding:0.5rem; text-align:right; border:1px solid var(--border);">64×64×4 = 16,384</td>
+      <td style="padding:0.5rem; text-align:right; border:1px solid var(--border);"><strong>48×</strong></td>
+    </tr>
+    <tr>
+      <td style="padding:0.5rem; border:1px solid var(--border);">U-Net 单步 FLOPs</td>
+      <td style="padding:0.5rem; text-align:right; border:1px solid var(--border);">~1 TFLOPs</td>
+      <td style="padding:0.5rem; text-align:right; border:1px solid var(--border);">~22 GFLOPs</td>
+      <td style="padding:0.5rem; text-align:right; border:1px solid var(--border);">~50×</td>
+    </tr>
+    <tr>
+      <td style="padding:0.5rem; border:1px solid var(--border);">batch size（A100 40GB）</td>
+      <td style="padding:0.5rem; text-align:right; border:1px solid var(--border);">~4</td>
+      <td style="padding:0.5rem; text-align:right; border:1px solid var(--border);">~64</td>
+      <td style="padding:0.5rem; text-align:right; border:1px solid var(--border);">16×</td>
+    </tr>
+    <tr>
+      <td style="padding:0.5rem; border:1px solid var(--border);">每秒可处理样本</td>
+      <td style="padding:0.5rem; text-align:right; border:1px solid var(--border);">~0.5</td>
+      <td style="padding:0.5rem; text-align:right; border:1px solid var(--border);">~25</td>
+      <td style="padding:0.5rem; text-align:right; border:1px solid var(--border);">~50×</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>"50 倍"不是 LDM 论文的宣传话术，是张量维度、显存占用、batch size 三者相乘的实测结果。这就是为什么 2022 年 8 月 SD 1.4 发布后，<em>个人开发者第一次能在 RTX 3090 上生成 512×512 图</em>——之前同样质量需要 8 张 V100。</p>
+
+<p>还有一个常常被忽略的副作用：因为 latent 张量小、batch 大，<strong>训练的统计有效性也提高了</strong>。同样一个梯度更新看到的样本数从 4 变成 64，BN/LayerNorm 的统计更稳，梯度噪声更小。这就是为什么 LDM 在<em>相同 GPU hours</em>下达到的 FID 还显著优于像素空间模型——不只是单步计算便宜，连每次更新带来的"学习信号"质量都更高。压缩是一笔三重红利：算得快、显存省、梯度更干净。</p>
+
+<div class="my-addition">
+🟡 <strong>教材外补充：DiT 把 U-Net 换成了 Transformer</strong><br>
+Peebles &amp; Xie 2023 的 <strong>DiT</strong>（Diffusion Transformer）证明，LDM 框架不绑死 U-Net。把 latent $z_t$ patchify 成 token 序列，丢进 Transformer，扩散一样训。<strong>Sora / Stable Diffusion 3 / Flux 全部走 DiT 路线</strong>。LDM 真正普适的部分是"在 latent 上扩散"这个思想，不是 U-Net 这个具体架构。
+</div>
+
+<h2>六、从图到视频：扩散维度再升一阶</h2>
+
+<p>Alex 在 chunk #1468–1469 里说 Luma 训了一个叫 <strong>R3</strong> 的文生视频模型，"擅长生成运动和真实角色动画"。背后的技术框架就是<strong>视频扩散</strong>（Video Diffusion）。把图像扩散从 $\mathbb{R}^{H \times W \times C}$ 推广到视频 $\mathbb{R}^{T \times H \times W \times C}$，多了一个时间维度 $T$，听起来"只是多一维"，但工程上是质变——一个 5 秒 24fps 视频就是 120 帧，每帧本身已经是个高维张量，整段视频的总维度比单张图像大 100 倍以上。主流的应对策略大致可以分成<strong>三种配方</strong>，每种都对应一类落地模型，下面逐个拆。</p>
+
+<div class="callout-quote">
+"And at Luma we also train large scale text to video models that excel at realism."（Alex Zhou, CMU 10799 L11, chunk #1468）—— 整段课的开场就是为了说明：现在所有大厂的 text-to-video，无一例外建在扩散/流匹配之上。
+</div>
+
+<h3>6.1 配方 A：3D U-Net + 时序注意力（Image+Motion）</h3>
+
+<p>最直接的扩展：把 2D U-Net 改成 <strong>3D U-Net</strong>（卷积核加一个时间维度），或者更常见的做法——<strong>2D U-Net 串一个时序注意力</strong>：</p>
+
+<ul>
+  <li>空间注意力 / 卷积：每帧内部，和图像扩散一样；</li>
+  <li>时序注意力：跨帧，在 $T$ 维度上做 self-attention，让帧之间"看到对方"，保证一致性。</li>
+</ul>
+
+<p>代表作：</p>
+<ul>
+  <li><strong>Video Diffusion Models</strong>（Ho et al. 2022，首篇）</li>
+  <li><strong>Imagen Video</strong>（Google 2022，多级超分级联）</li>
+  <li><strong>Make-A-Video</strong>（Meta 2022）</li>
+  <li><strong>AnimateDiff / Stable Video Diffusion</strong>（Stability AI 2023）：直接拿预训练 SD 的 U-Net，<em>只在新加的时序注意力层上微调</em>。</li>
+  <li><strong>Runway Gen-2</strong>（商用）</li>
+</ul>
+
+<p>训练数据：(video, caption) 对，loss 还是简单的 ε-prediction MSE，只不过 $\epsilon \in \mathbb{R}^{T \times H \times W \times C}$。</p>
+
+<h3>6.2 配方 B：图像扩散 + 动画化（Image-as-Frame）</h3>
+
+<p>更轻量的路线：<em>压根不训视频模型</em>。流程：</p>
+
+<ol>
+  <li>用预训练 SD 生成一张图（首帧）；</li>
+  <li>用光流模型预测后续帧的运动场；</li>
+  <li>把首帧按运动场 warp 到后续每一帧。</li>
+</ol>
+
+<p>代表作：<strong>Animate Anyone</strong>、早期 <strong>Deforum SD</strong>、各种 ControlNet + AnimateDiff 流水线。优点：训练成本几乎为零（只训 motion module）；缺点：长视频会漂、复杂运动会塌（光流估不准）。</p>
+
+<h3>6.3 配方 C：4D 时空 latent（Sora / Veo 路线）</h3>
+
+<p>最现代、性能最强的路线，也是 Alex 在 Luma 实际在用的路线。它把 LDM 思想再升一阶——既然 LDM 把"图像维度"压下来了，那为什么不连"时间维度"也一起压？</p>
+
+<ul>
+  <li>训一个 <strong>时空 VAE</strong>，把 $\mathbb{R}^{T \times H \times W \times C}$ 压成 $\mathbb{R}^{T' \times H' \times W' \times C'}$（时间也压，比如 $T'=T/4$）；</li>
+  <li>在这个 4D latent 上跑 <strong>DiT</strong>（注意：U-Net 在这里通常被抛弃，因为 Transformer 更适合处理长 token 序列）；</li>
+  <li>解码：4D latent → 像素视频。</li>
+</ul>
+
+<p>代表作：</p>
+<ul>
+  <li><strong>Sora</strong>（OpenAI 2024）：spacetime patches + DiT，号称能生成 1 分钟 1080p 视频；</li>
+  <li><strong>Veo / Veo 2</strong>（Google DeepMind 2024–2025）；</li>
+  <li><strong>Luma R3 / Dream Machine</strong>（Alex 在课上展示的就是这条路线的产物）；</li>
+  <li><strong>Kling、Hailuo、Hunyuan Video</strong>（国内开源 / 商用）。</li>
+</ul>
+
+<p>这条路线为什么质量最强？因为时空 VAE 一并把<em>时间冗余</em>也压掉了——相邻几帧之间像素差异往往很小，VAE 可以用一个 latent token 表示几帧的合成信息。这相比"逐帧编码再加时序 attention"省了大量重复计算，也让 DiT 的 token 序列更短、长程依赖更容易学。代价是：时空 VAE 自己就难训练（既要重建空间高频也要重建时间细节），训练这一步现在反而成了视频模型最难复现的工程门槛。</p>
+
+<svg viewBox="0 0 760 280" role="img" aria-label="视频扩散三种配方对比">
+  <g font-family="ui-sans-serif" font-size="11" fill="var(--text)">
+    <text x="380" y="20" text-anchor="middle" font-weight="700" font-size="13">三种视频扩散配方</text>
+
+    <g transform="translate(20, 40)">
+      <rect x="0" y="0" width="230" height="220" rx="8" fill="#eef6fc" stroke="#2b80c4"/>
+      <text x="115" y="22" text-anchor="middle" font-weight="600">A · 3D U-Net + 时序 attn</text>
+      <text x="115" y="42" text-anchor="middle" font-size="10" fill="var(--text-muted)">Stable Video Diffusion / Gen-2</text>
+
+      <g transform="translate(30, 60)">
+        <rect x="0" y="0" width="40" height="30" fill="#fff" stroke="#2b80c4"/>
+        <rect x="50" y="0" width="40" height="30" fill="#fff" stroke="#2b80c4"/>
+        <rect x="100" y="0" width="40" height="30" fill="#fff" stroke="#2b80c4"/>
+        <text x="70" y="50" text-anchor="middle" font-size="10">每帧 2D 扩散</text>
+        <line x1="20" y1="70" x2="20" y2="100" stroke="#6f4dd0" class="flow-arrow" stroke-width="1.5"/>
+        <line x1="70" y1="70" x2="70" y2="100" stroke="#6f4dd0" class="flow-arrow" stroke-width="1.5"/>
+        <line x1="120" y1="70" x2="120" y2="100" stroke="#6f4dd0" class="flow-arrow" stroke-width="1.5"/>
+        <rect x="0" y="105" width="140" height="25" fill="#f3f0fa" stroke="#6f4dd0"/>
+        <text x="70" y="122" text-anchor="middle" font-size="10">时序 attn 跨帧</text>
+      </g>
+      <text x="115" y="200" text-anchor="middle" font-size="9" fill="var(--text-muted)">轻量、可复用 SD checkpoint</text>
+    </g>
+
+    <g transform="translate(265, 40)">
+      <rect x="0" y="0" width="230" height="220" rx="8" fill="#fff6e0" stroke="#d4a017"/>
+      <text x="115" y="22" text-anchor="middle" font-weight="600">B · Image-as-Frame</text>
+      <text x="115" y="42" text-anchor="middle" font-size="10" fill="var(--text-muted)">AnimateDiff / Deforum</text>
+
+      <g transform="translate(30, 60)">
+        <rect x="0" y="0" width="40" height="30" fill="#fff" stroke="#d4a017" stroke-width="2"/>
+        <text x="20" y="50" text-anchor="middle" font-size="9">SD 出首帧</text>
+        <line x1="40" y1="15" x2="60" y2="15" stroke="#d4a017" stroke-width="2" marker-end="url(#ldm-arrow)"/>
+        <rect x="60" y="0" width="40" height="30" fill="#fff" stroke="#d4a017" stroke-dasharray="3"/>
+        <rect x="110" y="0" width="40" height="30" fill="#fff" stroke="#d4a017" stroke-dasharray="3"/>
+        <text x="105" y="50" text-anchor="middle" font-size="9">光流 warp 后续帧</text>
+      </g>
+      <text x="115" y="200" text-anchor="middle" font-size="9" fill="var(--text-muted)">几乎零训练成本，但运动易塌</text>
+    </g>
+
+    <g transform="translate(510, 40)">
+      <rect x="0" y="0" width="230" height="220" rx="8" fill="#e8f5e9" stroke="#0b5"/>
+      <text x="115" y="22" text-anchor="middle" font-weight="600">C · 4D 时空 latent</text>
+      <text x="115" y="42" text-anchor="middle" font-size="10" fill="var(--text-muted)">Sora / Veo / Luma R3</text>
+
+      <g transform="translate(30, 60)">
+        <rect x="0" y="0" width="150" height="50" fill="#fff" stroke="#0b5"/>
+        <text x="75" y="22" text-anchor="middle" font-size="10">时空 VAE 压缩</text>
+        <text x="75" y="40" text-anchor="middle" font-size="9">T×H×W×C → T'×H'×W'×C'</text>
+        <line x1="75" y1="50" x2="75" y2="75" stroke="#0b5" stroke-width="2" marker-end="url(#ldm-arrow)"/>
+        <rect x="0" y="80" width="150" height="40" fill="#f3f0fa" stroke="#6f4dd0"/>
+        <text x="75" y="105" text-anchor="middle" font-size="10">DiT 在 4D latent 扩散</text>
+      </g>
+      <text x="115" y="200" text-anchor="middle" font-size="9" fill="var(--text-muted)">质量最强、训练最贵</text>
+    </g>
+  </g>
+</svg>
+
+<div class="my-addition">
+🟡 <strong>教材外补充：Sora 的"spacetime patches"</strong><br>
+Sora 论文的关键技术报告里讲，它把视频 latent 切成<em>时空 patch</em>（比如 $2 \times 16 \times 16$，时间方向 2 帧、空间 16×16），每个 patch flatten 成一个 token，喂进 DiT。这让 Sora 能<strong>统一处理不同长度、分辨率、宽高比</strong>的视频（不像传统视频模型必须固定 16 帧 256×256）。这是 LDM "latent + token-based diffusion" 思想在视频上的极致演绎。
+</div>
+
+<h2>七、视频扩散的四个老大难</h2>
+
+<p>视频比图像难的不只是"维度高 $T$ 倍"，而是引入了<strong>四类新挑战</strong>：</p>
+
+<h3>7.1 时序一致性（Temporal Coherence）</h3>
+
+<p>同一个物体在第 1 帧是橘猫、第 5 帧变成黑猫——这是早期视频扩散的"招牌 bug"，业内戏称"角色漂移"。出现的根本原因是每一帧的去噪是相对独立的随机过程，如果没有强力的跨帧约束，模型每帧都在自己重新"想象"主角长什么样。修法主要有：</p>
+<ul>
+  <li>时序注意力让帧间互通；</li>
+  <li>训练时数据集要有<em>大量真实视频</em>而不是图像 + 假动画；</li>
+  <li>采样时用<strong>固定 noise seed for all frames</strong>（同一个 $\epsilon$ 在所有帧间共享一部分），从噪声层就保持一致。</li>
+  <li>提供"角色参考图"作为额外条件——这就是 Alex 提到的 character reference 任务，等价于给模型一张"主角的身份证"。</li>
+</ul>
+
+<h3>7.2 运动合理性（Motion Plausibility）</h3>
+
+<p>"一只猫从沙发跳到桌子"——猫的肢体协调、重力、惯性都要对。这是<em>世界模型</em>层面的挑战，纯靠扩散模型从数据里学，需要海量真实视频（YouTube 全网级别）。Sora 据传训练数据规模是几亿条视频。可控运动还有个更隐蔽的难题：模型生成的"动"很容易退化成"摄像机平移"或者"整体缩放"——因为这是统计上最简单的"动"。让物体真的产生<em>结构性形变</em>（比如人走路时腿真的在弯）需要数据集本身的运动多样性足够丰富，而不是清一色的延时摄影、航拍片段。</p>
+
+<h3>7.3 长视频生成（Long-form）</h3>
+
+<p>5 秒视频 ≈ 120 帧。10 分钟视频 ≈ 14400 帧。直接训练时空 DiT 处理一万帧的 attention 矩阵太大。主流解法：</p>
+<ul>
+  <li><strong>滑动窗口生成</strong>：每次生成 8 秒，下一段以上一段最后 1 秒为条件；</li>
+  <li><strong>层级 / 关键帧 + 插帧</strong>：先生成 10 个关键帧，再插帧；</li>
+  <li><strong>autoregressive over chunks</strong>：把视频分块，块间 autoregressive、块内扩散。</li>
+</ul>
+
+<h3>7.4 可控性（Controllability）</h3>
+
+<p>用户想要的不是"随机一段猫的视频"，而是"这只特定的猫，做这个特定动作，相机这样运镜"。条件信号要从单一文本扩到：</p>
+<ul>
+  <li>首帧图（image-to-video）；</li>
+  <li>运动轨迹（drag-based control，如 DragNUWA）；</li>
+  <li>相机轨迹（camera control）；</li>
+  <li>角色参考（character reference，Alex 在 chunk #1475 提到过这是 Luma 的实际业务任务之一）；</li>
+  <li>深度图 / 姿态序列（ControlNet for video）。</li>
+</ul>
+
+<div class="callout-quote">
+Alex 在 chunk #1475 谈到为什么"步骤蒸馏"在生产环境很贵：「after training a good text to video model, we usually need to train task specific modules for different tasks such as video editing, image to video task and character reference tasks」——每个任务一个 module，每个 module 都要重新做一遍步数蒸馏。这就是<em>视频扩散落地</em>的真实成本结构。
+</div>
+
+<h2>八、推理成本：为什么"步数蒸馏"对视频是刚需</h2>
+
+<p>这是 Alex 这堂课的真正主线。在 chunk #1472–1476 他反复强调一个事实：</p>
+
+<blockquote>"diffusion models scale very poorly with inference compute"——步数砍到几步以下，质量直线掉。但 50 步 ODE，对于视频生成意味着 50 × (T 帧 × U-Net cost) 的推理成本。一个 5 秒 24fps 视频在 H100 上要跑几分钟。</blockquote>
+
+<p>Alex 在课上用一张图清楚地画出了这件事：横轴是采样步数，纵轴是模型质量。普通扩散模型这条曲线长得像个"陡坡上山"——步数很少时质量很差，必须跑到几十甚至上百步才能爬到山顶。而他在画的"理想模型"是另一条几乎水平的绿色直线——<em>步数不论多少，质量都接近最优</em>。Alex 给这种性质起了个名字：<strong>"efficient inference time scaling"</strong>（高效的推理时缩放）。这是少步生成研究的明星指标。</p>
+
+<p>所以下一章 <a href="/video-to-notebook/textbook/19/">蒸馏与少步采样</a> 不是"锦上添花"，而是<strong>视频扩散能否商业化的生死线</strong>。具体看 Alex 在课上比对的两条路：</p>
+
+<ul>
+  <li><strong>两阶段路线（pre-train + distill）</strong>：先训扩散模型，再用 Consistency Distillation / DMD 等方法蒸馏成 1–4 步模型。问题：DMD 要训两个网络、调参敏感；每个新任务（视频编辑、角色参考……）都得重蒸一遍。</li>
+  <li><strong>单阶段路线（直接从头训少步模型）</strong>：Alex 介绍的 Luma 自研工作—— <strong>Inductive Moment Matching</strong> 和 <strong>Terminal Velocity Matching</strong>——目标是<em>用一个训练 pipeline 直接得到一个 1–4 步采样的模型</em>，跳过蒸馏阶段。</li>
+</ul>
+
+<div class="callout callout-info">
+ℹ️ <strong>本章和下一章的衔接</strong>：第 18 章告诉你"扩散在 latent 上跑"是 SD 之后所有大模型的基础；第 19 章则告诉你"在 latent 上跑得再快也不够，必须把 50 步压成几步"。LDM 是<em>空间维度</em>的节省，蒸馏是<em>时间维度</em>的节省。两者正交叠加，才有今天我们体验到的"几秒出图、十几秒出视频"。
+</div>
+
+<h2>九、PyTorch 实现骨架：LDM 训练步</h2>
+
+<p>下面是 LDM 一次训练迭代的最小骨架（省略了数据加载、optimizer 等模板代码）。注意 VAE 在 <code>no_grad</code> 里——它是冻结的。</p>
+
+<pre><code>import torch
+import torch.nn.functional as F
+
+# 假设这些模块已实例化、加载预训练权重
+vae         = VAE().eval()              # 冻结的 KL-reg VAE（encoder + decoder）
+text_encoder = CLIPTextEncoder().eval() # 冻结的 CLIP
+unet        = UNet2DCondition()         # 可训练，cross-attn 接收 text emb
+scheduler   = DDPMScheduler(T=1000)     # β 调度（cosine 或 linear）
+
+for x, caption in dataloader:           # x: [B,3,512,512]   caption: List[str]
+    # ----- 1. 编码到 latent（冻结，不计梯度） -----
+    with torch.no_grad():
+        z0 = vae.encode(x).sample()     # [B,4,64,64]，乘以 0.18215 标准化
+        z0 = z0 * 0.18215
+        c  = text_encoder(caption)      # [B,77,768]，CLIP token 表示
+
+    # ----- 2. 随机时间步 + 加噪 -----
+    B = z0.size(0)
+    t = torch.randint(0, scheduler.T, (B,), device=z0.device)
+    eps = torch.randn_like(z0)
+    zt = scheduler.add_noise(z0, eps, t)  # √ᾱ_t z0 + √(1-ᾱ_t) ε
+
+    # ----- 3. Classifier-free guidance 风格的条件 dropout -----
+    mask = (torch.rand(B, device=z0.device) < 0.1).view(B, 1, 1)
+    c_in = torch.where(mask, torch.zeros_like(c), c)  # 10% 把条件清零
+
+    # ----- 4. U-Net 预测 ε，cross-attn 注入 c_in -----
+    eps_pred = unet(zt, t, encoder_hidden_states=c_in)  # [B,4,64,64]
+
+    # ----- 5. 简单 MSE loss -----
+    loss = F.mse_loss(eps_pred, eps)
+    loss.backward()
+    optimizer.step()
+    optimizer.zero_grad()
+
+
+# ===== 推理（采样）伪代码 =====
+@torch.no_grad()
+def sample(prompt, w=7.5, num_steps=50):
+    c = text_encoder([prompt])           # 条件
+    c_uncond = text_encoder([""])        # 无条件（empty prompt）
+    zT = torch.randn(1, 4, 64, 64).cuda()
+    for t in scheduler.timesteps(num_steps):
+        eps_c   = unet(zT, t, encoder_hidden_states=c)
+        eps_u   = unet(zT, t, encoder_hidden_states=c_uncond)
+        eps_hat = (1 + w) * eps_c - w * eps_u   # CFG，见第 17 章
+        zT = scheduler.step(eps_hat, zT, t)     # DDIM / DPM-Solver 单步
+    z0 = zT / 0.18215
+    x  = vae.decode(z0)
+    return x  # [1,3,512,512]
+</code></pre>
+
+<div class="callout callout-note">
+🧰 <strong>那个神秘的 0.18215</strong>：SD 1.x 训练时统计了 VAE latent 的标准差，乘 0.18215 让 latent 接近单位方差。这是<em>纯工程常数</em>，但你看代码时绕不开它。SDXL 改成 0.13025，因为 VAE 不同。
+</div>
+
+<h2>十、和"流匹配"的关系：同一件事的两种命名</h2>
+
+<p>读到这里你可能会困惑：Alex 整堂课嘴里挂着的不是 "diffusion"，而是 "diffusion and flow matching"。这两个词到底是什么关系？要不要在 LDM 里换成 flow matching？简短答案：<strong>flow matching 是 diffusion 的一个等价重表述</strong>，目标分布、神经网络的输入输出都几乎一样，只是把"预测噪声 $\epsilon$"换成"预测速度场 $v$"，把概率流 ODE 写成更干净的形式。在 LDM 框架里，你可以把扩散 U-Net 换成 flow matching U-Net 一行代码改完，整体架构（VAE 编码器 + latent ε / v 网络 + 解码器）不变。</p>
+
+<p>Alex 在 chunk #1471 里说："the job of diffusion models and flow matching is to learn this velocity field with a neural network"——他强调两者是<em>同一类问题的两个名字</em>。Stable Diffusion 3 / Flux 已经全面切到 flow matching；Sora 据透露也是 flow matching。但这不影响本章 LDM 的核心思想：<strong>无论是 ε 预测还是 v 预测，都跑在 VAE 提供的 latent space 上</strong>。LDM 是"在哪里跑"的问题；diffusion vs flow matching 是"用什么目标跑"的问题。两者正交。</p>
+
+<div class="callout callout-info">
+ℹ️ <strong>记忆口诀</strong>：把 LDM 当成"操作系统"，diffusion 和 flow matching 是同一个操作系统上的两个"应用层算法"。下一步如果再出现新的生成范式（比如最近的 mean flow、shortcut models），只要它们仍在低维 latent 上工作，它们就还在 LDM 的版图里。
+</div>
+
+<h2>十一、把这一章接到全局：扩散模型的"省钱进化树"</h2>
+
+<p>把 18 章及前后的内容串成一棵进化树：</p>
+
+<ul>
+  <li><strong>2020 · DDPM</strong>（<a href="/video-to-notebook/textbook/5/">第 5 章</a>）：像素空间 256×256，几百张 V100 才能跑。</li>
+  <li><strong>2021 · Improved DDPM / ADM</strong>：cosine 调度、可学习方差，像素空间继续战斗。</li>
+  <li><strong>2022 · LDM / Stable Diffusion</strong>（本章）：<em>空间压缩 48×</em>，个人显卡能跑。</li>
+  <li><strong>2022–2023 · DDIM / DPM-Solver</strong>（<a href="/video-to-notebook/textbook/16/">第 16 章</a>）：<em>步数从 1000 砍到 20</em>。</li>
+  <li><strong>2023 · Consistency Models / LCM</strong>（<a href="/video-to-notebook/textbook/19/">第 19 章</a>）：<em>步数砍到 1–4 步</em>。</li>
+  <li><strong>2023 · ControlNet / IP-Adapter</strong>（<a href="/video-to-notebook/textbook/20/">第 20 章</a>）：把条件信号从文本扩到深度图、姿态、参考图。</li>
+  <li><strong>2024 · DiT / Sora / SD3 / Flux</strong>：U-Net 让位给 Transformer，扩 latent 思想搬到视频和 4D。</li>
+  <li><strong>2024–2025 · Luma R3 / Veo 2</strong>：4D 时空 latent + DiT + 步数蒸馏，端到端推理几秒一段视频。</li>
+</ul>
+
+<p>注意：<strong>这棵树上的每一个节点都没有抛弃前一个节点</strong>。LDM 是 DDPM 的"省空间"版本，Consistency 是 DDIM 的"省时间"版本，DiT 是 LDM 的"换骨架"版本。所有这些优化在工业模型里是<strong>叠加使用</strong>的——一个现代视频模型同时享受 latent 压缩 + 步数蒸馏 + Transformer 骨架的好处。</p>
+
+<div class="callout callout-tip">
+💡 <strong>把这章当作"分水岭"</strong>：第 18 章之前，我们讨论的扩散是 <em>academic-scale</em> 的（MNIST、CIFAR、ImageNet 64×64）；从这章开始，我们正式进入 <em>production-scale</em> 的扩散（512×512 文生图、5 秒视频）。理论没变，工程变了——而本章就是工程把扩散救活的那一招。
+</div>
+
+<figure class="clip-frame">
+  <iframe src="https://www.youtube.com/embed/H7MxR3XDt30?start=44" title="Alex Zhou (Luma AI) 在 CMU 10799 开场：text-to-image / text-to-video 都建在扩散和流匹配上" allowfullscreen></iframe>
+  <figcaption>📺 CMU 10799 S26 Lecture 11（00:44 起）—— Alex 用 Luma R3 视频样本开场，铺垫"为什么所有视觉大模型都跑扩散"。</figcaption>
+</figure>
+
+<div class="my-addition">
+🟡 <strong>教材外补充：Latent Diffusion 的"概念地图"</strong><br>
+如果你在学 SD 二次开发（LoRA、ControlNet、IP-Adapter 等），所有这些技术都<em>建在 LDM 的 latent space 之上</em>，而不是在像素上工作。这是因为 SD 的 cross-attention 层在 latent 维度，所有插拔式扩展只需要面对 64×64 的张量，不用考虑像素分辨率。<strong>LDM 这个"latent 中间层"成了 Stable Diffusion 生态系统的"操作系统"</strong>——所有插件都是它的应用层。
+</div>
+
+<div class="takeaways" style="background:#0b5; color:#fff; padding:1.4rem; border-radius:8px; margin-top:2rem;">
+  <h3 style="margin-top:0; color:#fff;">本章要记住的</h3>
+  <ol>
+    <li><strong>LDM 核心洞察</strong>："像素扩散在浪费 capacity"——纹理交给 VAE decoder，扩散只管语义。压缩 48×，端到端加速 ~50×。</li>
+    <li><strong>三件套</strong>：冻结的 VAE encoder $E$ + 可训练 U-Net $\epsilon_\theta$ + 冻结的 VAE decoder $D$。第一阶段训 VAE（L1+LPIPS+弱 KL+GAN），第二阶段在 latent 上跑标准 DDPM。</li>
+    <li><strong>和第 2 章 VAE 的关系</strong>：LDM = "VAE 做压缩 + Diffusion 做生成"。第 2 章的强 KL prior 被换成可学习的扩散 prior，这是 VAE 家族的重大升级。</li>
+    <li><strong>Cross-attention 注入条件</strong>：Q 来自 latent，K/V 来自 CLIP/T5 文本编码。"空间位置查询文本 token"——这是 SD 实现 prompt 控制的根本机制。</li>
+    <li><strong>视频扩散三配方</strong>：A) 3D U-Net + 时序注意力（SVD/Gen-2）；B) Image-as-Frame + 光流（AnimateDiff）；C) 4D 时空 latent + DiT（Sora/Veo/Luma R3）。Alex 在课上展示的 R3 走的是 C。</li>
+    <li><strong>视频四大难</strong>：时序一致性、运动合理性、长视频、可控性。每一个都还在 active research。</li>
+    <li><strong>本章承上启下</strong>：LDM 解决"空间维度的浪费"，下一章 Consistency / 蒸馏解决"时间维度的浪费"。Alex 这堂课的真正主线是后者—— Inductive Moment Matching、Terminal Velocity Matching 都是为了用一个训练 pipeline 直接拿到 1–4 步采样的模型。</li>
+  </ol>
+</div>
+
+</article>

@@ -1,0 +1,540 @@
+<style>
+  .reverse-ch { line-height: 1.75; }
+  .reverse-ch svg { display: block; margin: 1.2rem auto; max-width: 100%; height: auto; }
+  .reverse-ch .clip-frame { max-width: 720px; margin: 1.4rem auto; }
+  .reverse-ch .clip-frame iframe { width: 100%; aspect-ratio: 16/9; border: 0; border-radius: 6px; }
+  .reverse-ch .clip-frame figcaption { color: var(--text-muted); font-size: 0.85rem; margin-top: 0.4rem; text-align: center; }
+  .reverse-ch .tldr { background: var(--surface-soft); border-left: 4px solid var(--module-accent); padding: 1rem 1.2rem; border-radius: 0 6px 6px 0; margin: 1.4rem 0; }
+  .reverse-ch .tldr h2 { margin-top: 0; font-size: 1.05rem; border-bottom: 0; }
+  .reverse-ch .callout { padding: 0.7rem 1rem; margin: 1rem 0; border-radius: 0 6px 6px 0; }
+  .reverse-ch .callout-info { background: #eef6fc; border-left: 4px solid #2b80c4; }
+  .reverse-ch .callout-note { background: #f3f0fa; border-left: 4px solid #6f4dd0; }
+  .reverse-ch .callout-warning { background: #fff6e0; border-left: 4px solid #d4a017; }
+  .reverse-ch .callout-tip { background: #e8f5e9; border-left: 4px solid #0b5; }
+  .reverse-ch .callout-quote { background: var(--surface-soft); border-left: 3px solid var(--border-strong); padding: 0.5rem 1rem; margin: 0.8rem 0; font-style: italic; color: var(--text-muted); }
+  .reverse-ch .my-addition { background: #fff7d6; border-left: 4px solid #b8860b; padding: 0.7rem 1rem; margin: 1rem 0; border-radius: 0 6px 6px 0; }
+  .reverse-ch pre { background: #1f1f1f; color: #f6f4ee; padding: 1rem; border-radius: 6px; font-size: 0.86rem; line-height: 1.55; overflow-x: auto; }
+  .reverse-ch code:not(pre code) { background: var(--surface-soft); padding: 0.1rem 0.35rem; border-radius: 3px; font-size: 0.9em; }
+  .reverse-ch h2 { border-bottom: 1px solid var(--border); padding-bottom: 0.3rem; margin-top: 2.4rem; }
+  .reverse-ch h3 { color: var(--module-accent); margin-top: 1.6rem; }
+  .reverse-ch .deriv-step { margin: 0.8rem 0; padding: 0.6rem 0.8rem; background: var(--surface-soft); border-radius: 4px; }
+  .reverse-ch .deriv-step strong { color: var(--module-accent); }
+  .reverse-ch .source-quote { font-style: italic; color: var(--text-muted); border-left: 3px solid var(--module-accent); padding: 0.5rem 1rem; margin: 0.8rem 0; background: var(--surface-soft); border-radius: 0 4px 4px 0; }
+</style>
+
+<article class="reverse-ch">
+
+<h1>6. 反向去噪：从噪声里恢复数据</h1>
+
+<p style="font-size:0.95rem; color:var(--text-muted);">主源：Vizuara《Principles of Diffusion Models》Lecture 3（讲师 Dr. Raj Dandekar，chunk #0–19）；副源：CMU 10799 Lecture 2（Kelly Marsh）；Vizuara《Diffusion LM》Lecture 4（denoising 直觉）。</p>
+
+<div class="tldr">
+  <h2>📌 TL;DR</h2>
+  <p><strong>反向过程</strong>就是把<a href="/video-to-notebook/textbook/4/">第 4 章</a>那条"数据 → 噪声"的链子反过来跑：从一团纯高斯噪声 $x_T \sim \mathcal{N}(0, I)$ 出发，一步一步去噪、还原成一张真实样本 $x_0$。每一步学一个条件高斯：</p>
+  $$p_\theta(x_{t-1} \mid x_t) = \mathcal{N}\!\big(x_{t-1};\ \mu_\theta(x_t, t),\ \Sigma_t\big)$$
+  <p>方差 $\Sigma_t$ 通常固定（DDPM 取 $\beta_t I$ 或 $\tilde\beta_t I$）；<strong>真正要学的只有均值 $\mu_\theta(x_t, t)$</strong>，由一个共享参数的神经网络（多半是 U-Net）给出。</p>
+  <p>训练目标怎么定？Bayes 给出一个"作弊神器"：<strong>在条件 $x_0$ 已知时</strong>，真实后验 $q(x_{t-1} \mid x_t, x_0)$ 是闭式高斯。让网络的 $\mu_\theta(x_t, t)$ 去匹配它的均值 $\tilde\mu_t(x_t, x_0)$——这就把"反向"问题压成了一连串可解的 KL 优化。</p>
+  <p><strong>为什么不是简单地把前向公式反着写一次？</strong>因为前向加噪是<em>有损过程</em>：那个 $\epsilon$ 一旦采完就丢了，反向时只能"估期望"而非"精确还原"。Dr. Raj 在 L8 把这件事讲得很重——这一章就把"naïve 反向"是怎么被打掉、"真正的反向"为什么必须是<strong>一连串可学的 decoder</strong>讲清楚。</p>
+  <p><strong>承上启下</strong>：本章是 DDPM 训练损失的"地基"。后面 <a href="/video-to-notebook/textbook/7/">第 7 章</a>会在它的基础上推出著名的 $L_\text{simple} = \mathbb{E}[\|\epsilon - \epsilon_\theta(x_t, t)\|^2]$——你会看到所有 KL 项最终都坍缩成"预测噪声的 MSE"。</p>
+</div>
+
+<h2>一、从 VAE 跨到 Diffusion：一次还原 vs 多步还原</h2>
+
+<p>讲师 Dr. Raj 在 Lecture 3 一开场，先<strong>把 VAE 复习了一遍</strong>——不是凑时间，而是因为反向过程的语法和 VAE decoder 几乎一模一样，只是<em>把一次还原拉成 T 次还原</em>。Vizuara 这门课的开场原话：</p>
+
+<blockquote class="source-quote">「In this particular lecture, we are going to move forward from variational autoencoders. Before we move ahead, I want to do a quick recap of variational autoencoders and what is the exact architecture of VAEs. So, VAEs have an architecture which look like this: you have a data, and then you have an encoder which transforms this data from the real space to the latent space.」（chunk #0）</blockquote>
+
+<p>VAE 干的事情可以一句话概括："压一次，还原一次。"——encoder 把图压成 latent $z$，decoder 把 $z$ 解码回 $x$。<strong>它是个一步过程</strong>。但讲师马上指出 VAE 有两大遗憾（chunk #16-17）：</p>
+
+<blockquote class="source-quote">「Every single output image appears blur compared to the original image... So that is the drawback of standard variational autoencoder that it often produces blurry outputs. And another major drawback is that the encoder and the decoder have to be trained jointly... two neural networks at the same time. and this is something which has proven to be uh problematic in practical use cases.」（chunk #16–17）</blockquote>
+
+<p>这两个痛点直接把讲师导向 DDPM：</p>
+
+<blockquote class="source-quote">「So with this introduction in mind we are going to move to diffusion modeling in this lecture, and the title of this lecture is <strong>denoising diffusion probabilistic models</strong>. So this was a paper which came out in 2020... it is an incredibly popular paper and it gave a new direction to the field of image generation.」（chunk #17–18）</blockquote>
+
+<p>那 DDPM 比 VAE 好在哪？想象一下"把<em>一次重建</em>切成<em>一千次小重建</em>"：</p>
+
+<ul>
+  <li>每一步只需要解决"从噪声更多一点的 $x_t$ 还原到噪声少一点的 $x_{t-1}$"——<strong>这是个非常小的、局部的去噪任务</strong>，模型很容易学；</li>
+  <li>所有 T 步共享同一个网络（参数 $\theta$ 共用），time embedding 告诉它当前是第几步；</li>
+  <li>不再需要 encoder（前向是无参的<a href="/video-to-notebook/textbook/4/">高斯加噪</a>）—— <em>一个网络就够了</em>，VAE "训两个网络互相打架"的麻烦消失。</li>
+</ul>
+
+<div class="callout callout-note">
+🧭 <strong>直觉锚点</strong>：把 VAE 想成"一台一气呵成的复印机"——你按一下，它一次就还原出整张图，容易模糊。DDPM 是"一千个微微清晰一点的修图师排成流水线"——每个人只需要负责把照片"擦亮一档"，错的余地极小。<em>多步小修</em>战胜<em>一步大修</em>，这是 DDPM 思想的灵魂。
+</div>
+
+<h2>二、Vizuara LM 课的"去噪"直觉：从噪声里走回数据流形</h2>
+
+<p>Vizuara 在 LM 那门姐妹课（Lecture 4）用了另一个画面把 denoising 讲得格外形象——讲师把图像空间想成一个<strong>概率分布的"地图"</strong>：</p>
+
+<blockquote class="source-quote">「Now that we have seen the probabilistic length of generative AI, let us actually see that how do diffusion models achieve their true purpose. And their true purpose is to find the underlying probability distribution. <strong>The way diffusion models find this purpose is through a process of denoising.</strong>」（chunk #2）</blockquote>
+
+<blockquote class="source-quote">「Let's say that we want to generate images of a panda or a bear. And these images live somewhere over here—that's the probability distribution where you have to sample images which look like a bear or a panda. The way diffusion models work is that they start out with noise. So they may start out at some random location in the probability distribution space.」（chunk #2）</blockquote>
+
+<p>把这个画面写成数学：</p>
+
+<ul>
+  <li>真实数据 $x_0 \sim p_{\text{data}}$ 集中在高维空间里一个非常薄、非常稀疏的<em>流形</em>（"全世界的熊猫图"在 784 维像素空间里只占极小一片）；</li>
+  <li>纯高斯噪声 $x_T \sim \mathcal{N}(0, I)$ 弥漫整个空间，离数据流形非常远；</li>
+  <li><strong>反向过程要做的</strong>，就是从 $x_T$ 出发，沿着一条<em>梯度下降一般</em>的轨迹，<em>一步步</em>朝数据流形挪——每一步小小拉近 $x_t$ 到流形的距离。</li>
+</ul>
+
+<svg viewBox="0 0 620 240" role="img" aria-label="反向过程：从噪声游走到数据流形">
+  <g font-family="ui-sans-serif" font-size="11" fill="var(--text)">
+    <defs>
+      <marker id="rev-arrow" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+        <path d="M0,0 L6,3 L0,6 Z" fill="var(--red)"/>
+      </marker>
+    </defs>
+    <rect x="10" y="10" width="600" height="220" rx="8" fill="var(--surface-soft)" stroke="var(--border)"/>
+
+    <!-- data manifold -->
+    <path d="M 80 170 Q 180 100 280 150 Q 380 200 480 130 Q 540 100 580 130" stroke="var(--module-accent)" stroke-width="3" fill="none"/>
+    <text x="120" y="195" font-size="10" fill="var(--module-accent)">真实数据流形 $p_\text{data}$</text>
+
+    <!-- noise sample -->
+    <circle cx="40" cy="50" r="6" fill="var(--red)"/>
+    <text x="50" y="48" font-size="10" fill="var(--red)">x_T（纯噪声）</text>
+
+    <!-- trajectory -->
+    <circle cx="100" cy="80" r="4" fill="var(--red)" opacity="0.8"/>
+    <circle cx="170" cy="100" r="4" fill="var(--red)" opacity="0.6"/>
+    <circle cx="230" cy="125" r="4" fill="var(--red)" opacity="0.5"/>
+    <circle cx="280" cy="145" r="5" fill="var(--module-accent)"/>
+
+    <path d="M 46 56 L 96 78" stroke="var(--red)" stroke-dasharray="3,2" marker-end="url(#rev-arrow)"/>
+    <path d="M 104 84 L 166 100" stroke="var(--red)" stroke-dasharray="3,2" marker-end="url(#rev-arrow)"/>
+    <path d="M 174 104 L 226 124" stroke="var(--red)" stroke-dasharray="3,2" marker-end="url(#rev-arrow)"/>
+    <path d="M 234 128 L 276 144" stroke="var(--red)" stroke-dasharray="3,2" marker-end="url(#rev-arrow)"/>
+
+    <text x="160" y="60" font-size="11" fill="var(--text-muted)">每条箭头 = 一次 $p_\theta(x_{t-1}\!\mid\!x_t)$ 采样</text>
+    <text x="300" y="175" font-size="10" fill="var(--module-accent)">x_0（落到流形上）</text>
+  </g>
+</svg>
+
+<p>这张图就是<strong>反向过程的目标</strong>：让红点从画面左上角（高熵的噪声海洋）平滑漂回画面中下方那条曲线上（低熵的数据流形）。<em>每步漂移</em>由一个学出来的高斯 $p_\theta(x_{t-1}|x_t)$ 给出——这就是本章的主角。</p>
+
+<h2>三、Naïve 想法：把前向公式倒着写</h2>
+
+<p>面对这个问题，<strong>初学者最自然的反应</strong>就是："前向不是 $x_t = \sqrt{1-\beta_t}\, x_{t-1} + \sqrt{\beta_t}\, \epsilon$ 吗？那反向不就是把这两项<em>反算</em>一下？"——讲师 Dr. Raj 在 Lecture 3 直接拷问这个想法，让你看到它是怎么<em>看着对，其实错</em>的。</p>
+
+<blockquote class="source-quote">「The first intuition is — reverse 不就是把 forward 这步反过来？前向是 <em>mean × √α + √β × noise</em>。那为什么反向不能就是 <em>upscale by α、再 remove β noise from each pixel</em>？」（Dr. Raj，Lecture 3 反向引入段）</blockquote>
+
+<p>问题出在那个 $\epsilon$——前向加噪声的时候，那一项是<em>随机采的</em>，是 $\mathcal{N}(0, I)$ 抛出来的一个具体样本。一旦加进去：</p>
+
+<ul>
+  <li>前向方向，你<em>知道</em>这个 $\epsilon$ 是什么（训练时是你亲手 sample 出来的）；</li>
+  <li>反向方向（推理时），<strong>你只看到 $x_t$</strong>——你不知道当初加的具体那一团噪声长什么样。它已经和信号融合在一起。</li>
+</ul>
+
+<p>所以"减去 $\sqrt{\beta_t}\, \epsilon$"这件事<strong>根本无法精确执行</strong>——这是一个<em>不可逆的有损操作</em>。形式上：</p>
+
+$$x_{t-1} = \frac{x_t - \sqrt{\beta_t}\, \epsilon}{\sqrt{1 - \beta_t}}$$
+
+<p>右边的 $\epsilon$ 是未知量。你能做的<strong>最好</strong>的事情，就是<em>估计</em>它（或等价地，估计 $x_{t-1}$ 在已知 $x_t$ 下的<em>期望</em>）。这就是为什么反向必须用<strong>神经网络做 Bayesian 推断</strong>，而不是代数倒装。</p>
+
+<div class="callout callout-warning">
+⚠️ <strong>常见误区</strong>：很多博客把前向写成"加噪 $\epsilon$"，反向写成"减噪 $\epsilon$"，让读者误以为反向就是减法。其实<strong>反向预测的不是当时的那个 $\epsilon$，而是 $\epsilon$ 在所有可能性下的后验期望 $\mathbb{E}[\epsilon \mid x_t]$</strong>——这是个统计学习问题，不是代数题。
+</div>
+
+<h2>四、真正的反向：一连串可学的 decoder</h2>
+
+<p>讲师在 Lecture 3 给出反向过程的正式定义时，<strong>反复强调"a series of"</strong>这件事——不是一次还原，是上千次小还原：</p>
+
+<blockquote class="source-quote">「This is <strong>not</strong> like a one-time denoising step like we did for VAE. There are <strong>a series of decoders</strong> here with trainable parameters. The essence of DDPM lies in the ability to reverse the controlled diffusion.」（Dr. Raj，Lecture 3 反向定义段）</blockquote>
+
+<p>形式化：反向也是一条 Markov 链——但<em>方向相反</em>，<em>需要学习</em>：</p>
+
+$$p_\theta(x_{0:T}) = p(x_T) \prod_{t=1}^T p_\theta(x_{t-1} \mid x_t), \qquad p(x_T) = \mathcal{N}(0, I)$$
+
+<p>每一步条件分布参数化为高斯：</p>
+
+$$\boxed{\ p_\theta(x_{t-1} \mid x_t) \;=\; \mathcal{N}\!\big(x_{t-1};\ \mu_\theta(x_t, t),\ \Sigma_t\big)\ }$$
+
+<p>逐项理解（这是本章<strong>第一块必须背下来的砖</strong>）：</p>
+
+<ul>
+  <li><strong>$\mathcal{N}(\cdot, \cdot, \cdot)$</strong>：每一步是一个高斯分布——意味着"从 $x_t$ 去到 $x_{t-1}$"不是一个确定的映射，而是一个<em>有不确定性</em>的转移。这件事很合理：知道一张噪声图后，能与它对得上的"稍微清晰一点"的图<em>有很多种</em>，反向过程必须<em>承认这种多样性</em>，于是用一个分布来表达；</li>
+  <li><strong>$\mu_\theta(x_t, t)$</strong>：均值——由神经网络（参数 $\theta$）给出，<em>这是反向过程里唯一需要训练的东西</em>。它依赖<em>当前噪声图</em> $x_t$ <em>和当前时间步</em> $t$；</li>
+  <li><strong>$\Sigma_t$</strong>：协方差矩阵——<em>通常固定不学</em>。DDPM 原论文用 $\beta_t I$（前向的方差直接搬过来）或 $\tilde\beta_t I$（后面会推出来的后验方差），实验上两种差距不大；</li>
+  <li><strong>$t$ 作为输入</strong>：网络<em>必须知道</em>自己处在哪一步——是 t=999（噪声很多、目标是粗略勾轮廓）还是 t=10（噪声很少、目标是抠细节）。这就是 sinusoidal time embedding 的来源（下文）。</li>
+</ul>
+
+<svg viewBox="0 0 640 200" role="img" aria-label="反向链：一连串共享参数的 decoder">
+  <g font-family="ui-sans-serif" font-size="11" fill="var(--text)">
+    <defs>
+      <marker id="rev2-arrow" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+        <path d="M0,0 L6,3 L0,6 Z" fill="var(--red)"/>
+      </marker>
+    </defs>
+
+    <!-- boxes for x_t -->
+    <rect x="20" y="70" width="60" height="60" rx="4" fill="#bbb"/>
+    <text x="50" y="105" text-anchor="middle">$x_T$</text>
+    <text x="50" y="155" text-anchor="middle" font-size="10" fill="var(--text-muted)">纯噪声</text>
+
+    <path d="M 85 100 L 115 100" stroke="var(--red)" stroke-width="2" marker-end="url(#rev2-arrow)"/>
+    <text x="100" y="90" text-anchor="middle" font-size="9" fill="var(--red)">$p_\theta$</text>
+
+    <rect x="120" y="70" width="60" height="60" rx="4" fill="var(--module-accent)" opacity="0.4"/>
+    <text x="150" y="105" text-anchor="middle">$x_{T-1}$</text>
+
+    <text x="195" y="105" font-size="18">···</text>
+
+    <rect x="220" y="70" width="60" height="60" rx="4" fill="var(--module-accent)" opacity="0.6"/>
+    <text x="250" y="105" text-anchor="middle">$x_{t+1}$</text>
+
+    <path d="M 285 100 L 315 100" stroke="var(--red)" stroke-width="2" marker-end="url(#rev2-arrow)"/>
+    <text x="300" y="90" text-anchor="middle" font-size="9" fill="var(--red)">$p_\theta$</text>
+
+    <rect x="320" y="70" width="60" height="60" rx="4" fill="var(--module-accent)" opacity="0.7"/>
+    <text x="350" y="105" text-anchor="middle">$x_t$</text>
+
+    <path d="M 385 100 L 415 100" stroke="var(--red)" stroke-width="2" marker-end="url(#rev2-arrow)"/>
+    <text x="400" y="90" text-anchor="middle" font-size="9" fill="var(--red)">$p_\theta$</text>
+
+    <rect x="420" y="70" width="60" height="60" rx="4" fill="var(--module-accent)" opacity="0.85"/>
+    <text x="450" y="105" text-anchor="middle">$x_{t-1}$</text>
+
+    <text x="495" y="105" font-size="18">···</text>
+
+    <rect x="520" y="70" width="60" height="60" rx="4" fill="var(--module-accent)"/>
+    <text x="550" y="105" text-anchor="middle" fill="var(--surface)">$x_0$</text>
+    <text x="550" y="155" text-anchor="middle" font-size="10" fill="var(--module-accent)">真实样本</text>
+
+    <text x="300" y="180" text-anchor="middle" font-size="11" fill="var(--text-muted)">所有 $p_\theta$ 共享同一个神经网络；t 通过 time embedding 注入</text>
+  </g>
+</svg>
+
+<p>注意三个要点：</p>
+
+<ol>
+  <li><strong>整条链反过来跑</strong>：从右往左看是<a href="/video-to-notebook/textbook/4/">前向</a>（清晰→噪声、无参、用 $q$ 表示），从左往右看是反向（噪声→清晰、有参、用 $p_\theta$ 表示）；</li>
+  <li><strong>箭头数量 = T</strong>：DDPM 原论文 $T = 1000$。每个红箭头都是网络<em>跑一次 forward</em>——所以 DDPM 推理慢（1000 步），但<a href="/video-to-notebook/textbook/4/">训练快</a>（可跳步采 $x_t$）；</li>
+  <li><strong>参数 θ 共享</strong>：不是 1000 个独立网络，是<em>同一个网络</em>跑 1000 次，每次只通过 time embedding 告诉它"现在是第几步"。</li>
+</ol>
+
+<h2>五、训练目标怎么定？Bayes 把"作弊神器"递过来</h2>
+
+<p>我们已经知道<em>形式</em>$p_\theta(x_{t-1}|x_t) = \mathcal{N}(\mu_\theta, \Sigma_t)$，但 $\mu_\theta$ 究竟应该<em>逼近什么</em>？这里要用一招很漂亮的<strong>条件 Bayes</strong>。</p>
+
+<h3>5.1 真后验 $q(x_{t-1}|x_t)$ 算不出来</h3>
+
+<p>"理想的"反向应该是前向的真后验：</p>
+
+$$q(x_{t-1} \mid x_t) \;=\; \frac{q(x_t \mid x_{t-1}) \, q(x_{t-1})}{q(x_t)}$$
+
+<p>但这个公式<strong>不可计算</strong>，因为分母 $q(x_t) = \int q(x_t \mid x_0) p_{\text{data}}(x_0) dx_0$ 要在<em>所有真实数据 $x_0$</em>上积分——同样的 intractability 问题，和<a href="/video-to-notebook/textbook/3/">ELBO 那一章</a>遇到的一模一样。</p>
+
+<h3>5.2 「偷看 $x_0$」 这一招</h3>
+
+<p>关键的小技巧：<strong>训练时我们其实有 $x_0$！</strong>——它就是当前 batch 里的真实图。所以我们可以问一个更聪明的问题：</p>
+
+<blockquote>不要算 $q(x_{t-1}|x_t)$，而去算<strong>条件版本</strong> $q(x_{t-1}|x_t, x_0)$——已知"清晰原图 $x_0$ + 当前噪声图 $x_t$"，问"上一步的中间产物 $x_{t-1}$" 应该长什么样。</blockquote>
+
+<p>神奇的事情发生了：<strong>$q(x_{t-1}|x_t, x_0)$ 是一个闭式高斯</strong>！</p>
+
+<h3>5.3 推导（一步一行）</h3>
+
+<p>用 Bayes 公式：</p>
+
+<div class="deriv-step">
+<strong>步骤 1：列 Bayes</strong>
+$$q(x_{t-1} \mid x_t, x_0) \;=\; \frac{q(x_t \mid x_{t-1}, x_0)\, q(x_{t-1} \mid x_0)}{q(x_t \mid x_0)}$$
+<em>Why</em>：标准条件 Bayes，把"难算的 $q(x_t \mid x_0)$"放到分母里。三个组件全是<em>前向</em>分布。
+</div>
+
+<div class="deriv-step">
+<strong>步骤 2：三个组件都已知（且都是高斯！）</strong>
+<ul>
+  <li>$q(x_t \mid x_{t-1}, x_0) = q(x_t \mid x_{t-1}) = \mathcal{N}\!\big(x_t; \sqrt{1-\beta_t}\, x_{t-1},\ \beta_t I\big)$（Markov 前向，<a href="/video-to-notebook/textbook/4/">第 4 章</a>）；</li>
+  <li>$q(x_{t-1} \mid x_0) = \mathcal{N}\!\big(x_{t-1}; \sqrt{\bar\alpha_{t-1}}\, x_0,\ (1-\bar\alpha_{t-1}) I\big)$（跳步公式）；</li>
+  <li>$q(x_t \mid x_0) = \mathcal{N}\!\big(x_t; \sqrt{\bar\alpha_t}\, x_0,\ (1-\bar\alpha_t) I\big)$（跳步公式）。</li>
+</ul>
+<em>Why</em>：所有右侧分布都是前向的、有显式解析式——这就是<a href="/video-to-notebook/textbook/4/">第 4 章</a>那一堆 $\bar\alpha$ 的回报。
+</div>
+
+<div class="deriv-step">
+<strong>步骤 3：三个高斯相乘 / 相除 → 仍是高斯</strong>
+<p>把三个 PDF 写出来，把指数里的 $x_{t-1}$ 项配方（complete the square）。代数有点繁琐但纯机械。结果：</p>
+$$\boxed{\ q(x_{t-1} \mid x_t, x_0) \;=\; \mathcal{N}\!\big(x_{t-1};\ \tilde\mu_t(x_t, x_0),\ \tilde\beta_t I\big)\ }$$
+<p>其中：</p>
+$$\tilde\mu_t(x_t, x_0) \;=\; \frac{\sqrt{\bar\alpha_{t-1}}\, \beta_t}{1-\bar\alpha_t}\, x_0 \;+\; \frac{\sqrt{1-\beta_t}\,(1-\bar\alpha_{t-1})}{1-\bar\alpha_t}\, x_t$$
+$$\tilde\beta_t \;=\; \frac{1-\bar\alpha_{t-1}}{1-\bar\alpha_t}\, \beta_t$$
+<em>Why</em>：这是高斯族的封闭性——高斯之间做"乘/除/配方"运算，结果还是高斯。所以"真后验" $q(x_{t-1}|x_t, x_0)$ 完全已知，<em>有闭式</em>。
+</div>
+
+<div class="callout callout-tip">
+💡 <strong>看清楚 $\tilde\mu_t$ 的结构</strong>：它就是 $x_0$ 和 $x_t$ 的<strong>加权平均</strong>——一个权重往"清晰原图"靠，一个权重往"当前噪声图"靠。两个权重的和不是 1（涉及 $\bar\alpha$），但<em>形式是线性插值</em>。直观说：上一步 $x_{t-1}$ 既应该<em>有点像</em>原图（向 $x_0$ 拉），也应该<em>有点像</em>当前噪声图（向 $x_t$ 拉）。
+</div>
+
+<h3>5.4 训练目标：让 $\mu_\theta$ 匹配 $\tilde\mu_t$</h3>
+
+<p>有了"标准答案" $\tilde\mu_t(x_t, x_0)$，训练目标就清楚了：</p>
+
+<blockquote>让模型输出 $\mu_\theta(x_t, t)$ <strong>逼近真实后验均值</strong> $\tilde\mu_t(x_t, x_0)$。</blockquote>
+
+<p>讲师 Dr. Raj 在反向训练目标那段直白地说：</p>
+
+<blockquote class="source-quote">「This is the KL divergence between two probabilities. Our prediction should match... as close as possible. Our neural network will predict 'how do we actually go from $x_2$ to $x_1$'.」（Dr. Raj，Lecture 3 反向 KL 段）</blockquote>
+
+<p>形式化为<strong>每一步的 KL 损失</strong>：</p>
+
+$$L_{t-1} \;=\; \mathbb{E}_{q}\!\left[D_{\mathrm{KL}}\!\big(\,\underbrace{q(x_{t-1}|x_t, x_0)}_{\text{标准答案 } \mathcal{N}(\tilde\mu_t, \tilde\beta_t I)} \,\|\, \underbrace{p_\theta(x_{t-1}|x_t)}_{\text{模型 } \mathcal{N}(\mu_\theta, \Sigma_t)}\,\big)\right]$$
+
+<p>当 $\Sigma_t$ 是固定的（取 $\tilde\beta_t I$），两个高斯之间的 KL 退化成<strong>均值差的平方</strong>：</p>
+
+$$L_{t-1} \;=\; \mathbb{E}_q\!\left[\frac{1}{2\tilde\beta_t}\, \|\tilde\mu_t(x_t, x_0) - \mu_\theta(x_t, t)\|^2\right] + \text{const}$$
+
+<p><strong>每一步的训练损失就是一个 MSE。</strong>整条反向链的损失是 T 个这种 MSE 加起来——这就是 DDPM 损失的"原版结构"。</p>
+
+<h2>六、ELBO 视角：为什么 KL 之和等于反向链的 NLL 下界</h2>
+
+<p>把每步 KL 拼起来不是凑出来的——它<strong>恰好就是整条 Markov 链 log-likelihood 的 ELBO</strong>。回忆<a href="/video-to-notebook/textbook/3/">第 3 章</a>的 ELBO 推导，把它从"一层 latent"推广到"T 层 latent"：</p>
+
+$$\log p_\theta(x_0) \;\geq\; \mathbb{E}_q\!\left[\log \frac{p_\theta(x_{0:T})}{q(x_{1:T} \mid x_0)}\right]$$
+
+<p>用 Markov 因子化展开，整理成著名的"三段式 ELBO"（DDPM 原论文式 5）：</p>
+
+$$-\log p_\theta(x_0) \;\leq\; \underbrace{\mathbb{E}_q\!\left[D_{\mathrm{KL}}\!\big(q(x_T|x_0) \| p(x_T)\big)\right]}_{L_T:\text{ prior 匹配，常数}} \;+\; \sum_{t=2}^T \underbrace{\mathbb{E}_q\!\left[D_{\mathrm{KL}}\!\big(q(x_{t-1}|x_t, x_0) \| p_\theta(x_{t-1}|x_t)\big)\right]}_{L_{t-1}:\text{ 反向 KL}} \;+\; \underbrace{-\mathbb{E}_q[\log p_\theta(x_0|x_1)]}_{L_0:\text{ 最后一步重构}}$$
+
+<p>三块各自的角色：</p>
+
+<ul>
+  <li><strong>$L_T$（prior matching）</strong>：让前向终点 $q(x_T|x_0)$ 接近标准高斯 $p(x_T) = \mathcal{N}(0, I)$。在 DDPM 里 $T$ 取得很大、$\bar\alpha_T \approx 0$，这一项几乎是<em>常数</em>，训练时完全忽略；</li>
+  <li><strong>$L_{1:T-1}$（reverse KL）</strong>：每一步的反向高斯要匹配真后验——<em>本章主菜</em>，T-1 个 MSE 项；</li>
+  <li><strong>$L_0$（reconstruction）</strong>：最后从 $x_1$ 到 $x_0$ 的离散似然项——MNIST/图像里通常用 discretized Gaussian 处理像素 0-255 的离散性。</li>
+</ul>
+
+<div class="callout callout-info">
+ℹ️ <strong>DDPM 论文的"简化"</strong>：把所有 $L_{t-1}$ 的权重 $\frac{1}{2\tilde\beta_t}$ <em>统一替换成 1</em>，把 $L_0$ 也并入同一个 MSE 形式——得到大名鼎鼎的 $L_\text{simple}$。这个简化在<a href="/video-to-notebook/textbook/7/">第 7 章</a>讲透，那时你会发现它居然能让训练更稳定、效果更好（虽然在 ELBO 意义上是"不严格"的）。
+</div>
+
+<h2>七、Epsilon 参数化：把 $\mu_\theta$ 换成 $\epsilon_\theta$</h2>
+
+<p>到这一步，我们的网络是"预测均值的"——输入 $(x_t, t)$，输出 $\mu_\theta(x_t, t)$。DDPM 论文里有一个<strong>关键的换元</strong>，把它改成"预测噪声的"，loss 立刻变得更简单。</p>
+
+<h3>7.1 从前向闭式提取 $\epsilon$</h3>
+
+<p>回忆<a href="/video-to-notebook/textbook/4/">第 4 章</a>的跳步公式：</p>
+
+$$x_t \;=\; \sqrt{\bar\alpha_t}\, x_0 + \sqrt{1-\bar\alpha_t}\, \epsilon, \qquad \epsilon \sim \mathcal{N}(0, I)$$
+
+<p>反解出 $x_0$（这一步是<strong>整个换元的核心</strong>）：</p>
+
+$$x_0 \;=\; \frac{1}{\sqrt{\bar\alpha_t}}\left(x_t - \sqrt{1-\bar\alpha_t}\, \epsilon\right)$$
+
+<h3>7.2 把 $x_0$ 代回 $\tilde\mu_t$</h3>
+
+<p>把上式代入 $\tilde\mu_t(x_t, x_0)$，再做一些代数（这一步是 mechanical 但容易出错的，建议自己用纸笔推一遍）：</p>
+
+<div class="deriv-step">
+<strong>展开 $\tilde\mu_t$ 后合并同类项</strong>
+$$\tilde\mu_t \;=\; \frac{1}{\sqrt{1-\beta_t}}\left(x_t - \frac{\beta_t}{\sqrt{1-\bar\alpha_t}}\, \epsilon\right)$$
+<em>Why</em>：把 $x_0$ 替换成 $(x_t, \epsilon)$ 的表达后，$\tilde\mu_t$ 的所有"对 $x_0$ 的依赖"都变成"对 $\epsilon$ 的依赖"——而 $x_t$ 本身在等式两边都出现，自然合并。
+</div>
+
+<p>这个结果<strong>非常漂亮</strong>：$\tilde\mu_t$ 不再是 $x_0, x_t$ 的线性组合，而是 $x_t$ 减去一个"按比例缩放的 $\epsilon$"。它直接暗示：</p>
+
+<blockquote>反向过程的"实际工作"，就是<strong>预测当时加进去的那一团噪声 $\epsilon$</strong>——然后从 $x_t$ 里把它按比例减掉。</blockquote>
+
+<h3>7.3 网络改为预测 $\epsilon$</h3>
+
+<p>定义网络输出 $\epsilon_\theta(x_t, t)$（同样的 U-Net，只是把目标头从"预测 $\mu$"改成"预测 $\epsilon$"）。把 $\mu_\theta$ 参数化为：</p>
+
+$$\boxed{\ \mu_\theta(x_t, t) \;=\; \frac{1}{\sqrt{1-\beta_t}}\!\left(x_t - \frac{\beta_t}{\sqrt{1-\bar\alpha_t}}\, \epsilon_\theta(x_t, t)\right)\ }$$
+
+<p>代回每步 KL 损失 $L_{t-1} \propto \|\tilde\mu_t - \mu_\theta\|^2$，所有 $x_t$ 项相消，<strong>只剩 $\epsilon$ 项</strong>：</p>
+
+$$L_{t-1} \;=\; \mathbb{E}_{x_0, \epsilon, t}\!\left[\frac{\beta_t^2}{2 \tilde\beta_t (1-\beta_t)(1-\bar\alpha_t)}\, \|\epsilon - \epsilon_\theta(x_t, t)\|^2\right]$$
+
+<p>这就是 DDPM 损失的<strong>第二种等价形式</strong>——网络的工作是"看着 $x_t$ 猜被加进去的 $\epsilon$"，loss 是 $\epsilon$ 的 MSE。<a href="/video-to-notebook/textbook/7/">第 7 章</a>会把前面那个复杂的权重直接<em>抹掉</em>，得到 $L_\text{simple} = \mathbb{E}[\|\epsilon - \epsilon_\theta\|^2]$。</p>
+
+<div class="callout callout-note">
+🧰 <strong>为什么换元成 $\epsilon$ 更好？</strong><br>
+① <strong>目标尺度更稳定</strong>：$\epsilon \sim \mathcal{N}(0, I)$ 是<em>标准化</em>的（均值 0、方差 1），网络输出在所有 $t$ 上量纲一致；而 $\mu_\theta$ 的尺度随 $t$ 变化很大。<br>
+② <strong>训练样本生成快</strong>：用跳步公式 $x_t = \sqrt{\bar\alpha_t} x_0 + \sqrt{1-\bar\alpha_t}\, \epsilon$，<em>随机采 $(x_0, t, \epsilon)$ 就能直接合成训练样本</em>——不需要真的跑前向 t 步。<br>
+③ <strong>与 score matching 的桥梁</strong>：$\epsilon$ 预测本质上等价于估计 <em>score function</em> $\nabla_{x_t} \log q(x_t)$，详见<a href="/video-to-notebook/textbook/10/">第 10 章</a>（Tweedie's formula 那一节）。
+</div>
+
+<h2>八、网络架构插曲：U-Net + Time Embedding</h2>
+
+<p>本章主要讲的是<em>反向过程的概率结构</em>，但既然提到"网络给出 $\epsilon_\theta(x_t, t)$"，简要说一下<strong>这个网络长什么样</strong>。完整架构留到后面专门讲，这里只埋一个关键点。</p>
+
+<h3>8.1 U-Net：输入输出同样大小</h3>
+
+<p>图像 DDPM 的网络是<strong>U-Net</strong>——一种"先下采样、再上采样、再加 skip connection"的对称沙漏结构。为什么用 U-Net？</p>
+
+<ul>
+  <li><strong>输入输出尺寸相同</strong>：$x_t$ 是 $C \times H \times W$ 的图，网络要输出同样形状的 $\epsilon_\theta$（每个像素都要预测对应位置的噪声分量）；</li>
+  <li><strong>多尺度感受野</strong>：下采样路径抓全局结构（这张噪声图大致是个什么类别？），上采样路径抠局部细节（这块像素的噪声应该减多少？）；</li>
+  <li><strong>Skip connection 保细节</strong>：高分辨率特征直接跨过 bottleneck 传到上采样端——防止"细节信息被瓶颈压扁"。</li>
+</ul>
+
+<h3>8.2 Time embedding：让网络知道"现在是第几步"</h3>
+
+<p>因为<em>同一个网络处理所有 1000 步</em>，它必须分清"我现在在去早期的微调（小 t）还是去晚期的粗去噪（大 t）"。做法是把整数 $t$ 编码成一个向量，然后注入网络每一层。</p>
+
+<p>最常见的编码是<strong>sinusoidal positional embedding</strong>（Transformer 那套）：</p>
+
+$$\text{emb}(t)_{2i} = \sin\!\left(\frac{t}{10000^{2i/d}}\right), \quad \text{emb}(t)_{2i+1} = \cos\!\left(\frac{t}{10000^{2i/d}}\right)$$
+
+<p>得到 $d$ 维向量后，再过 2 层 MLP，最后在 U-Net 每个 residual block 里以"加偏置"或"FiLM"形式注入。这样不同 $t$ 对应不同的特征调制——同一个网络<em>动态适应</em>不同的去噪难度。</p>
+
+<div class="callout callout-info">
+ℹ️ <strong>详细架构</strong>：U-Net 的具体配置（多少层、attention 放哪、residual block 怎么写）留到<a href="/video-to-notebook/textbook/9/">第 9 章 U-Net</a>讲。这里你只需要知道两件事：(1) 网络输入是 $(x_t, t)$、输出是 $\epsilon_\theta(x_t, t)$，形状和 $x_t$ 一样；(2) 同一个网络处理所有时间步，靠 time embedding 区分。
+</div>
+
+<h2>九、Tweedie 直觉：从噪声"看穿"到清晰图</h2>
+
+<p>到这里你可能还有一个疑问："网络凭什么能预测 $\epsilon$？给它一张噪声图，它怎么知道这团噪声里<em>原本的信号</em>是什么？"——这背后有一个非常深的统计学事实，叫做 <strong>Tweedie's formula</strong>（<a href="/video-to-notebook/textbook/10/">第 10 章</a>完整讲）。这里给个直觉版预告，把第十章的<em>叙事钩子</em>先埋下来。</p>
+
+<blockquote>对一个高斯加噪过程 $y = x + \sigma \epsilon$，<strong>已知 y 时 x 的后验均值</strong>可以写成：$\mathbb{E}[x|y] = y + \sigma^2 \nabla_y \log p(y)$。这意味着：<em>只要你知道 $\log p(y)$ 的梯度（"score function"），你就能从 y 算出 x 的最佳估计</em>。</blockquote>
+
+<p>翻译成 diffusion 语言：</p>
+
+<ul>
+  <li>给定 $x_t$（带噪），它的"清晰版"$x_0$ 的最佳点估计就是 $x_t$ 加上"概率密度的梯度"乘 $\sigma^2$；</li>
+  <li>这个"概率密度梯度"不需要知道 $p_\text{data}$ 的具体公式——可以<em>直接用神经网络拟合</em>；</li>
+  <li>事实上，<strong>预测 $\epsilon$ 等价于预测 score function</strong>（差一个 $-1/\sqrt{1-\bar\alpha_t}$ 的常数）。</li>
+</ul>
+
+<p>所以"网络看着噪声图猜噪声"听起来玄，其实它在<em>无意识地学整个数据分布的形状</em>——更精确地说，学的是<em>数据分布的对数梯度场</em>。这是 diffusion 和 <a href="/video-to-notebook/concepts/score-matching/">score-based 模型</a>本质等价的根源。Song Yang 在 2021 年的著名论文《Score-Based Generative Modeling through SDE》正是把这两条看似不同的路线（DDPM 的概率链 + Hyvärinen 的 score matching）统一在同一个 SDE 框架下——这一统一让整个领域的术语和工具瞬间打通，从那之后大家说"diffusion model"和"score-based model"基本指的是同一件事。</p>
+
+<div class="callout callout-quote">
+"网络从一张几乎全是噪声的图里『看穿』出一张清晰图"——这不是什么魔法。它是 Bayes 后验在大量训练数据上的统计平均：训练集里见过的"清晰图 + 噪声"对足够多时，<em>"在这个噪声 pattern 附近最可能的清晰图长什么样"</em> 就被学进了网络参数。换句话说，<strong>反向过程不是"破解每一个具体的 $\epsilon$"，而是"逼近整个数据分布的几何结构"</strong>。模型学到的是"什么样的图像在数据流形上"，然后在每一步采样里把当前噪声推一小步往那个流形挪。
+</div>
+
+<p>再换个角度说同一件事：前向是<em>熵增过程</em>（信息一点点散掉），反向必须是<em>熵减过程</em>（信息一点点恢复）。但物理上"凭空"减熵不可能——所以网络必须"<em>从训练集见过的样本</em>"那里把信息<em>注入回</em>采样过程。反向链的所有"清晰度"，本质上来自<em>训练时学到的数据分布几何知识</em>。这也解释了为什么生成出来的图<em>看起来像训练集</em>——网络其实就是在<em>沿训练分布的对数梯度做最速下降</em>。</p>
+
+<h2>十、整章串起来：训练流程 vs 采样流程</h2>
+
+<p>把所有概念合到两张流程图里，是检验自己理解的最好方式。</p>
+
+<h3>10.1 训练流程（每个 step）</h3>
+
+<pre><code># 训练一步 (DDPM)
+x_0 = sample_real_image()                # 从数据集随机取一张图
+t   = sample_uniform(1, T)               # 随机一个时间步
+eps = randn_like(x_0)                    # 采一个标准高斯噪声
+
+# 用跳步公式合成 x_t（不需要真跑 t 步前向）
+x_t = sqrt(alpha_bar[t]) * x_0 + sqrt(1 - alpha_bar[t]) * eps
+
+# 让网络预测 eps
+eps_pred = epsilon_theta(x_t, t)         # U-Net + time embedding
+
+loss = mse(eps, eps_pred)                # L_simple
+loss.backward(); optim.step()</code></pre>
+
+<p>这就是 DDPM 训练的全貌——<strong>不到 10 行</strong>。注意：</p>
+
+<ul>
+  <li>训练时<strong>从来不跑反向链</strong>——只是"采个 t、合成 $x_t$、让网络猜噪声"；</li>
+  <li>每个 batch 里 t 是<em>随机均匀</em>的——网络同时被训成"小 t 的精细去噪师"和"大 t 的粗略去噪师"；</li>
+  <li>$\bar\alpha_t$ 是预计算好的（schedule 固定）；$\beta_t, \tilde\beta_t$ 都不出现在 loss 里（被 simplify 掉了）。</li>
+</ul>
+
+<h3>10.2 采样流程（生成一张图）</h3>
+
+<pre><code># 采样 (DDPM ancestral)
+x_T = randn(shape=(C, H, W))             # 从纯高斯起步
+
+for t in range(T, 0, -1):
+    eps_pred = epsilon_theta(x_t, t)
+    # 用 mu_theta 公式算这步的均值
+    mu = (1 / sqrt(1 - beta[t])) * (x_t - beta[t] / sqrt(1 - alpha_bar[t]) * eps_pred)
+    # 加一点随机性（最后一步 t=1 时不加）
+    sigma = sqrt(beta_tilde[t]) if t > 1 else 0
+    z = randn_like(x_t) if t > 1 else 0
+    x_{t-1} = mu + sigma * z
+
+return x_0</code></pre>
+
+<p>这就是反向链的<strong>实际计算</strong>——T 次循环、每次一个 U-Net forward。1000 步意味着 1000 次 forward——DDPM 推理慢的原因。<a href="/video-to-notebook/textbook/13/">第 13 章 DDIM</a> 会教你怎么<em>跳步采样</em>把 1000 压到 50。</p>
+
+<h2>十一、为什么这件事能跑通？三个"贵宾"性质</h2>
+
+<p>反向过程能 work，背后藏着三个并非显然的<em>数学礼物</em>：</p>
+
+<h3>11.1 高斯族封闭性</h3>
+
+<p>所有前向分布（一步加噪、跳步加噪）都是高斯；高斯之间做乘除/配方后<em>还是</em>高斯。这让 $q(x_{t-1}|x_t, x_0)$ <em>恰好有闭式</em>——如果前向用别的噪声（拉普拉斯、t-分布），后验就不再闭式，整套推导塌掉。</p>
+
+<h3>11.2 反向也能用高斯近似</h3>
+
+<p>这是 Sohl-Dickstein (2015) 那篇原始论文证明的事：<strong>当每步加噪足够小（$\beta_t \to 0$）时，反向 $q(x_{t-1}|x_t)$ 在数学上趋近于一个高斯</strong>（即使没有 $x_0$ 条件）。这给了"用 $\mathcal{N}(\mu_\theta, \Sigma_t)$ 参数化 $p_\theta(x_{t-1}|x_t)$"理论合理性。这就是为什么 DDPM 要用 $T = 1000$ 这种大数字——<em>步数越多、每步越小、高斯近似越好</em>。</p>
+
+<h3>11.3 KL 损失的拆解恰好和 ELBO 对齐</h3>
+
+<p>"让每步 $p_\theta$ 匹配真后验 $q$" 听起来是<em>一个工程目标</em>——但它<strong>恰好等于</strong>整条链 negative log-likelihood 的 ELBO 上界。这不是巧合，而是<em>变分推断的内在结构</em>使然——所有"分块匹配"思想都能在 ELBO 框架下找到统一解释。这是 DDPM 之所以叫 "probabilistic" 的真正原因，也是它和 GAN 这种"靠对抗博弈训练"的生成模型本质不同的地方：DDPM 训练时每一步都<em>有可证的概率意义</em>，loss 下降<em>必然</em>对应 log-likelihood 上升（在简化前的严格 ELBO 下）。这种"训练目标本身就是数学下界"的特性，让 DDPM 训练异常稳定——没有 GAN 那种"训着训着模式崩塌"的烦恼，也没有 VAE 的"KL 项被淹没"的工程坑。<strong>三个礼物加起来，让一个看似简单的"加噪-去噪"循环，最终成为图像生成 SOTA 的根基</strong>。</p>
+
+<div class="my-addition">
+🟡 <strong>教材外补充：方差也可以学（$\Sigma_\theta$ 而不是固定 $\Sigma_t$）</strong><br>
+DDPM 原论文把 $\Sigma_t$ 固定为 $\beta_t I$ 或 $\tilde\beta_t I$，<em>实验上发现两者差距不大</em>。但 <strong>Improved DDPM</strong>（Nichol & Dhariwal 2021）让网络<em>同时</em>预测 $\Sigma_\theta$（作为 $\beta_t$ 和 $\tilde\beta_t$ 之间的插值系数）——FID 从 3.17 降到 2.94，<em>采样所需步数减少 4 倍</em>。这是反向过程参数化的一个重要扩展，<a href="/video-to-notebook/textbook/14/">后续章节</a>详谈。
+</div>
+
+<div class="my-addition">
+🟡 <strong>教材外补充：$x_0$ 参数化（DDPM 的第三种等价形式）</strong><br>
+除了"预测 $\mu$"和"预测 $\epsilon$"，还有"<strong>直接预测 $x_0$</strong>"——让网络输出 $\hat x_0 = f_\theta(x_t, t)$。三种参数化在最小化 ELBO 意义上<em>完全等价</em>，但训练动力学不同：$\epsilon$ 参数化在大 t 时信号好（因为 $\epsilon$ 还在）；$x_0$ 参数化在小 t 时信号好（因为 $x_0$ 还在）。<strong>v-prediction</strong>（Stable Diffusion v2 用）干脆把两者插值——是 EDM/Flow Matching 框架下的统一表达。
+</div>
+
+<h2>十二、和 VAE 的对照表（一图看清两者关系）</h2>
+
+<table style="width:100%; border-collapse: collapse; margin: 1rem 0; font-size: 0.93rem;">
+  <thead style="background: var(--surface-soft);">
+    <tr><th style="padding:0.6rem; text-align:left;">维度</th><th style="padding:0.6rem; text-align:left;">VAE</th><th style="padding:0.6rem; text-align:left;">DDPM 反向</th></tr>
+  </thead>
+  <tbody>
+    <tr style="border-top:1px solid var(--border);"><td style="padding:0.6rem;">Latent 层数</td><td style="padding:0.6rem;">1 层（$z$）</td><td style="padding:0.6rem;">T 层（$x_1, \dots, x_T$）</td></tr>
+    <tr style="border-top:1px solid var(--border);"><td style="padding:0.6rem;">Encoder</td><td style="padding:0.6rem;">可学 $q_\phi(z|x)$</td><td style="padding:0.6rem;"><strong>无参</strong>前向 $q(x_t|x_{t-1})$（固定高斯）</td></tr>
+    <tr style="border-top:1px solid var(--border);"><td style="padding:0.6rem;">Decoder</td><td style="padding:0.6rem;">可学 $p_\theta(x|z)$，一次还原</td><td style="padding:0.6rem;">可学 $p_\theta(x_{t-1}|x_t)$，<strong>T 次小还原</strong></td></tr>
+    <tr style="border-top:1px solid var(--border);"><td style="padding:0.6rem;">Prior</td><td style="padding:0.6rem;">$p(z) = \mathcal{N}(0, I)$</td><td style="padding:0.6rem;">$p(x_T) = \mathcal{N}(0, I)$（前向自动达成）</td></tr>
+    <tr style="border-top:1px solid var(--border);"><td style="padding:0.6rem;">训练目标</td><td style="padding:0.6rem;">ELBO（1 个 KL + 1 个重构）</td><td style="padding:0.6rem;">ELBO（T 个 KL + 1 个重构）</td></tr>
+    <tr style="border-top:1px solid var(--border);"><td style="padding:0.6rem;">网络数量</td><td style="padding:0.6rem;">2（encoder + decoder）</td><td style="padding:0.6rem;">1（共享 U-Net）</td></tr>
+    <tr style="border-top:1px solid var(--border);"><td style="padding:0.6rem;">输出质量</td><td style="padding:0.6rem;">常模糊</td><td style="padding:0.6rem;">极锐利（SOTA）</td></tr>
+    <tr style="border-top:1px solid var(--border);"><td style="padding:0.6rem;">采样成本</td><td style="padding:0.6rem;">1 次 forward</td><td style="padding:0.6rem;">T 次 forward（DDIM 可减）</td></tr>
+  </tbody>
+</table>
+
+<p>核心差异一句话：<strong>VAE 是"压一次、还原一次"；DDPM 是"压 T 次（无参）、还原 T 次（可学）"</strong>。这是为什么 Vizuara 这门课先教 VAE 再过渡到 DDPM——所有数学骨架都<em>同源</em>，只是把"一步"拉成"T 步"。</p>
+
+<h2>十三、源材料原文回顾：DDPM 的诞生</h2>
+
+<p>讲师在本讲尾声郑重其事介绍了 DDPM 这篇论文的"江湖地位"，原话非常震撼：</p>
+
+<blockquote class="source-quote">「This paper has over 30,000 citations... it is an incredibly popular paper and it gave a new direction to the field of image generation. And this was the paper which was at the heart of creating a revolution in image generation using AI, and you saw a lot of different models like stable diffusion do incredibly well in generating realistic images. The beauty of this paper is that it laid down a framework which gave steps which are straightforward, and it also linked some of the prior works together.」（chunk #18）</blockquote>
+
+<blockquote class="source-quote">「So diffusion models existed before as well, but people had not proven that they could be used to generate realistic images, and this paper showed that yes it can be used for that purpose, and they laid down a recipe which was practical for researchers to implement, and from there on there was no stopping.」（chunk #19）</blockquote>
+
+<p>讲师还特意嘱咐听众：</p>
+
+<blockquote class="source-quote">「I want all of you to also take a printout of this paper and keep it handy.」（chunk #19）</blockquote>
+
+<p>本章的所有数学——$p_\theta(x_{t-1}|x_t)$、$\tilde\mu_t$、$\epsilon$ 换元、ELBO 拆解——<strong>都是 Ho et al. 2020 这篇论文里的内容</strong>。把这一章吃透，就具备了精读那篇论文的全部前置。</p>
+
+<figure class="clip-frame">
+  <iframe src="https://www.youtube.com/embed/UNNUQ2WzU30?start=3211" title="Vizuara L8: 反向去噪 + KL 目标" allowfullscreen></iframe>
+  <figcaption>📺 Vizuara《Principles of Diffusion Models》Lecture 3（53:31 处）—— 反向过程 + 训练 KL 目标</figcaption>
+</figure>
+
+<figure class="clip-frame">
+  <iframe src="https://www.youtube.com/embed/rngYBa46AXY?start=2" title="Vizuara LM L4: 从噪声走回数据流形" allowfullscreen></iframe>
+  <figcaption>📺 Vizuara《Diffusion LM》Lecture 4（开篇）—— "diffusion finds the underlying probability distribution through denoising"</figcaption>
+</figure>
+
+<div style="background:#0b5; color:#fff; padding:1.4rem; border-radius:8px; margin-top:2rem;">
+  <h3 style="margin-top:0; color:#fff;">本章要记住的（讲师亲口给的核心）</h3>
+  <ol>
+    <li><strong>"Naïve 反向 = 前向的逆运算"不行</strong>——前向加的 $\epsilon$ 在加完后<em>丢失了</em>，反向只能"估期望"而非"精确还原"。这是反向必须是统计学习问题、不是代数题的根本原因。</li>
+    <li><strong>反向是"a series of decoders with trainable parameters"</strong>——讲师 Dr. Raj 反复强调。每一步参数化为条件高斯 $p_\theta(x_{t-1}|x_t) = \mathcal{N}(\mu_\theta(x_t, t), \Sigma_t)$，方差通常固定、只学均值。</li>
+    <li><strong>Bayes 给出的"作弊神器"：在已知 $x_0$ 条件下，$q(x_{t-1}|x_t, x_0)$ 是闭式高斯</strong>，均值 $\tilde\mu_t$ 是 $x_0$ 和 $x_t$ 的线性组合。训练目标 = 让 $\mu_\theta$ 匹配 $\tilde\mu_t$，每步是一个 MSE，总和恰好等于 ELBO（不是凑出来的）。</li>
+    <li><strong>$\epsilon$ 参数化</strong>：把 $x_0$ 用跳步公式表达成 $(x_t, \epsilon)$ 后代回 $\tilde\mu_t$，得到 $\mu_\theta = \frac{1}{\sqrt{1-\beta_t}}(x_t - \frac{\beta_t}{\sqrt{1-\bar\alpha_t}}\epsilon_\theta)$。网络改成预测 $\epsilon$ 后，loss 简化成<em>纯噪声 MSE</em>——下一章 $L_\text{simple}$ 的雏形。</li>
+    <li><strong>U-Net + sinusoidal time embedding</strong>：一个网络覆盖所有 T 步，$t$ 通过 sinusoidal embedding 注入。架构细节<a href="/video-to-notebook/textbook/9/">第 9 章</a>详谈。</li>
+    <li><strong>Tweedie 直觉</strong>："网络看穿噪声"不是魔法——它在统计意义上等价于估计 score function $\nabla_{x_t} \log q(x_t)$，把数据分布的对数梯度场学进了参数。详见<a href="/video-to-notebook/textbook/10/">第 10 章</a>。</li>
+    <li><strong>训练 vs 采样</strong>：训练 10 行（采 t、合成 $x_t$、MSE）；采样 T 步循环（每步一次 U-Net forward）。<strong>训练不需要跑反向链</strong>——这是 DDPM 训练快的秘密。</li>
+  </ol>
+</div>
+
+</article>

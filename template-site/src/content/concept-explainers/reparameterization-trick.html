@@ -1,62 +1,237 @@
 <style>
-/* prefix: rt- */
-.rt-quickref{background:var(--surface-soft);border-left:3px solid var(--module-accent);padding:0.8rem 1rem;border-radius:0 4px 4px 0;margin:1rem 0;font-size:0.92rem;}
-.rt-quickref div{margin:0.3rem 0;}
-.rt-svg{display:block;margin:1.2rem auto;max-width:100%;height:auto;}
-.rt-pitfalls ol{padding-left:1.4rem;} .rt-pitfalls li{margin:0.5rem 0;}
-.rt-source{font-style:italic;color:var(--text-muted);border-left:2px solid var(--border);padding:0.2rem 0.8rem;margin:0.5rem 0;font-size:0.9rem;}
+/* prefix: rep- */
+.rep-quickref{background:var(--surface-soft);border-left:3px solid var(--module-accent);padding:0.8rem 1rem;border-radius:0 4px 4px 0;margin:1rem 0;font-size:0.92rem;}
+.rep-quickref div{margin:0.3rem 0;}
+.rep-svg{display:block;margin:1.2rem auto;max-width:100%;height:auto;}
+.rep-pitfalls ol{padding-left:1.4rem;} .rep-pitfalls li{margin:0.6rem 0;}
+.rep-source{font-style:italic;color:var(--text-muted);border-left:2px solid var(--border);padding:0.2rem 0.8rem;margin:0.5rem 0;font-size:0.9rem;}
+.rep-callout{background:var(--module-accent-soft);border-left:3px solid var(--module-accent);padding:0.6rem 0.9rem;margin:0.8rem 0;border-radius:0 4px 4px 0;}
+.rep-why{color:var(--module-accent);font-weight:600;}
+.my-addition{background:var(--surface-soft);border-left:3px solid var(--accent);padding:0.5rem 0.9rem;margin:0.8rem 0;font-size:0.92rem;border-radius:0 4px 4px 0;}
+.rep-controls{display:flex;gap:0.5rem;margin:0.8rem 0;flex-wrap:wrap;}
+.rep-controls button{padding:0.3rem 0.8rem;border:1px solid var(--border);background:var(--surface);color:var(--text);border-radius:4px;cursor:pointer;font-size:0.85rem;}
+.rep-controls button.active{background:var(--module-accent);color:var(--surface);border-color:var(--module-accent);}
 </style>
+
 <article class="concept-entry">
   <header class="concept-header">
     <span class="concept-eyebrow">概念</span>
     <h1>Reparameterization Trick</h1>
-    <p class="concept-tagline">— 把采样改写成"确定性变换 + 外部噪声"，让梯度能穿过去。</p>
+    <p class="concept-tagline">— 把"随机采样"改写成"确定函数 + 外部噪声"，梯度才能流过去。</p>
   </header>
-  <aside class="rt-quickref">
-    <div><strong>定义</strong> · $z \sim \mathcal{N}(\mu, \sigma^2) \Leftrightarrow z = \mu + \sigma\epsilon, \epsilon \sim \mathcal{N}(0, I)$。</div>
-    <div><strong>公式</strong> · 同上。$\mu, \sigma$ 由网络给（可导）；$\epsilon$ 外部采（无梯度）。</div>
-    <div><strong>易错</strong> · 数值技巧不改 z 分布，只让反向传播能进 μ, σ。</div>
+
+  <aside class="rep-quickref">
+    <div><strong>定义</strong> · 将 $z \sim q_\phi(z|x)$ 改写为 $z = g_\phi(\epsilon, x)$，其中 $\epsilon$ 与参数 $\phi$ 无关。</div>
+    <div><strong>公式</strong> · 高斯情形 $z = \mu_\phi(x) + \sigma_\phi(x) \odot \epsilon$，$\epsilon \sim \mathcal{N}(0, I)$。</div>
+    <div><strong>易错</strong> · 这不是 VAE 专属技巧——它是"梯度穿越随机性"的通用范式，diffusion 的 forward process 也是它。</div>
   </aside>
+
   <section class="concept-intuition">
-    <p>VAE encoder 输出 $\mu, \sigma$ 后想从 $\mathcal{N}(\mu, \sigma^2)$ 采 z 然后反传梯度——但"采样"不可导，反传断了。重参数化把随机性挤到 $\epsilon$ 里：$z = \mu + \sigma\epsilon$。$\mu, \sigma$ 变成确定性函数，梯度畅通。</p>
-    <p>Vizuara L9 在解释这一技巧时强调"把不可导变可导"是 VAE 训练可行的关键。Diffusion 的跳步公式 $x_t = \sqrt{\bar\alpha_t}x_0 + \sqrt{1-\bar\alpha_t}\epsilon$ 也是同样的把戏。</p>
+    <p>很多人以为 reparameterization 只是 Kingma &amp; Welling 在 2014 年那篇 VAE 论文里设计的一个小技巧，专门给 VAE 用、用完即弃。<strong>其实这是任何"想对随机采样反向传播"的场景都必须用到的通用范式</strong>——只要你的损失函数形如 $\mathbb{E}_{z \sim q_\phi}[f(z)]$，且分布 $q_\phi$ 的参数 $\phi$ 是可学习的，你就会撞到同一面墙：梯度无法穿过 <code>z = sample(q_\phi)</code> 这一步。后面会看到，diffusion 模型的 forward process、flow matching 的插值轨迹、SDE-based 生成模型的扰动核，本质上全都在用同一个 trick。</p>
+    <p>问题的本质用一句话讲清楚：<strong>$z$ 通过分布参数依赖于 $\phi$，但"采样"这个操作本身不可微</strong>。Vizuara 的 Dr. Raj 在 Lecture 2 讲 VAE 时反复强调，VAE 之所以能用普通的 SGD + autograd 训练出来，全靠这一招把随机性"挤"到一个跟 $\phi$ 完全无关的外部噪声 $\epsilon$ 里——这样 encoder 的梯度通路就不会被采样事件切断。</p>
+    <div class="rep-source">「once you capture the secret recipe for a student you can determine their handwriting...there is a 1:1 mapping from the secret recipe to the handwriting.」—— Vizuara L2 @ 9:02（Dr. Raj 把 latent z 比作"secret recipe"，而 reparameterization 就是让这台"按 recipe 出字"的机器可以被梯度反推、被 SGD 调节的关键工程改造。）</div>
+    <p>在训练里，这件事对应的具体动作是这样的：encoder 网络读入 $x$、输出两个张量 $\mu_\phi(x)$ 和 $\sigma_\phi(x)$，然后我们<em>不</em>直接写 <code>z = np.random.normal(mu, sigma)</code>，而是改成两行代码 <code>eps = np.random.normal(0, 1); z = mu + sigma * eps</code>。这两种写法在数值分布上完全等价——$z$ 都服从 $\mathcal{N}(\mu, \sigma^2)$，但<strong>反向传播时第二种写法让 $\partial z / \partial \mu = 1$、$\partial z / \partial \sigma = \epsilon$ 都成为良定义的确定函数偏导</strong>，梯度因此能一路回流到 encoder 的权重上。这一个微小的代码改动，是 VAE 与 diffusion 整个家族能"端到端可训练"的工程基石。</p>
   </section>
+
   <section class="concept-deepdive">
-    <h2>梯度交换</h2>
-    <p>没有重参数化 $\nabla_\phi \mathbb{E}_{q_\phi}[f(z)]$ 不易算。重参数化后 $z = g_\phi(\epsilon)$，可交换：</p>
-    $$\nabla_\phi \mathbb{E}_\epsilon[f(g_\phi(\epsilon))] = \mathbb{E}_\epsilon[\nabla_\phi f(g_\phi(\epsilon))]$$
-    <svg class="rt-svg" viewBox="0 0 600 130" role="img" aria-label="重参数化前后">
+    <h2>问题的形式化：为什么直接采样不可导</h2>
+    <p>我们要优化的目标长这样——在 VAE 里就是 ELBO 的重建项 $\mathbb{E}_{z \sim q_\phi(z|x)}[\log p_\theta(x|z)]$，在 diffusion 里就是去噪损失 $\mathbb{E}_{x_t \sim q(x_t|x_0)}[\|\epsilon - \epsilon_\theta(x_t, t)\|^2]$——抽象一下都是同一个模板：</p>
+    <p>$$\mathcal{L}(\phi) = \mathbb{E}_{z \sim q_\phi(z|x)}\big[f(z)\big]$$</p>
+    <p>我们想要的是 $\nabla_\phi \mathcal{L}$，把它代入 SGD 更新 $\phi$。展开期望：</p>
+    <p>$$\nabla_\phi \mathcal{L} = \nabla_\phi \int q_\phi(z|x)\, f(z)\, dz$$</p>
+    <p>右边的 $q_\phi(z|x)$ 也依赖 $\phi$——这意味着你<strong>不能</strong>把 $\nabla_\phi$ 直接搬进期望里（如果分布跟 $\phi$ 无关你就可以，但这里不行）。从代码层面看：<code>torch.normal(mu, sigma)</code> 返回的张量虽然数值上由 $\mu, \sigma$ 决定，但 PyTorch 的 autograd 不会沿"采样算子"反向传播——这是和"discrete operation breaks the graph"同类的问题。如果你硬把这一行写在 forward 里，PyTorch 报的不是错，而是悄悄给你一个<em>错误的、与 $\mu, \sigma$ 无关的梯度</em>，这才是真正危险的。</p>
+
+    <div class="rep-callout">
+      <span class="rep-why">Why（要点）</span>：梯度的数学定义需要"确定函数对输入的偏导数"。$z \sim \mathcal{N}(\mu, \sigma^2)$ 是一个采样事件，它没有"$z$ 对 $\mu$ 的偏导"这种东西——$z$ 是随机变量的一次<em>实现</em>（realization），不是 $\mu$ 的函数。autograd 需要的是"输出张量是输入张量的可微函数"，而采样恰恰不是。
+    </div>
+
+    <h2>The Trick：把随机源剥离出去</h2>
+    <p>Kingma &amp; Welling 2014 的洞察非常优雅：与其在分布<em>内部</em>采样，不如在分布<em>外部</em>找一个跟参数 $\phi$ 无关的"基础噪声分布" $p(\epsilon)$，再找一个确定的、可微的变换 $g_\phi(\epsilon, x)$，使得</p>
+    <p>$$z = g_\phi(\epsilon, x), \quad \epsilon \sim p(\epsilon) \quad \Longleftrightarrow \quad z \sim q_\phi(z|x)$$</p>
+    <p>两者在分布意义上完全等价（数学上叫 measure-preserving transform，测度保持变换）。代入到期望里：</p>
+    <p>$$\mathcal{L}(\phi) = \mathbb{E}_{\epsilon \sim p(\epsilon)}\big[f(g_\phi(\epsilon, x))\big]$$</p>
+    <p>注意这一步的关键：<strong>期望符号下的分布 $p(\epsilon)$ 不再依赖 $\phi$</strong>——$\phi$ 只出现在 $g_\phi$ 这个被积函数里，而 $g_\phi$ 是个普通的可微函数（神经网络 + 加乘运算）。这下我们可以放心把 $\nabla_\phi$ 搬进期望：</p>
+    <p>$$\nabla_\phi \mathcal{L} = \mathbb{E}_{\epsilon}\big[\nabla_\phi f(g_\phi(\epsilon, x))\big] \approx \frac{1}{N}\sum_{i=1}^N \nabla_\phi f(g_\phi(\epsilon^{(i)}, x))$$</p>
+    <p>用 Monte Carlo 估计——实践中 $N = 1$ 就够用，每个 mini-batch 抽一次 $\epsilon$，配合 batch size 自然就摊平了方差。这就是 VAE 训练能用普通 SGD 流程跑起来的全部秘密。</p>
+
+    <div class="rep-callout">
+      <span class="rep-why">Why（要点）</span>：随机性还在，但它被推到了计算图的<strong>外部输入端</strong>——梯度不需要穿过它，只需要穿过 $g_\phi$ 这个确定函数。这就是 "trick" 两个字的真正含义：不是消除随机性，而是<strong>重新摆放它在计算图里的位置</strong>。这种思路在数学里叫"变量替换"（change of variables），在物理里叫"参数化族"，在统计里叫"location-scale family"——同一思想在不同领域反复出现。
+    </div>
+
+    <h2>高斯情形：最常见的具体形式</h2>
+    <p>当 $q_\phi(z|x) = \mathcal{N}(\mu_\phi(x), \mathrm{diag}(\sigma_\phi(x)^2))$ 是对角高斯（VAE 的默认选择），标准的 reparameterization 就是：</p>
+    <p>$$z = \mu_\phi(x) + \sigma_\phi(x) \odot \epsilon, \quad \epsilon \sim \mathcal{N}(0, I)$$</p>
+    <p>其中 $\odot$ 是逐元素乘（Hadamard product）。验证一下分布等价：$\mu + \sigma \cdot \epsilon$ 是 $\epsilon$ 的仿射变换，根据高斯的性质 $\mathbb{E}[z] = \mu + \sigma \cdot \mathbb{E}[\epsilon] = \mu$、$\mathrm{Var}[z] = \sigma^2 \cdot \mathrm{Var}[\epsilon] = \sigma^2$——所以 $z$ 的边际分布确实就是 $\mathcal{N}(\mu, \sigma^2)$，跟直接采样在概率分布意义上完全相同。梯度也直接可读：$\partial z / \partial \mu = 1$，$\partial z / \partial \sigma = \epsilon$。两者都是良定义、可数值计算的张量，autograd 可以无障碍处理。</p>
+
+    <div class="rep-callout">
+      <span class="rep-why">Why（工程细节）</span>：实际代码里通常输出 $\log \sigma^2$ 而不是 $\sigma$ 本身，再 <code>sigma = exp(0.5 * log_var)</code> 转换。原因有两层——第一，神经网络输出可正可负，但 $\sigma$ 必须为正；用 $\log \sigma^2$ 做参数化天然满足正性约束，省去 softplus 或 abs 这类非光滑操作。第二，数值上更稳定：当模型预测 $\sigma \to 0$（确定性增加）时，直接输出 $\sigma$ 会面临除零和梯度爆炸；输出 $\log \sigma^2$ 则把这个区域映到 $-\infty$，被 exp 自然 clip 住。
+    </div>
+
+    <h2>第二种视角：测度变换的常识例子</h2>
+    <p>如果上面的形式化让你晕了，可以用一个生活类比来理解 reparam 的思路。想象你要研究"班上同学的体重 $W$"——同学体重服从某个分布，你想统计 $W$ 的平均、方差。但你设备只能称"行李 $\epsilon$"（一个标准化的、跟同学无关的随机量）。怎么办？你建一个变换 $W = a + b \cdot \epsilon$（$a, b$ 跟班级有关），先称 $\epsilon$，再用变换算出 $W$。本质上你把"对 $W$ 的统计"翻译成了"对 $\epsilon$ 的统计 + 一次变换"。神经网络这里的 $a, b$ 就是 $\mu_\phi, \sigma_\phi$，差别只在于这是高维的、变换由神经网络给出的版本。重点在于：<strong>随机性的"源头" $\epsilon$ 跟我们要调节的参数 $\phi$ 解耦了</strong>，所以调节 $\phi$ 不会影响"采样这件事本身怎么发生"，只会影响"采样结果怎么被映射"。这就是它能跟 SGD 兼容的关键。</p>
+
+    <h2>diffusion 里它无处不在</h2>
+    <p>Vizuara 后续讲 forward process 时（Lecture 7 起）会写出 DDPM 最核心的那一行公式：</p>
+    <p>$$x_t = \sqrt{\bar\alpha_t}\, x_0 + \sqrt{1 - \bar\alpha_t}\, \epsilon, \quad \epsilon \sim \mathcal{N}(0, I)$$</p>
+    <p>这一行公式<strong>本身就是</strong>一次 reparameterization。$x_t$ 本应"从 $q(x_t | x_0) = \mathcal{N}(\sqrt{\bar\alpha_t}x_0, (1-\bar\alpha_t)I)$ 这个分布里采"——如果你照字面写，autograd 在这里就断了。但 DDPM 通过这一行公式，把整个 $t$ 步加噪过程改写成了"输入 $x_0$ + 一次外部噪声 $\epsilon$ 的确定算术运算"。这个改写带来的好处是巨大的，远超"能反向传播"这一点：</p>
+    <ul>
+      <li><strong>closed-form 跳步采样</strong>：训练时你可以直接 <code>t = randint(1, T); x_t = sqrt(alpha_bar[t]) * x_0 + sqrt(1 - alpha_bar[t]) * eps</code>，不用真的迭代 $t$ 次马尔可夫链。这把训练成本从 $O(T)$ 砍到 $O(1)$——没有这一点，$T = 1000$ 的 DDPM 训练在算力上根本不可行。</li>
+      <li><strong>$\epsilon$-prediction 训练目标合法</strong>：DDPM 让网络去预测<em>噪声本身</em>，损失是 $\|\epsilon - \epsilon_\theta(x_t, t)\|^2$。这个目标能成立的前提，就是 $x_t$ 必须是 $\epsilon$ 的可微函数——只有这样，从重构误差出发，梯度才能倒推到"应该输出哪个噪声"。</li>
+      <li><strong>变量替换 ELBO 化简</strong>：所有 $\mathbb{E}_{q(x_t|x_0)}[\cdot]$ 都能换成 $\mathbb{E}_{\epsilon \sim \mathcal{N}(0,I)}[\cdot]$，原本的 KL 散度也变成对 $\epsilon$ 的简单期望。DDPM 论文里 simple loss 的整个推导链都建立在这一步上。</li>
+    </ul>
+    <div class="my-addition">🟡 教材外补充：DDPM 论文（Ho et al. 2020）里 Algorithm 1（training）的第 4 行 <code>x_t = sqrt(alpha_bar) * x_0 + sqrt(1 - alpha_bar) * eps</code> 和 Algorithm 2（sampling）的第 4 行 <code>x_{t-1} = ... + sigma_t * z</code>，全都在显式使用 reparameterization。可以说没有这一招，整个 $\epsilon$-prediction + simple loss + 单步加噪的工程范式都不成立。Score-based SDE（Yang Song 2021）把这个想法推得更远——SDE 形式 $dx = f(x,t)dt + g(t)dw$ 里，Wiener process $dw$ 就是"reparam 的外部噪声"在连续时间下的对应物。Flow matching（Lipman et al. 2023）的 $x_t = (1-t)x_0 + t x_1$ 是 reparam 在确定性轨迹上的版本。EDM（Karras et al. 2022）把整个去噪框架重新写成 $x = D_\theta(x_0 + n\sigma)$，本质也是 reparam。</div>
+
+    <h2>梯度估计器的对比：reparam vs REINFORCE</h2>
+    <p>如果你不用 reparameterization，还可以用另一种估计器叫 <strong>score function estimator</strong>（也叫 REINFORCE 估计器、似然比估计器）：</p>
+    <p>$$\nabla_\phi \mathbb{E}_{z \sim q_\phi}[f(z)] = \mathbb{E}_{z \sim q_\phi}\big[f(z) \cdot \nabla_\phi \log q_\phi(z|x)\big]$$</p>
+    <p>这个估计器的好处是<em>不需要</em> $f$ 或 $g_\phi$ 可微（所以离散变量也能用，强化学习里的 policy gradient 就是它），但代价是<strong>方差极高</strong>——常常需要 baseline、控制变量、上千次采样才能让估计收敛。Reparameterization 的方差通常比它低 1 到 2 个数量级，这才是 reparam 能让 VAE 和 diffusion 用 mini-batch + 单次采样就训练得动的真正工程根因。如果当年 Kingma &amp; Welling 只会用 REINFORCE，VAE 大概率根本训不出来。</p>
+
+    <div class="rep-callout">
+      <span class="rep-why">Why（直觉）</span>：reparam 估计器之所以方差低，是因为它<strong>利用了 $f$ 的局部信息</strong>——通过 $\nabla f$ 知道"$z$ 在这个方向上能让 loss 下降多少"。REINFORCE 只看 $f$ 的标量值，完全不利用"loss 在 $z$ 周围怎么变化"的结构，相当于盲人摸象，所以方差自然高。可以把它想成两种导航：reparam 像有 GPS 加陀螺仪知道每一步该往哪偏；REINFORCE 像只能问"你现在离目的地近还是远"，然后靠多次试错猜方向。
+    </div>
+
+    <h2>更深一层：把 reparam 看作分布的"参数化族"</h2>
+    <p>从测度论的视角，reparameterization 其实是在做一件优雅的事：把一族分布 $\{q_\phi\}_{\phi}$ 表示成"一个固定的基础测度 $p(\epsilon)$ 经过参数化变换 $g_\phi$ 推前（pushforward）"得到的像测度。这个视角下，$\phi$ 的角色从"分布的参数"变成了"变换的参数"——而对变换的微分是数学上完全合法的（流形上的切空间），对采样事件的微分则不是。这也是为什么 normalizing flow 整个研究方向能从 reparam 自然生长出来：把 $g_\phi$ 从仿射变换扩展到任意可逆光滑映射，就得到了 NF；让 $g_\phi$ 随时间演化、由 ODE 定义，就得到了 continuous normalizing flow；让噪声本身随时间演化、由 SDE 定义，就得到了 score-based 扩散模型。同一个数学思想，分叉出整个深度生成模型谱系。</p>
+
+    <h2>什么时候 reparam 不工作</h2>
+    <p>除了离散分布之外，还有几种实际情形会让 reparam 失灵或退化：</p>
+    <ul>
+      <li><strong>分布族不容许 location-scale 形式</strong>：例如 mixture of Gaussians（混合高斯），各分量的混合权重是离散选择，需要 Gumbel-Softmax 或单独处理每个分量。又如 Dirichlet、Beta 这些分布，参数 $\phi$ 不是简单的位置-尺度结构，要用 implicit reparam（隐式重参数化，Figurnov et al. 2018）通过 CDF 的逆来构造可微采样。</li>
+      <li><strong>$g_\phi$ 几乎不可微</strong>：比如 $z = \mathrm{ReLU}(\mu + \sigma \epsilon)$ 在 0 处不光滑，会带来次梯度问题——但实践中 ReLU 的次梯度（在 0 处取 0 或 0.5）足够好用，不算真正障碍。真正麻烦的是 round / sign / Heaviside 这类阶梯函数，它们处处梯度为 0，整个回路就废了。</li>
+      <li><strong>截断分布</strong>：truncated normal 在边界处的 reparam 需要小心处理边界 mass，常见做法是用 inverse CDF reparam（也叫 implicit reparam），通过 $z = F^{-1}_\phi(\Phi(\epsilon))$ 来构造，其中 $F^{-1}_\phi$ 是目标分布的分位数函数。</li>
+    </ul>
+
+    <h2>历史小注：trick 这个名字</h2>
+    <p>Kingma 在 2014 年 ICLR 的论文里直接把这一节标题命名为 "The Reparameterization Trick"——"trick" 这个词其实有点低估它的重要性。它看起来像一个工程小聪明，但其实是<strong>所有现代连续型生成模型可训练性的数学基础</strong>。Rezende, Mohamed &amp; Wierstra 几乎同时（DeepMind 团队）独立提出了等价的想法，叫 "stochastic backpropagation"——这个名字其实更准确，因为它强调了"梯度穿越随机性"这件事的本质。两个团队在差不多的时间点撞上同一个 idea，说明这是一个"水到渠成"的发现——一旦你想用神经网络参数化连续分布、想用 SGD 优化，就必然要走到这一步。后来的 normalizing flow、diffusion、flow matching、neural ODE，全是在这个发现之上的不同方向延展。</p>
+
+    <h2>双计算图对照：直接采样 vs reparam</h2>
+    <p>下面这张图是这个概念最核心的可视化。左边是"直接采样"版本——computation graph 在采样节点处<strong>断开</strong>，梯度无法从 loss 倒推到 encoder 参数 $\phi$。右边是"reparam"版本——通过引入外部噪声 $\epsilon$，graph 变成一条连续的可微路径，梯度可以沿橘色虚线箭头一路回流到 $f_\phi$。读图的关键看两点：(1) $\epsilon$ 节点在哪——左图没有它，右图它独立悬挂；(2) 从 $\mathcal{L}$ 到 $\phi$ 有没有一条不经过虚线（dashed = 不可微）的回路。</p>
+
+    <svg class="rep-svg" viewBox="0 0 600 280" role="img" aria-label="reparameterization vs direct sampling 计算图对比">
+      <defs>
+        <marker id="rep-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--text-muted)"/>
+        </marker>
+        <marker id="rep-arrow-grad" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--module-accent)"/>
+        </marker>
+      </defs>
       <g font-family="ui-sans-serif" font-size="11" fill="var(--text)">
-        <rect x="20" y="30" width="260" height="80" rx="6" fill="var(--red-soft)" stroke="var(--red)"/>
-        <text x="150" y="55" text-anchor="middle" font-weight="600" fill="var(--red)">不重参</text>
-        <text x="35" y="75" font-size="10">μ, σ → 采样 → z</text>
-        <text x="35" y="92" font-size="10" fill="var(--red)">梯度断在采样</text>
-        <rect x="320" y="30" width="260" height="80" rx="6" fill="var(--module-accent-soft)" stroke="var(--module-accent)"/>
-        <text x="450" y="55" text-anchor="middle" font-weight="600" fill="var(--module-accent)">重参后</text>
-        <text x="335" y="75" font-size="10">ε ~ N（外部）；z = μ + σε</text>
-        <text x="335" y="92" font-size="10" fill="var(--module-accent)">梯度畅通</text>
+        <!-- 左：direct sampling 梯度断 -->
+        <text x="150" y="18" text-anchor="middle" font-weight="700" fill="var(--red)">直接采样：梯度断在采样节点</text>
+        <rect x="60" y="40" width="60" height="28" rx="4" fill="var(--surface-soft)" stroke="var(--border)"/>
+        <text x="90" y="58" text-anchor="middle">x</text>
+        <path d="M 120 54 L 145 54" stroke="var(--text-muted)" marker-end="url(#rep-arrow)"/>
+        <rect x="145" y="40" width="80" height="28" rx="4" fill="var(--module-accent)" stroke="var(--module-accent)"/>
+        <text x="185" y="58" text-anchor="middle" fill="var(--surface)">f_φ(x)→μ,σ</text>
+        <path d="M 185 68 L 185 100" stroke="var(--text-muted)" marker-end="url(#rep-arrow)"/>
+        <rect x="135" y="100" width="100" height="32" rx="4" fill="var(--red-soft)" stroke="var(--red)" stroke-dasharray="4 3"/>
+        <text x="185" y="120" text-anchor="middle" fill="var(--red)">z ~ N(μ,σ²)</text>
+        <text x="270" y="120" font-size="9" fill="var(--red)" text-anchor="middle">✗ 采样</text>
+        <text x="270" y="132" font-size="9" fill="var(--red)" text-anchor="middle">不可微</text>
+        <path d="M 185 132 L 185 165" stroke="var(--red)" stroke-dasharray="3 3" marker-end="url(#rep-arrow)"/>
+        <rect x="155" y="165" width="60" height="28" rx="4" fill="var(--surface-soft)" stroke="var(--border)"/>
+        <text x="185" y="183" text-anchor="middle">L=f(z)</text>
+        <text x="150" y="225" font-size="10" fill="var(--red)" text-anchor="middle">∇φ L 无法计算</text>
+        <text x="150" y="240" font-size="9" fill="var(--text-muted)" text-anchor="middle">（autograd 在虚线处停止）</text>
+
+        <!-- 分隔 -->
+        <path d="M 300 25 L 300 260" stroke="var(--border)" stroke-dasharray="3 4"/>
+
+        <!-- 右：reparam 梯度通 -->
+        <text x="450" y="18" text-anchor="middle" font-weight="700" fill="var(--module-accent)">Reparam：梯度沿 g_φ 流回</text>
+        <rect x="320" y="40" width="60" height="28" rx="4" fill="var(--surface-soft)" stroke="var(--border)"/>
+        <text x="350" y="58" text-anchor="middle">x</text>
+        <path d="M 380 54 L 405 54" stroke="var(--text-muted)" marker-end="url(#rep-arrow)"/>
+        <rect x="405" y="40" width="80" height="28" rx="4" fill="var(--module-accent)" stroke="var(--module-accent)"/>
+        <text x="445" y="58" text-anchor="middle" fill="var(--surface)">f_φ(x)→μ,σ</text>
+
+        <rect x="510" y="40" width="65" height="28" rx="4" fill="var(--blue-soft)" stroke="var(--blue)"/>
+        <text x="542" y="58" text-anchor="middle" fill="var(--blue)">ε ~ N(0,I)</text>
+        <text x="542" y="82" font-size="9" fill="var(--text-muted)" text-anchor="middle">外部噪声</text>
+
+        <path d="M 445 68 L 445 100" stroke="var(--text-muted)" marker-end="url(#rep-arrow)"/>
+        <path d="M 542 88 L 510 100" stroke="var(--text-muted)" marker-end="url(#rep-arrow)"/>
+        <rect x="395" y="100" width="120" height="32" rx="4" fill="var(--module-accent-soft)" stroke="var(--module-accent)"/>
+        <text x="455" y="120" text-anchor="middle" fill="var(--module-accent)">z = μ + σ·ε</text>
+        <text x="455" y="130" text-anchor="middle" font-size="9" fill="var(--text-muted)">（确定运算）</text>
+        <path d="M 455 132 L 455 165" stroke="var(--text-muted)" marker-end="url(#rep-arrow)"/>
+        <rect x="425" y="165" width="60" height="28" rx="4" fill="var(--surface-soft)" stroke="var(--border)"/>
+        <text x="455" y="183" text-anchor="middle">L=f(z)</text>
+        <!-- 梯度回流路径 -->
+        <path d="M 425 180 Q 360 215 360 70" stroke="var(--module-accent)" fill="none" stroke-dasharray="4 3" stroke-width="1.5" marker-end="url(#rep-arrow-grad)"/>
+        <text x="345" y="230" font-size="10" fill="var(--module-accent)">∇φ L 沿确定路径回流 ✓</text>
       </g>
     </svg>
   </section>
-  <section class="concept-interact"><p>双图对比——<strong>不变量</strong>是 z 的边缘分布始终是 $\mathcal{N}(\mu, \sigma^2)$。</p></section>
-  <section class="concept-example">
-    <h2>手算梯度</h2>
-    <p>$\mu = 2, \sigma = 1.5, \epsilon = 0.4 \Rightarrow z = 2.6$, $L = z^2 = 6.76$. $\partial L/\partial\mu = 2z \cdot 1 = 5.2$；$\partial L/\partial\sigma = 2z \cdot \epsilon = 2.08$。</p>
+
+  <section class="concept-interact">
+    <p>点击下面四个步骤按钮，看 reparameterization 是怎么把"采样事件"一步步替换为"确定函数 + 外部噪声"的。<strong>不变量</strong>：$z$ 的边际分布始终是 $\mathcal{N}(\mu, \sigma^2)$；改变的<em>只是</em> $\phi$ 出现在计算图里的位置——从"分布内部"挪到"确定函数内部"。</p>
+
+    <div class="rep-controls">
+      <button data-step="0" class="active">① 目标</button>
+      <button data-step="1">② 直接采样的困难</button>
+      <button data-step="2">③ 引入外部 ε</button>
+      <button data-step="3">④ 梯度可传</button>
+    </div>
+
+    <div id="rep-readout" style="background:var(--surface-soft);padding:0.9rem 1.1rem;border-radius:4px;font-family:ui-monospace,monospace;font-size:0.9rem;min-height:8em;">
+      <div class="rep-line" data-line="0">优化 <strong>$\mathcal{L}(\phi) = \mathbb{E}_{z \sim q_\phi(z|x)}[f(z)]$</strong>。我们想要 $\nabla_\phi \mathcal{L}$ 来更新 encoder 参数。</div>
+      <div class="rep-line" data-line="1" style="display:none;color:var(--red);">写出 <code>z = sample(N(μ_φ, σ_φ²))</code>——autograd 在采样这一步停住。$\partial z / \partial \phi$ 不存在，因为 z 是<em>随机变量的实现</em>，不是 $\phi$ 的函数。直接调用 <code>torch.normal()</code> 会得到一个错误的零梯度。</div>
+      <div class="rep-line" data-line="2" style="display:none;color:var(--module-accent);">改写：先采 <code>ε = sample(N(0, I))</code>（与 $\phi$ 无关，只是一组外部数字），再计算 <code>z = μ_φ + σ_φ · ε</code>。$z$ 现在是 $\phi$ 和 $\epsilon$ 的<em>确定函数</em>，分布上仍是 $\mathcal{N}(\mu_\phi, \sigma_\phi^2)$。</div>
+      <div class="rep-line" data-line="3" style="display:none;color:var(--module-accent);">现在 $\nabla_\phi \mathcal{L} = \mathbb{E}_\epsilon[\nabla_\phi f(\mu_\phi + \sigma_\phi \epsilon)]$，链式法则一路畅通。$\partial z / \partial \mu_\phi = 1$，$\partial z / \partial \sigma_\phi = \epsilon$。每个 batch 抽一次 $\epsilon$ 就能算出梯度。</div>
+    </div>
+
+    <script>
+      (function () {
+        const btns = document.querySelectorAll('.rep-controls button');
+        const lines = document.querySelectorAll('#rep-readout .rep-line');
+        function show(step) {
+          btns.forEach(b => b.classList.toggle('active', +b.dataset.step === step));
+          lines.forEach(l => l.style.display = (+l.dataset.line === step) ? 'block' : 'none');
+        }
+        btns.forEach(b => b.addEventListener('click', () => show(+b.dataset.step)));
+        show(0);
+      })();
+    </script>
   </section>
-  <section class="concept-pitfalls">
-    <h2>常见误区</h2>
+
+  <section class="concept-example">
+    <h2>手算一次前向 + 反向</h2>
+    <p>设 encoder 在某个样本上输出 $\mu = 0.5$、$\sigma = 1.2$，本次 mini-batch 采样 $\epsilon = 0.3$，下游损失为 $f(z) = z^2$（一个最简化的代理损失）。</p>
+    <p>前向计算：</p>
+    <p>$$z = \mu + \sigma \cdot \epsilon = 0.5 + 1.2 \cdot 0.3 = 0.5 + 0.36 = 0.86$$</p>
+    <p>$$\mathcal{L} = f(z) = z^2 = 0.86^2 = 0.7396$$</p>
+    <p>反向计算（链式法则一步步代入，不要跳）：</p>
+    <p>$$\frac{\partial \mathcal{L}}{\partial \mu} = \frac{\partial f}{\partial z} \cdot \frac{\partial z}{\partial \mu} = 2z \cdot 1 = 2 \cdot 0.86 \cdot 1 = 1.72$$</p>
+    <p>$$\frac{\partial \mathcal{L}}{\partial \sigma} = \frac{\partial f}{\partial z} \cdot \frac{\partial z}{\partial \sigma} = 2z \cdot \epsilon = 2 \cdot 0.86 \cdot 0.3 = 0.516$$</p>
+    <p>两个梯度都是<strong>具体的数</strong>——可以拿去更新 encoder 的 $\mu, \sigma$ 输出层权重了。如果你用直接采样、不用 reparam，这两个偏导根本写不出来，autograd 给你的会是错误的零或 NaN。</p>
+  </section>
+
+  <section class="concept-pitfalls rep-pitfalls">
+    <h2>三个常见误区</h2>
     <ol>
-      <li><strong>"仅 Gaussian 可"。</strong>反例：任何 location-scale 族都行（Laplace、uniform）。</li>
-      <li><strong>"加 ε 增噪声"。</strong>反例：随机性原就在；只是挪到外部让梯度可算。</li>
-      <li><strong>"梯度能传 ε"。</strong>反例：ε 不属于计算图，pytorch detach。</li>
+      <li><strong>"reparam 是 VAE 的专属技巧"</strong>。反例：DDPM 训练算法第 4 行 <code>x_t = √ᾱ_t · x_0 + √(1−ᾱ_t) · ε</code> 就是 reparameterization 的直接应用；flow matching 里 $x_t = (1-t)x_0 + t x_1$ 同样是它（$\epsilon$ 这里是 $x_1$）；score SDE 里 $dx = f(x,t)dt + g(t)dw$ 的 Wiener 增量 $dw$ 是它的连续时间版本；甚至 GAN 里 $z \sim \mathcal{N}(0, I); G(z)$ 也是。它是<em>梯度穿越随机性</em>的通用钥匙，不是 VAE 的私有财产。</li>
+      <li><strong>"reparam 消除了采样的随机性，所以训练是确定的"</strong>。反例：随机性还在 $\epsilon$ 里——每个 mini-batch 抽不同的 $\epsilon$，loss 仍然是随机变量。同一个 $x$ 跑两次前向，得到的 $z$ 不一样，loss 也不一样。reparam 只是把随机源<em>挪了位置</em>（从计算图的"内部不可微节点"挪到"外部输入端"），并没有让模型变成确定模型。具体表现：相同 batch 跑两次，loss 差异通常在 1% 量级，正是采样方差的体现。</li>
+      <li><strong>"任何分布都能 reparam"</strong>。反例：离散分布做不到——比如 $z \sim \mathrm{Categorical}(\pi_\phi)$，没有一个可微的 $g_\phi(\epsilon)$ 能把均匀噪声映射成 one-hot 类别向量，因为 argmax 这一步本质不可微（输出是阶梯函数，梯度处处为 0）。Reparam 严格要求"连续分布 + 可微变换"这两个条件同时成立。
+        <div class="my-addition">🟡 教材外补充：离散情形要用 <strong>Gumbel-Softmax</strong>（Jang &amp; Gu 2017；Maddison et al. 2017）——它通过 $z = \mathrm{softmax}((\log \pi + g)/\tau)$ 其中 $g$ 是 Gumbel 噪声，做出一个"可微的近似 argmax"，温度 $\tau \to 0$ 时退化为真正的 categorical 采样。这是 reparam 在离散世界里的对应物，被 VQ-VAE 的训练、discrete diffusion language model 等场景广泛使用。Diffusion language model（如 D3PM、SEDD）里离散态扩散也面临这个问题，常见解法是把 token embed 到连续空间再做 reparam，或者直接用 score matching for discrete domains。</div>
+      </li>
     </ol>
   </section>
+
   <section class="concept-seealso">
     <h2>相关概念</h2>
-    <ul><li><a href="/video-to-notebook/concepts/vae-encoder/">VAE Encoder</a></li><li><a href="/video-to-notebook/concepts/variational-lower-bound/">ELBO</a></li></ul>
+    <ul>
+      <li><a href="/video-to-notebook/concepts/vae-encoder/">VAE Encoder</a> —— reparam 第一次登场的舞台，encoder 输出 $\mu, \sigma$ 然后 reparam 采 $z$。</li>
+      <li><a href="/video-to-notebook/concepts/variational-lower-bound/">Variational Lower Bound</a> —— ELBO 的重建项之所以能展开成 $\mathbb{E}_\epsilon[\cdot]$、能用 SGD 优化，全靠 reparam。</li>
+    </ul>
   </section>
+
   <section class="concept-sources">
     <h2>来源</h2>
-    <ol><li><a href="https://www.youtube.com/watch?v=LqQNvuLqyfk&t=480s" target="_blank" rel="noopener">diffusion-principles-vizuara · L9 · VAE reparam · (8:00)</a></li></ol>
+    <ol>
+      <li><a href="https://www.youtube.com/watch?v=Yyir7-OAnlA&t=405s" target="_blank" rel="noopener">diffusion-principles-vizuara · L2 · Variational Autoencoders Explained From Scratch · (6:45)</a> —— Dr. Raj 引出 latent variable 概念，把它比作"secret recipe"，为 reparameterization 的需求埋下伏笔。</li>
+      <li><a href="https://www.youtube.com/watch?v=Yyir7-OAnlA&t=542s" target="_blank" rel="noopener">diffusion-principles-vizuara · L2 · "1:1 mapping from secret recipe to handwriting" · (9:02)</a> —— Dr. Raj 强调"采样后的 z 必须能反推回参数 μ, σ"——这正是 reparam 要解决的可微性问题。</li>
+    </ol>
   </section>
 </article>

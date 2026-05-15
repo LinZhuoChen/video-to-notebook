@@ -1,0 +1,202 @@
+<style>
+/* prefix: lan- */
+.lan-quickref{background:var(--surface-soft);border-left:3px solid var(--module-accent);padding:0.8rem 1rem;border-radius:0 4px 4px 0;margin:1rem 0;font-size:0.92rem;}
+.lan-quickref div{margin:0.3rem 0;}
+.lan-svg{display:block;margin:1.2rem auto;max-width:100%;height:auto;}
+.lan-pitfalls ol{padding-left:1.4rem;} .lan-pitfalls li{margin:0.6rem 0;}
+.lan-source{font-style:italic;color:var(--text-muted);border-left:2px solid var(--border);padding:0.2rem 0.8rem;margin:0.5rem 0;font-size:0.9rem;}
+.callout-quote{border-left:3px solid var(--module-accent);background:var(--surface-soft);padding:0.6rem 0.9rem;margin:0.8rem 0;font-style:italic;color:var(--text);}
+.my-addition{background:var(--module-accent-soft);border-left:3px solid var(--module-accent);padding:0.4rem 0.8rem;margin:0.6rem 0;font-size:0.93rem;color:var(--text);}
+.lan-why{background:var(--surface-soft);border-left:2px solid var(--border-strong);padding:0.45rem 0.85rem;margin:0.55rem 0;font-size:0.93rem;}
+@keyframes lan-particle{
+  0%{transform:translate(280px,40px);}
+  12%{transform:translate(240px,80px);}
+  24%{transform:translate(200px,140px);}
+  36%{transform:translate(180px,200px);}
+  48%{transform:translate(195px,215px);}
+  60%{transform:translate(175px,205px);}
+  72%{transform:translate(220px,180px);}
+  84%{transform:translate(310px,160px);}
+  100%{transform:translate(380px,210px);}
+}
+.lan-anim-dot{animation:lan-particle 8s ease-in-out infinite alternate;}
+@keyframes lan-trail{
+  0%{opacity:0;}10%{opacity:0.65;}100%{opacity:0.05;}
+}
+.lan-trail-dot{animation:lan-trail 8s ease-out infinite;}
+</style>
+
+<article class="concept-entry">
+  <header class="concept-header">
+    <span class="concept-eyebrow">概念 · Module 3 Score 视角</span>
+    <h1>Langevin Dynamics</h1>
+    <p class="concept-tagline">— 沿 score 漂移加高斯抖动，让粒子最终按 $p(x)$ 分布。</p>
+  </header>
+
+  <aside class="lan-quickref">
+    <div><strong>定义</strong> · 一种 MCMC 采样：每步用 score $\nabla \log p$ 把粒子拉向高概率区，再撒一点噪声防止陷在局部模式，长时间访问频率收敛到 $p(x)$。</div>
+    <div><strong>公式</strong> · $x_{k+1} = x_k + \frac{\delta}{2}\nabla_x \log p(x_k) + \sqrt{\delta}\,\epsilon_k,\ \epsilon_k \sim \mathcal{N}(0, I)$。</div>
+    <div><strong>易错</strong> · Langevin 不是「加噪声的 SGD」——是<em>梯度上升加噪声</em>，目标不是最小化 loss 而是从 $p$ 采样；它永远不停下。</div>
+    <div><strong>关键联系</strong> · DDPM 反向链每一步 ≈ 在某个噪声级别上做一步 Langevin；Score-based SDE 把两条历史线（Ho 2020 / Song 2019）统一在一起。</div>
+  </aside>
+
+  <section class="concept-intuition">
+    <p>很多人第一次看到 Langevin 的更新式 $x \leftarrow x + \frac{\delta}{2}\nabla \log p + \sqrt{\delta}\,\epsilon$，第一反应是：「这不就是带噪声的 SGD 吗？」<strong>不是</strong>。这是初学者最致命的误读。SGD 的目标是把 loss 推到极小，参数最后稳定下来；Langevin 的目标恰恰相反——让粒子<em>永远不要停下</em>，使得长时间下来访问每个点 $x$ 的频率正好等于密度 $p(x)$。一个是优化、一个是采样，是两件完全不同的任务，只是更新式长得像而已。</p>
+
+    <p>把 Langevin 看成「加噪 SGD」的人，会犯三类典型错：调小步长想让它「更准确」（结果完全失去 mixing）、跑到 score 接近零就停下（停下意味着只采到一个 mode 的样本）、以及奇怪为什么训练好的 score 网络直接跑 Langevin 会生成噪声（因为流形外 score 估不准，需要 annealed 调度）。下面三个 pitfall 会逐一给反例。先把<em>正确</em>的图像建立起来。</p>
+
+    <p>Vizuara 的 Dr. Raj 在 Lecture 5《Energy Based Models / Score Function》给的物理图像最直观：把 $-\log p(x)$ 想象成一个<strong>势能面 $V(x) = -\log p(x)$</strong>，山谷（势能低）就是高概率区（density 高），山顶（势能高）就是低概率区。Langevin 就是一颗布朗粒子被扔进这个势能面，受两种力同时作用——</p>
+
+    <div class="callout-quote">「Score $\nabla\log p$ 就是势能的负梯度 $-\nabla V$，它告诉粒子往哪里『下坡』。但如果你只听 score、不加噪声，粒子会卡死在距离起点最近的那个山谷里，永远到不了别的山谷。加噪声 $\sqrt{\delta}\epsilon$ 的意义，是让粒子有概率翻过低矮的山脊，去到分布的其他 mode。drift 与 diffusion 的<em>平衡</em>，让稳态访问频率正好是 $p(x)$。」—— Vizuara L5 主旨改写</div>
+
+    <p>这个 Brownian-particle-in-potential 的画面是物理学家 Paul Langevin 1908 年提出的，原本用来描述悬浮颗粒在热涨落下的运动。机器学习借用它的数学结构来做采样：势能定义成 $-\log p$，温度调成 1，粒子的稳态分布就是 $p$ 本身。这不是巧合——Fokker-Planck 方程给的是严格的「连续时间下的精确收敛」保证。</p>
+
+    <p>CMU 10-799 Lecture 4《Score-based Models》在另一个角度补完图像：在扩散语境里，Langevin 不是一个独立工具，而是反向去噪过程的<strong>原子步</strong>。DDPM 的反向链 $x_T \to x_{T-1} \to \dots \to x_0$，每一步「去一点噪声」的操作，重写出来正好就是「在 noise level $\sigma_t$ 下做一次 Langevin step」。两门课从两个不同的起点出发（Vizuara 从 EBM/score 切入，CMU 从扩散反向过程切入），最后会合在同一个公式上——这是 score-based 范式的全部魅力所在。</p>
+
+    <p>在训练里，这件事对应一个非常具体的工程问题：你训了一个 score network $s_\theta(x) \approx \nabla \log p(x)$（怎么训留给 Score Matching 那一页），<em>怎么用它生成新样本？</em> 答案就是 Langevin——把 $\nabla \log p$ 换成 $s_\theta$，从一个初始噪声 $x_0 \sim \mathcal{N}(0, I)$ 开始，迭代几百到几千步，最后粒子的位置就是 $p_{\text{data}}$ 的一个样本。这就是 Song & Ermon 2019 的 NCSN，以及后续整个 score-based diffusion 家族的生成机制。</p>
+
+    <p>所以一句话总结这个开场：Langevin 不是优化、不是「噪声 SGD」，它是<em>用 score 把粒子的访问频率塑造成目标分布</em>的一台机器。drift 项决定密度的形状，noise 项决定混合的强度，两者通过 Fokker-Planck 的精确平衡，让稳态等于 $p$。理解这一点之后，后面所有公式（DDPM 反向、SDE 框架、Probability Flow ODE）都只是这个核心思想在不同坐标下的表达。</p>
+  </section>
+
+  <section class="concept-deepdive">
+    <h2>1. 从 SDE 到离散更新</h2>
+    <p>连续时间下，Langevin 写成一个随机微分方程（SDE）：</p>
+    <p>$$ dx_t = \nabla_x \log p(x_t)\,dt + \sqrt{2}\,dW_t $$</p>
+    <p>这里 $W_t$ 是标准布朗运动，$dW_t$ 在直觉上等于 $\sqrt{dt}\cdot \mathcal{N}(0, I)$（这是布朗运动方差随时间线性增长的核心性质）。第一项是<strong>漂移项 (drift)</strong>，把粒子推向 $p$ 的高密度区；第二项是<strong>扩散项 (diffusion)</strong>，不断撒入高斯噪声。两项平衡时，粒子分布会收敛到 $p$ 本身。</p>
+
+    <div class="lan-why"><strong>Why 系数是 $\sqrt{2}$？</strong>不是任意挑的。Fokker-Planck 方程描述了粒子分布 $p_t(x)$ 随时间的演化：对于一般 SDE $dx = \mu(x)dt + \sigma\,dW$，有 $\partial_t p_t = -\nabla\cdot(\mu p_t) + \frac{1}{2}\sigma^2 \Delta p_t$。代入 $\mu = \nabla\log p$、$\sigma = \sqrt{2}$，得 $\partial_t p_t = -\nabla\cdot(p_t \nabla\log p) + \Delta p_t$。当 $p_t = p$（稳态），右边两项完全相消（用恒等式 $p\nabla\log p = \nabla p$ 验证），所以 $\partial_t p = 0$，$p$ 确实是不变测度。如果系数不是 $\sqrt{2}$，温度就会"不对"，稳态分布会变成 $p^\beta$ 而不是 $p$。</div>
+
+    <p>实践中我们不能跑连续 SDE，必须离散化。最简单的欧拉-丸山（Euler-Maruyama）离散化，步长 $\delta$（讲师有时也写 $\eta$ 或 $\epsilon$，不同 paper 不一致，注意区分）：</p>
+    <p>$$ x_{k+1} = x_k + \frac{\delta}{2}\,\nabla_x \log p(x_k) + \sqrt{\delta}\,\epsilon_k, \quad \epsilon_k \sim \mathcal{N}(0, I) $$</p>
+
+    <div class="lan-why"><strong>Why drift 配 $\frac{\delta}{2}$、noise 配 $\sqrt{\delta}$？</strong>因为 $dt$ 离散成 $\delta$ 后，drift 项的尺度是 $\delta$，而布朗运动增量 $dW$ 的尺度是 $\sqrt{dt} = \sqrt{\delta}$（方差线性、标准差平方根）。$\sqrt{2}$ 在离散下被「分裂」：$\sqrt{2}\cdot\sqrt{\delta} = \sqrt{2\delta}$，配套地 drift 写成 $\frac{2\delta}{2}\nabla\log p$，把那个 2 移到分母。这样写出来 $(\delta/2,\ \sqrt{\delta})$ 是对称的、好记的形式，等价于 $(\delta,\ \sqrt{2\delta})$ 但更通用——Welling & Teh 2011（SGLD 论文）就是用前一种。两种你都会看到，记住<em>方差与步长的比例关系</em>就行：方差是步长的<em>一次方</em>，标准差是<em>平方根</em>。</div>
+
+    <h2>2. 为什么必须有 score（也就是为什么 score-based 模型重要）</h2>
+    <p>更新式里出现的不是 $p$、不是 $\log p$，而是 $\nabla \log p$——<strong>对数密度的梯度</strong>。这个看似细小的区别，是 Langevin 跟 score-based modeling 的命脉所在：</p>
+    <ul>
+      <li>把 $p$ 写成能量形式 $p(x) = \frac{1}{Z}\exp(-E(x))$，其中 $Z = \int \exp(-E(x))dx$ 是归一化常数。在高维下 $Z$ 根本算不出来（积分维数太高、没有解析形式）——这是 EBM 几十年来的核心痛点。</li>
+      <li>但是！$\nabla \log p = \nabla(-E - \log Z) = -\nabla E$。因为 $Z$ 跟 $x$ 无关，$\nabla \log Z = 0$。<strong>score 自动绕过了归一化常数</strong>。</li>
+      <li>所以只要学到 $s_\theta(x) \approx \nabla \log p(x)$（用 score matching 或 denoising score matching，损失函数<em>不依赖 $Z$</em>），就能跑 Langevin 采样。这正是 Hyvärinen 2005 → Vincent 2011 → Song & Ermon 2019 这条线的核心发现。</li>
+    </ul>
+    <p>反过来：如果我们必须用 $p$ 本身（而不是 score）来采样，那就只能走 MCMC 的 Metropolis-Hastings 路线，需要算 $p(x')/p(x)$ 这种比值——比值中 $Z$ 会消掉，但 $E(x')$ 和 $E(x)$ 都得算，仍然要 train 一个能算能量的模型。score 路线更纯粹：网络直接吐 $\nabla\log p$，连 $E$ 都不需要建模。</p>
+
+    <svg class="lan-svg" viewBox="0 0 560 280" role="img" aria-label="Langevin 在势能面上的 drift 与 noise 分解示意">
+      <defs>
+        <marker id="lan-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--text-muted)"/>
+        </marker>
+        <marker id="lan-arrow-red" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--red)"/>
+        </marker>
+      </defs>
+      <g font-family="ui-sans-serif" font-size="11" fill="var(--text)">
+        <text x="280" y="18" text-anchor="middle" font-size="12">势能 $V(x) = -\log p(x)$（山谷 = 高概率）</text>
+        <path d="M 40 80 Q 120 220 180 130 Q 240 60 320 200 Q 400 240 480 100 L 520 70" stroke="var(--module-accent)" stroke-width="2" fill="none"/>
+        <circle cx="180" cy="130" r="5" fill="var(--blue)"/>
+        <text x="180" y="118" text-anchor="middle" font-size="10" fill="var(--text-muted)">mode 1</text>
+        <circle cx="320" cy="200" r="5" fill="var(--blue)"/>
+        <text x="320" y="219" text-anchor="middle" font-size="10" fill="var(--text-muted)">mode 2</text>
+        <text x="250" y="95" font-size="10" fill="var(--text-muted)">山脊 · 低 $p$</text>
+        <circle cx="105" cy="115" r="4" fill="var(--accent)"/>
+        <path d="M 105 115 L 145 130" stroke="var(--text-muted)" stroke-width="1.5" marker-end="url(#lan-arrow)"/>
+        <text x="55" y="108" font-size="10" fill="var(--text-muted)">drift · $\nabla\log p$</text>
+        <path d="M 105 115 L 110 95" stroke="var(--red)" stroke-width="1.5" stroke-dasharray="3,2" marker-end="url(#lan-arrow-red)"/>
+        <text x="125" y="92" font-size="10" fill="var(--red)">noise · $\sqrt{\delta}\epsilon$</text>
+        <text x="280" y="265" text-anchor="middle" font-size="10" fill="var(--text-muted)">无噪声 → 卡在 mode 1；有噪声 → 偶尔翻山到 mode 2，访问频率 ∝ $p$</text>
+      </g>
+    </svg>
+
+    <h2>3. Annealed Langevin —— 工程上必须做的修正</h2>
+    <p>到这里你可能以为：训好 score 网络，跑 Langevin，搞定。<strong>不行</strong>。Song & Ermon 在 NCSN 论文里用实验证明：直接对原始数据分布 $p_{\text{data}}$ 学 score、然后跑 vanilla Langevin，<em>几乎一定失败</em>。原因有二：</p>
+    <ul>
+      <li><strong>流形假说问题</strong>：真实数据（图像、音频）集中在一个低维流形上，流形外几乎所有点 $p_{\text{data}}(x) \approx 0$，score $\nabla\log p$ 数值上未定义、网络也学不到东西。但 Langevin 初始化在 $\mathcal{N}(0, I)$，第一步就在流形外面——网络给出垃圾 score，迭代直接发散或卡死。</li>
+      <li><strong>低密度区域问题</strong>：即使所有 mode 之间有微弱通路，分隔它们的「山脊」概率极低、score 极小、加上的噪声不足以翻过去——粒子会被困在初始化附近的局部 mode，没法 mixing。</li>
+    </ul>
+
+    <p>修正方案：<strong>annealed Langevin</strong>。先对数据分布做大噪声平滑得到 $p_{\sigma_1}(x) = \int p_{\text{data}}(y) \mathcal{N}(x; y, \sigma_1^2 I)dy$，$\sigma_1$ 取得很大（比如 $\sigma_1 = 50$），让原本相互分隔的 modes「糊」成一片连续的分布。在这个平滑分布上跑几步 Langevin，得到一个粗糙样本。然后切换到稍小的 $\sigma_2 < \sigma_1$，跑几步，再切到更小的 $\sigma_3$，直到 $\sigma_L$ 接近 0，最后那个分布就是 $p_{\text{data}}$ 本身。整条链 $L$ 一般是 10–1000 个 noise level，每个 level 跑 5–100 步 Langevin。</p>
+
+    <p>更深刻的洞察：这个 noise-schedule 其实就是<strong>温度退火</strong>。高 $\sigma$ 等价于「高温」——粒子能轻松翻山；低 $\sigma$ 等价于「低温」——粒子精修到准确位置。直接低温启动会卡 mode；先高温再退火（annealing），是 statistical physics 里几十年来对付多模分布的标准把戏。</p>
+
+    <div class="my-addition">🟡 教材外补充：<strong>DDPM 反向过程 ≈ annealed Langevin</strong>。这是把两条历史线缝起来的关键。DDPM（Ho et al. 2020）的反向更新原本写成 $x_{t-1} = \frac{1}{\sqrt{\alpha_t}}(x_t - \frac{1-\alpha_t}{\sqrt{1-\bar\alpha_t}}\epsilon_\theta(x_t, t)) + \sigma_t z$，看起来跟 Langevin 没关系。但 Tweedie 恒等式给出 $\epsilon_\theta = -\sqrt{1-\bar\alpha_t}\cdot s_\theta$，代回去化简：$x_{t-1} \approx x_t + c_1(t)\,s_\theta(x_t, t) + c_2(t)\,z$，正好是 noise level $t$ 上的一步 Langevin。Yang Song 2021 的「Score SDE」论文把这件事在连续时间下正式化：DDPM 的离散反向链 = reverse-time SDE 的特定离散，而 reverse-time SDE 与 annealed Langevin 共享同一条<em>Probability Flow ODE</em>。从此 Ho 2020 的 "diffusion model" 和 Song 2019 的 "score-based model" 不再是两个东西。</div>
+
+    <h2>4. 离散化误差与 MH 修正</h2>
+    <p>Langevin SDE 在<em>连续时间</em>下严格收敛到 $p$（Fokker-Planck 证完事），但欧拉离散后有 $O(\delta^2)$ 的 bias——稳态分布会偏移一点点，不再是精确的 $p$。两种处理：</p>
+    <ul>
+      <li><strong>取小 $\delta$</strong>。bias 随 $\delta$ 线性下降，但代价是需要更多步数才能 mixing。实践中 $\delta \in [10^{-5}, 10^{-3}]$，跑 1000–10000 步。这是 score-based diffusion 实际生成图像所用的成本量级——也是为什么 diffusion 推理慢的根本原因（每张图要几百到几千次 score 网络前向）。</li>
+      <li><strong>Metropolis-Hastings 修正</strong>，得到 MALA（Metropolis-Adjusted Langevin Algorithm）。每步先按 Langevin 提议 $x'$，再以接受概率 $\min(1, \frac{p(x')q(x|x')}{p(x)q(x'|x)})$ 决定是否接受。理论上 MH 完全消除离散 bias，稳态严格是 $p$。代价：需要算 $p(x')/p(x)$ 这个比值——而 score-based 模型只学了 $\nabla\log p$、没学 $p$ 本身。所以 score diffusion 实践里通常<strong>不</strong>加 MH，靠小 $\delta$ + annealing 控制误差。</li>
+    </ul>
+
+    <h2>5. 与 DDPM 的精确对应（最重要的统一）</h2>
+    <p>到这里你已经看过 Langevin、annealed Langevin 与扩散模型的「类比」性陈述，但「类比」和「相等」之间隔着一道公式。把对应关系写明白：在 DDPM 的反向单步里，把 $\epsilon_\theta(x_t, t)$ 用 Tweedie 恒等式换成 score $s_\theta(x_t, t) = -\epsilon_\theta(x_t, t)/\sqrt{1-\bar\alpha_t}$，再把 $\alpha_t = 1 - \beta_t$ 在小 $\beta_t$ 极限下展开，反向更新可以化简成 $x_{t-1} = x_t + \beta_t\,s_\theta(x_t, t) + \sqrt{\beta_t}\,z$——这正是 noise level $\sigma_t = \sqrt{1-\bar\alpha_t}$ 上的一步 Langevin（步长 $\delta = 2\beta_t$ 的版本）。整条反向链 $T = 1000$ 步就是 1000 个不同 noise level 上各跑<em>一步</em> Langevin 的串接。</p>
+
+    <p>这个对应不只是「数学上恰巧相等」，而是有深刻物理意义：annealed Langevin 是「在固定 $p_\sigma$ 上跑很多步、再切换到更小 $\sigma$」；DDPM 反向是「每个 $\sigma_t$ 只跑一步、立刻切换」。前者更稳但慢，后者更快但每个 level 的样本不够 mixing——所以 DDPM 通常需要数百到上千 timestep 才能补偿。DDIM、DPM-Solver 等加速器本质上是在这条链上做「跳步」与「高阶离散化」，让 20–50 步就能跑完。这也是为什么理解 Langevin 是理解所有 diffusion 加速器的前提。</p>
+  </section>
+
+  <section class="concept-interact">
+    <p>下方动画里蓝色粒子按 Langevin 在双峰势能面上游走。<strong>不变量</strong>：粒子轨迹访问 mode A 与 mode B 的时间比例，长时间下来会精确等于两个 mode 的概率比例——即使粒子从不停下，<em>访问频率</em>本身就编码了 $p(x)$。</p>
+
+    <svg class="lan-svg" viewBox="0 0 560 280" role="img" aria-label="Langevin 粒子在双峰势能面上的轨迹动画">
+      <g font-family="ui-sans-serif" font-size="11">
+        <path d="M 40 80 Q 120 215 180 215 Q 240 215 280 130 Q 320 50 380 215 Q 440 280 520 90"
+              stroke="var(--module-accent)" stroke-width="2" fill="none"/>
+        <text x="180" y="248" text-anchor="middle" font-size="10" fill="var(--text-muted)">mode A · 高 $p$</text>
+        <text x="380" y="248" text-anchor="middle" font-size="10" fill="var(--text-muted)">mode B · 高 $p$</text>
+        <text x="280" y="115" text-anchor="middle" font-size="10" fill="var(--text-muted)">山脊</text>
+        <circle cx="195" cy="210" r="3" fill="var(--blue-soft)" class="lan-trail-dot" style="animation-delay:0s"/>
+        <circle cx="220" cy="200" r="3" fill="var(--blue-soft)" class="lan-trail-dot" style="animation-delay:1s"/>
+        <circle cx="180" cy="215" r="3" fill="var(--blue-soft)" class="lan-trail-dot" style="animation-delay:2s"/>
+        <circle cx="380" cy="210" r="3" fill="var(--blue-soft)" class="lan-trail-dot" style="animation-delay:3.5s"/>
+        <circle cx="0" cy="0" r="6" fill="var(--blue)" class="lan-anim-dot"/>
+        <text x="280" y="20" text-anchor="middle" font-size="12" fill="var(--text)">粒子从高处释放：drift 滚下 + noise 抖动 + 偶尔翻山</text>
+      </g>
+    </svg>
+
+    <p>动画粒子的运动满足三件事：(1) 大部分时间停在某个山谷底附近——因为 score 在那里指向中心，drift 把它拉回；(2) 即使在山谷底，粒子仍在抖——$\sqrt{\delta}\epsilon$ 这一项永远不为零；(3) 偶尔（概率随 $\delta$ 与山脊高度变化）噪声足够大，粒子被推过山脊到另一侧山谷。这三件事一起，让长时间访问频率严格等于 $p(x)$。换句话说，单条轨迹随时间的<em>遍历平均</em>等于分布的<em>空间平均</em>——这就是遍历定理（ergodic theorem）在 Langevin 上的具体体现，也是为什么我们可以「跑一条长链当一堆样本用」。</p>
+  </section>
+
+  <section class="concept-example">
+    <h2>手算：2D 高斯混合上跑 Langevin</h2>
+    <p>设目标 $p(x) = 0.5\,\mathcal{N}(x; (-2, 0), I) + 0.5\,\mathcal{N}(x; (2, 0), I)$。两个 mode 在 $x_1 = \pm 2$，方差为 $I$。粒子初始位置 $x_0 = (1, 0)$（在右侧 mode 附近但还没到）。</p>
+
+    <p><strong>第 1 步：算 score。</strong>因为 $x_0$ 离右侧高斯 $(2, 0)$ 距离为 1，离左侧 $(-2, 0)$ 距离为 3，右侧高斯密度 $\exp(-1/2) \approx 0.61$，左侧 $\exp(-9/2) \approx 0.011$，右侧权重压倒性主导。近似 $\nabla \log p(x_0) \approx \nabla \log \mathcal{N}(x_0; (2,0), I) = (2,0) - (1,0) = (1, 0)$。</p>
+
+    <p><strong>第 2 步：代入更新式。</strong>取 $\delta = 0.1$，采 $\epsilon_0 = (0.3, -0.2)$：</p>
+    <p>$$ x_1 = (1, 0) + \frac{0.1}{2}(1, 0) + \sqrt{0.1}(0.3, -0.2) $$</p>
+    <p>$$ = (1, 0) + (0.05, 0) + (0.0949, -0.0632) = (1.145, -0.063) $$</p>
+
+    <p><strong>第 3 步：观察 score 与 noise 的相对量级。</strong>drift 贡献 $0.05$，noise 贡献的标准差是 $\sqrt{0.1} \approx 0.316$。<em>noise 比 drift 大 6 倍以上</em>——这不是 bug 而是 feature。每一步看起来主要是随机走，但成千上万步累加下来，drift 的方向偏移会持续指向 mode，而 noise 的方向均匀对消。最终统计意义上 drift 把粒子稳定在 mode 附近、noise 让它探索周围。</p>
+
+    <p><strong>第 4 步：跑 1000 步会怎样。</strong>粒子会主要在 $(2, 0)$ 附近震荡（占用大约 50% 的时间，因为右侧 mode 权重为 0.5）；偶尔（大约每隔几百步）噪声方向恰好向左、累计走过 $x_1 = 0$ 的鞍部，跳到 $(-2, 0)$ 附近，再震荡一段时间。长时间下来两 mode 的访问频率各约 50%——这就是「Langevin 在采样而不是优化」最具体的体现。如果是 SGD，粒子会停在 $(2, 0)$ 永远不动，永远不知道左边还有个 mode。</p>
+
+    <p><strong>第 5 步：看 mixing time 对 $\delta$ 的依赖。</strong>把 $\delta$ 改成 $0.01$（小 10 倍），单步噪声标准差降到 $0.1$，要跨越 $x_1 = 0$ 鞍部需要累计的随机走步数增加 100 倍——粒子卡在右侧 mode 的时间变得极长，1000 步根本翻不过去；只有跑到 $10^5$ 步以上才会看到 mode 交换。反过来，把 $\delta$ 改成 $1.0$（大 10 倍），噪声标准差变成 $1$，单步位移巨大，粒子频繁跨过鞍部，mode 切换变快，但每个 mode 内部的分布变得偏离 $\mathcal{N}((2,0), I)$（离散化 bias 增大）——样本不再准确反映目标。这就是 $\delta$ 选取的两难：太小不 mixing，太大有 bias。annealed Langevin 用「先大 $\sigma$ 让 modes 糊在一起、再小 $\sigma$ 精修」绕开这个两难。</p>
+  </section>
+
+  <section class="concept-pitfalls">
+    <h2>常见误区</h2>
+    <ol>
+      <li><strong>「Langevin 就是加噪声的 SGD」。</strong>反例：SGD 收敛后 $\|\nabla L(x)\| \to 0$、$x$ 停下；Langevin 即便在 mode 中心 $\nabla\log p(x^*) = 0$ 处，$\sqrt{\delta}\epsilon$ 项仍把粒子推开——它永不停下，因为目标是<em>采样</em>不是优化。数值上：在 mode 中心 drift 项贡献 0，单步位移完全由 noise 决定，方差 $\delta\cdot I$，粒子立刻飘走。把 Langevin 跑到「收敛」是误解任务。</li>
+      <li><strong>「步长 $\delta$ 越小越准确」。</strong>反例：取 $\delta = 10^{-8}$，单步 drift $\sim 10^{-8}$、单步噪声 $\sim 10^{-4}$，1000 步累计噪声 $\sim 10^{-2.5}$——粒子几乎不动，更不可能跨越两个 mode 之间的低概率区。在 2D 双峰例子上，$\delta = 10^{-8}$ 跑 $10^4$ 步、最终位置距离起点 $< 0.1$，只采到初始点局部分布。需要的是<em>合适</em>的 $\delta$ + annealing schedule——一味取小是没有 mixing。这是 Langevin 与优化最反直觉的地方：在 SGD 里小学习率换稳定，在 Langevin 里小步长换不到任何东西，反而把采样变成「停在原地的高斯涨落」，离散 bias 是次要问题，mixing 失败才是首要问题。</li>
+      <li><strong>「训完 score 就能直接跑 Langevin 生成图像」。</strong>反例：NCSN paper 实验证明，对 CIFAR-10 直接训 score $s_\theta(x) \approx \nabla\log p_{\text{data}}(x)$，然后从 $\mathcal{N}(0, I)$ 出发跑 vanilla Langevin 1000 步——生成结果是<em>纯噪声</em>，FID > 200。原因：图像分布集中在低维流形上，$\mathcal{N}(0, I)$ 采的初始点都在流形外（流形外的体积占绝对多数），score 估计是垃圾、网络从未见过那种输入；同时即便侥幸落在流形附近，CIFAR 的不同类别 mode（飞机/狗/船）之间的低概率区极宽，vanilla Langevin 的噪声完全不够翻越——粒子卡在初始化附近的虚假吸引子里。必须用 annealed Langevin（10+ 个 noise level，$\sigma_1 \approx 50$ 到 $\sigma_L \approx 0.01$）才 work，这是 Song & Ermon 2019 整篇论文的核心实验贡献，也是 score-based diffusion 之所以是「diffusion」而不是「直接采 score」的根本原因。</li>
+    </ol>
+  </section>
+
+  <section class="concept-seealso">
+    <h2>相关概念</h2>
+    <ul>
+      <li><a href="/video-to-notebook/concepts/score-function/">Score Function</a> · Langevin 更新式里 drift 项的本体，$\nabla\log p$。</li>
+      <li><a href="/video-to-notebook/concepts/score-matching/">Score Matching</a> · 如何在不知道 $Z$ 的情况下学到 $s_\theta \approx \nabla\log p$。</li>
+      <li><a href="/video-to-notebook/concepts/sde-formulation/">SDE Formulation</a> · Langevin 的连续时间母体，以及与 forward/reverse-time SDE 的关系。</li>
+      <li><a href="/video-to-notebook/concepts/probability-flow-ode/">Probability Flow ODE</a> · Langevin 的确定性同伴，把 SDE 的噪声去掉、共享相同边际。</li>
+    </ul>
+  </section>
+
+  <section class="concept-sources">
+    <h2>来源</h2>
+    <ol>
+      <li><a href="https://www.youtube.com/watch?v=zRyD7GQ9RHs&t=4s" target="_blank" rel="noopener">diffusion-principles-vizuara · L5 · Energy Based Models / Score Function · (00:04)</a></li>
+      <li><a href="https://www.youtube.com/watch?v=zRyD7GQ9RHs&t=585s" target="_blank" rel="noopener">diffusion-principles-vizuara · L5 · EBM 能量函数与 score 推导 · (09:45)</a></li>
+      <li><a href="https://www.youtube.com/watch?v=57EFSTxL_5o&t=5s" target="_blank" rel="noopener">diffusion-principles-vizuara · L8 · SDE 框架统一 DDPM/score/EBM 三条线 · (00:05)</a></li>
+      <li><a href="https://www.youtube.com/watch?v=UEJxHpFEb04&t=4s" target="_blank" rel="noopener">cmu-10799 · L4 · Score-based Models — Diffusion &amp; Flow Matching · (00:04)</a></li>
+    </ol>
+  </section>
+</article>
