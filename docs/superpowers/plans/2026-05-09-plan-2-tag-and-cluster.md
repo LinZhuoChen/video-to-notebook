@@ -3083,7 +3083,7 @@ Replace the quickstart section with the expanded version:
 
 ```bash
 # 1. Install
-git clone https://github.com/chenlinzhuo/video-to-notebook.git
+git clone https://github.com/LinZhuoChen/video-to-notebook.git
 cd video-to-notebook
 uv venv && uv pip install -e ".[dev]"
 

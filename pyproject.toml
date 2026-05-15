@@ -51,10 +51,10 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/chenlinzhuo/video-to-notebook"
-Repository = "https://github.com/chenlinzhuo/video-to-notebook"
-Issues = "https://github.com/chenlinzhuo/video-to-notebook/issues"
-Changelog = "https://github.com/chenlinzhuo/video-to-notebook/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/LinZhuoChen/video-to-notebook"
+Repository = "https://github.com/LinZhuoChen/video-to-notebook"
+Issues = "https://github.com/LinZhuoChen/video-to-notebook/issues"
+Changelog = "https://github.com/LinZhuoChen/video-to-notebook/blob/main/CHANGELOG.md"
 
 [project.scripts]
 video-to-notebook = "video_to_notebook.cli:app"

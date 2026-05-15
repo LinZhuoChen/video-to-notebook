@@ -892,13 +892,13 @@ Replace with a complete walkthrough now that the v1 surface is shipped.
 
 > Crawl open-courseware, tag chunks with concept labels via Claude, and render an interactive cross-course concept-anchored static site for self-study.
 
-[![CI](https://github.com/chenlinzhuo/video-to-notebook/actions/workflows/ci.yml/badge.svg)](https://github.com/chenlinzhuo/video-to-notebook/actions/workflows/ci.yml)
+[![CI](https://github.com/LinZhuoChen/video-to-notebook/actions/workflows/ci.yml/badge.svg)](https://github.com/LinZhuoChen/video-to-notebook/actions/workflows/ci.yml)
 
 The killer feature: a **"Compare across courses"** view. Pick any concept (e.g. *Self-Attention*), see how Stanford CS336, GPU MODE, and Vizuara each teach it — side by side, with click-to-seek timestamped video.
 
 ## Demo
 
-Live demo: [chenlinzhuo.github.io/video-to-notebook/](https://chenlinzhuo.github.io/video-to-notebook/) — built from the 5 World-Models × Agents courses in `examples/frontier-notebook/`.
+Live demo: [linzhuochen.github.io/video-to-notebook/](https://linzhuochen.github.io/video-to-notebook/) — built from the 5 World-Models × Agents courses in `examples/frontier-notebook/`.
 
 ## Install
 
@@ -966,7 +966,7 @@ Each subcommand is **idempotent and resumable**. Add a new course → only that 
 Install once:
 
 ```bash
-git clone https://github.com/chenlinzhuo/video-to-notebook.git
+git clone https://github.com/LinZhuoChen/video-to-notebook.git
 bash video-to-notebook/skills/video-to-notebook/scripts/install-locally.sh
 ```
 

@@ -9,7 +9,7 @@ Thanks for your interest! video-to-notebook is a small project, but we welcome c
 ## Development setup
 
 ```bash
-git clone https://github.com/chenlinzhuo/video-to-notebook.git
+git clone https://github.com/LinZhuoChen/video-to-notebook.git
 cd video-to-notebook
 
 # Install with dev dependencies. We use uv but pip works too.

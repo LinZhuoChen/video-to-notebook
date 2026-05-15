@@ -9,20 +9,20 @@
 
 Point it at a few YouTube playlists on the same topic. Your coding agent does the heavy lifting — crawls the videos, tags every transcript chunk against your ontology, clusters them into a clean concept graph, designs a pedagogical chapter order, and writes each chapter + concept page. **No separate Anthropic API key required**: every LLM stage runs in-session through your agent's existing Claude Code or Codex subscription. Pagefind search and bilingual (中文 / English) output ship at the flip of a flag.
 
-[![CI](https://github.com/chenlinzhuo/video-to-notebook/actions/workflows/ci.yml/badge.svg)](https://github.com/chenlinzhuo/video-to-notebook/actions/workflows/ci.yml)
+[![CI](https://github.com/LinZhuoChen/video-to-notebook/actions/workflows/ci.yml/badge.svg)](https://github.com/LinZhuoChen/video-to-notebook/actions/workflows/ci.yml)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Astro](https://img.shields.io/badge/Astro-5-FF5D01?logo=astro&logoColor=white)](https://astro.build/)
 [![Built for Claude Code](https://img.shields.io/badge/built_for-Claude_Code-D97757?logo=anthropic&logoColor=white)](https://claude.com/claude-code)
 [![Built for OpenAI Codex](https://img.shields.io/badge/built_for-OpenAI_Codex-10A37F?logo=openai&logoColor=white)](https://github.com/openai/codex)
 
-[**Live demo**](https://chenlinzhuo.github.io/video-to-notebook/) · [**Quickstart**](#-quickstart) · [**How it works**](#-how-it-works) · [**Use with Claude Code / Codex / any agent**](#-drive-it-from-your-ai-coding-agent) · [**Roadmap**](#-roadmap)
+[**Live demo**](https://linzhuochen.github.io/video-to-notebook/) · [**Quickstart**](#-quickstart) · [**How it works**](#-how-it-works) · [**Use with Claude Code / Codex / any agent**](#-drive-it-from-your-ai-coding-agent) · [**Roadmap**](#-roadmap)
 
 ---
 
 </div>
 
-> 🚧 **Early days — expect rough edges.** `video-to-notebook` is in active development; v2.0.0 is the first public release after the `course-merger` → `video-to-notebook` rename. If you hit a bug, a confusing prompt, an off-target chapter, or a crawler that refuses to play nicely with a real playlist, please [**open an issue**](https://github.com/chenlinzhuo/video-to-notebook/issues/new/choose) with the failing command + a few lines of log — that's by far the fastest way to get it fixed. Feature requests, ontology files for new domains, and crawler adapters for non-YouTube platforms are all welcome too.
+> 🚧 **Early days — expect rough edges.** `video-to-notebook` is in active development; v2.0.0 is the first public release after the `course-merger` → `video-to-notebook` rename. If you hit a bug, a confusing prompt, an off-target chapter, or a crawler that refuses to play nicely with a real playlist, please [**open an issue**](https://github.com/LinZhuoChen/video-to-notebook/issues/new/choose) with the failing command + a few lines of log — that's by far the fastest way to get it fixed. Feature requests, ontology files for new domains, and crawler adapters for non-YouTube platforms are all welcome too.
 
 ## ✨ What you get
 
@@ -216,7 +216,7 @@ Every LLM stage supports a **`--print-prompts` / `--apply-results`** two-phase f
 ### 🟠 Claude Code
 
 ```bash
-git clone https://github.com/chenlinzhuo/video-to-notebook.git
+git clone https://github.com/LinZhuoChen/video-to-notebook.git
 bash video-to-notebook/skills/video-to-notebook/scripts/install-locally.sh
 ```
 
@@ -232,7 +232,7 @@ Full skill manifest at [`skills/video-to-notebook/SKILL.md`](skills/video-to-not
 ### 🔵 OpenAI Codex
 
 ```bash
-git clone https://github.com/chenlinzhuo/video-to-notebook.git
+git clone https://github.com/LinZhuoChen/video-to-notebook.git
 cd my-study-site
 bash video-to-notebook/skills/video-to-notebook/scripts/install-codex.sh
 codex                  # Codex reads AGENTS.md
