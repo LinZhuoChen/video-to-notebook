@@ -2,6 +2,32 @@
 
 All notable changes to video-to-notebook (formerly `course-merger`). Follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/).
 
+## [2.1.0] — 2026-05-18
+
+### Added — Whisper fallback for no-subtitle videos
+
+The `crawl` command can now ingest videos that have no published captions. When yt-dlp's subtitle download returns nothing AND `--whisper` is passed, the pipeline downloads the audio track, runs Whisper locally, and feeds the synthesised VTT back into the existing chunker → DB pipeline. The downstream stages (`tag`, `cluster`, `synthesize`, `explain`, `build`) need no changes.
+
+- **New module** `src/video_to_notebook/crawl/transcribe.py`: `Transcriber` Protocol + `MlxWhisperTranscriber` (Apple Silicon, default on Darwin) + `FasterWhisperTranscriber` (cross-platform CPU/GPU, default elsewhere) + `transcribe_video_to_vtt()` orchestrator. Both backends are lazy-imported — the package imports cleanly without either installed.
+- **New CLI flags** on `video-to-notebook crawl`:
+  - `--whisper / --no-whisper` (default off; opt-in because it can be slow on long lectures)
+  - `--whisper-backend mlx-whisper|faster-whisper` (override the platform default)
+  - `--whisper-model <id>` (defaults: `mlx-community/whisper-small-mlx` on mlx, `small` on faster-whisper; pass `medium` or `large-v3` for accuracy)
+  - `--whisper-lang <iso639>` (skip auto-detect, e.g. `en` / `zh`)
+- **New optional dep group** `[whisper]` in `pyproject.toml`: `mlx-whisper>=0.4.0` (macOS arm64 only, via PEP 508 environment marker) + `faster-whisper>=1.0.0` (everywhere). Install with `pip install 'video-to-notebook[whisper]'`.
+- **`CrawlReport.lectures_whisper`** counter (new field) tracks how many lectures used the fallback. The CLI prints `done: 12 ok, 8 via whisper, 0 no-subs, 0 errors` so operators can audit at a glance.
+- **VTT round-trip discipline** — the Whisper output goes through `segments_to_vtt()` and is re-parsed by the existing `parse_vtt()`. Same code path as published captions; same chunker behaviour downstream.
+- **Status code** for `--whisper setup failed` is exit 5 (distinct from the existing 1/2/3/4 codes).
+
+### Test coverage
+
+20 new unit tests covering: timestamp formatting (edge cases including banker's-rounding, negative clamp), VTT generation (empty cue skip, empty list, round-trip through `parse_vtt`), `download_audio` (success / yt-dlp failure / extension-fallback glob), `build_transcriber` (platform default selection, explicit overrides, unknown backend rejection), and the orchestrator (happy path, download-error → None, silent-transcriber → None). Backend libraries are NOT imported in tests — fakes implement the Protocol.
+
+### Docs
+
+- README: install section gains `pip install 'video-to-notebook[whisper]'` + new "🎤 Crawling videos without subtitles" subsection with a Bilibili example. Roadmap: "No-subtitle video support" moved from Deferred to Shipped.
+- CHANGELOG: this entry.
+
 ## [2.0.0] — 2026-05-15
 
 ### Changed — project renamed to `video-to-notebook` (BREAKING)

@@ -1,6 +1,6 @@
 [project]
 name = "video-to-notebook"
-version = "2.0.0"
+version = "2.1.0"
 description = "Crawl open-courseware video playlists, tag with concepts via Claude / Codex / any agent, and render an interactive cross-course study notebook + concept encyclopedia"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -48,6 +48,13 @@ dev = [
     "pyright>=1.1.370",
     "types-PyYAML>=6.0",
     "pytest-playwright>=0.5.0",
+]
+# Whisper fallback for videos without published subtitles.
+# mlx-whisper is the fast Apple Silicon path; faster-whisper is the cross-platform CPU/GPU fallback.
+# Install with `pip install video-to-notebook[whisper]` and pass `--whisper` to `crawl`.
+whisper = [
+    "mlx-whisper>=0.4.0; sys_platform == 'darwin' and platform_machine == 'arm64'",
+    "faster-whisper>=1.0.0",
 ]
 
 [project.urls]

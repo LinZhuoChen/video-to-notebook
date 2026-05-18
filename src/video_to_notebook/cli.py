@@ -202,6 +202,30 @@ def crawl_cmd(
         "--cookies-from",
         help="Browser to extract cookies from (required for Bilibili).",
     ),
+    whisper: bool = typer.Option(
+        False,
+        "--whisper/--no-whisper",
+        help="Fall back to Whisper transcription when a video has no published "
+             "subtitles. Needs `pip install video-to-notebook[whisper]`.",
+    ),
+    whisper_backend: str | None = typer.Option(
+        None,
+        "--whisper-backend",
+        help="Force a Whisper backend ('mlx-whisper' or 'faster-whisper'). "
+             "Default: mlx-whisper on macOS, faster-whisper elsewhere.",
+    ),
+    whisper_model: str | None = typer.Option(
+        None,
+        "--whisper-model",
+        help="Whisper model id. mlx default: 'mlx-community/whisper-small-mlx'. "
+             "faster-whisper default: 'small'. For long lectures try 'medium' or 'large-v3'.",
+    ),
+    whisper_lang: str | None = typer.Option(
+        None,
+        "--whisper-lang",
+        help="ISO-639 language code hint for Whisper (e.g. 'en', 'zh'). "
+             "Default: auto-detect.",
+    ),
 ) -> None:
     """Crawl a course (single video or playlist) into the local DB."""
     try:
@@ -221,6 +245,20 @@ def crawl_cmd(
 
     course_slug = name or _slug_from_url(url)
 
+    transcriber = None
+    if whisper:
+        from video_to_notebook.crawl.transcribe import build_transcriber
+        try:
+            transcriber = build_transcriber(
+                backend=whisper_backend,
+                model=whisper_model,
+                language=whisper_lang,
+            )
+        except (ValueError, ImportError) as e:
+            typer.echo(f"--whisper setup failed: {e}")
+            raise typer.Exit(code=5) from e
+        typer.echo(f"whisper fallback enabled: backend={transcriber.backend} model={transcriber.model}")
+
     db_path = root / PROJECT_MARKER / "db.sqlite"
     try:
         report: CrawlReport = run_crawl(
@@ -231,6 +269,7 @@ def crawl_cmd(
             course_title=name or course_slug,
             lang_priority=lang or default_lang,
             cookies_from=cookies_from.value if cookies_from else None,
+            transcriber=transcriber,
         )
     except BilibiliCookieError as e:
         typer.echo(f"bilibili cookies missing: {e}")
@@ -239,8 +278,9 @@ def crawl_cmd(
         typer.echo(f"playlist fetch failed: {e}")
         raise typer.Exit(code=4) from e
 
+    whisper_note = f", {report.lectures_whisper} via whisper" if report.lectures_whisper else ""
     typer.echo(
-        f"done: {report.lectures_ok} ok, "
+        f"done: {report.lectures_ok} ok{whisper_note}, "
         f"{report.lectures_no_subs} no-subs, {report.lectures_error} errors "
         f"(course: {report.course_slug})"
     )

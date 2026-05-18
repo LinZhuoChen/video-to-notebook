@@ -1,4 +1,4 @@
-"""Orchestrator: crawler → subtitles → chunker → DB."""
+"""Orchestrator: crawler → subtitles (or Whisper fallback) → chunker → DB."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -9,6 +9,7 @@ from typing import Protocol
 from video_to_notebook.crawl.base import Chunker
 from video_to_notebook.crawl.exceptions import BilibiliCookieError, PlaylistFetchError
 from video_to_notebook.crawl.subtitles import parse_vtt
+from video_to_notebook.crawl.transcribe import Transcriber, transcribe_video_to_vtt
 from video_to_notebook.db.session import connect
 
 
@@ -28,6 +29,7 @@ class CrawlReport:
     lectures_ok: int
     lectures_no_subs: int
     lectures_error: int
+    lectures_whisper: int = 0  # subset of lectures_ok that came from Whisper
 
     @property
     def total(self) -> int:
@@ -44,8 +46,14 @@ def run_crawl(
     lang_priority: list[str],
     cookies_from: str | None,
     target_tokens: int = 500,
+    transcriber: Transcriber | None = None,
 ) -> CrawlReport:
-    """Crawl a course and persist into the DB. Idempotent on (course_slug, lecture.idx)."""
+    """Crawl a course and persist into the DB. Idempotent on (course_slug, lecture.idx).
+
+    If `transcriber` is provided, lectures without published subtitles fall back
+    to audio download + Whisper transcription instead of being recorded as
+    `no_subs`. The CrawlReport's `lectures_whisper` counter tracks how many.
+    """
 
     now = datetime.now(UTC).isoformat()
     entries = crawler.list_playlist(url)
@@ -54,6 +62,7 @@ def run_crawl(
     ok = 0
     no_subs = 0
     error = 0
+    whisper_count = 0
 
     with connect(db_path) as conn:
         course_row = conn.execute(
@@ -101,6 +110,15 @@ def run_crawl(
                 error += 1
                 continue
 
+            from_whisper = False
+            if vtt is None and transcriber is not None:
+                vtt = transcribe_video_to_vtt(
+                    video_url=entry["video_url"],
+                    cookies_from=cookies_from,
+                    transcriber=transcriber,
+                )
+                from_whisper = vtt is not None
+
             if vtt is None:
                 conn.execute(
                     "INSERT INTO lectures (course_id, idx, title, video_url, transcript, status) "
@@ -126,10 +144,13 @@ def run_crawl(
                     (lecture_id, chunk.idx, chunk.start_sec, chunk.end_sec, chunk.text),
                 )
             ok += 1
+            if from_whisper:
+                whisper_count += 1
 
     return CrawlReport(
         course_slug=course_slug,
         lectures_ok=ok,
         lectures_no_subs=no_subs,
         lectures_error=error,
+        lectures_whisper=whisper_count,
     )

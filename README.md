@@ -154,7 +154,25 @@ pip install video-to-notebook
 # 2. External requirements
 brew install node yt-dlp       # Node 20+ for the HTML build; yt-dlp for crawling
 playwright install chromium    # only if running e2e tests
+
+# 3. (Optional) Whisper fallback for videos without published captions
+pip install 'video-to-notebook[whisper]'   # mlx-whisper on macOS + faster-whisper everywhere
 ```
+
+### 🎤 Crawling videos without subtitles
+
+When a video has no published captions, pass `--whisper` to `crawl` and the pipeline downloads the audio, transcribes it locally (`mlx-whisper` on Apple Silicon, `faster-whisper` on Linux/Windows), and feeds the synthesised VTT into the same chunk pipeline. No API key, no network round-trip after the audio download.
+
+```bash
+video-to-notebook crawl "https://www.bilibili.com/video/BV..." \
+  --name my-course \
+  --cookies-from edge \
+  --whisper \
+  --whisper-lang zh        # optional: skip auto-detect, hint Chinese
+# done: 12 ok, 8 via whisper, 0 no-subs, 0 errors
+```
+
+`--whisper-model` overrides the model (`small` default, `medium` / `large-v3` for higher quality at the cost of speed). On a single M2 Pro the small model transcribes about 5× real time; large-v3 is ~1×.
 
 ### Upgrading from `course-merger` (v1.x)?
 
@@ -370,12 +388,11 @@ The build script chains crawl/tag/cluster/build, reads `courses.toml`, and lands
 
 ## 🗺 Roadmap
 
-**Shipped:** v1.0 foundation · v1.1 in-session mode · v1.2 textbook generator · v1.3 concept encyclopedia + design-system polish · v1.4 multi-agent support (Codex + Cursor + Continue alongside Claude Code) · v2.0 project renamed to `video-to-notebook`, source-fidelity + textbook-depth quality discipline, chapter chunk-selection regression fixed, full zh/en i18n on prompts + Astro UI, automatic template overlay-sync on every `build` (see [CHANGELOG.md](CHANGELOG.md)).
+**Shipped:** v1.0 foundation · v1.1 in-session mode · v1.2 textbook generator · v1.3 concept encyclopedia + design-system polish · v1.4 multi-agent support (Codex + Cursor + Continue alongside Claude Code) · v2.0 project renamed to `video-to-notebook`, source-fidelity + textbook-depth quality discipline, chapter chunk-selection regression fixed, full zh/en i18n on prompts + Astro UI, automatic template overlay-sync on every `build` · **v2.1 Whisper fallback** — videos without published captions now transcribe locally via `mlx-whisper` (Apple Silicon) or `faster-whisper` (cross-platform), feeding the synthesised VTT back into the same chunk pipeline (see [CHANGELOG.md](CHANGELOG.md)).
 
 **Deferred:**
 
 - [ ] **Robust Bilibili support** — current crawler is YouTube-first; harden Bilibili playlist parsing, cookie refresh, P-multi (分P) handling, and CC-subtitle vs auto-caption discrimination so a B站 course works as smoothly as a YouTube one.
-- [ ] **No-subtitle video support (Whisper fallback)** — when `yt-dlp` returns no captions, transcribe locally via `mlx-whisper` (Apple Silicon) or Groq Whisper API, then feed the transcript into the same chunk pipeline. Unblocks lectures with auto-captions disabled and Bilibili videos missing CC.
 - [ ] **Live filter on compare view** client-side `?courses=cs336,gpu-mode` selection
 - [ ] **`review` CLI** human-in-the-loop dispatch for `ambiguous` cluster decisions
 - [ ] **Multi-language concept aliasing** dedicated Chinese ↔ English concept name pairs (current i18n covers UI + generated prose, not slug-level aliasing)
