@@ -9,6 +9,8 @@ build/
 # keep the source package — gitignore "build/" would swallow src/video_to_notebook/build/
 !src/video_to_notebook/build/
 !src/video_to_notebook/build/**
+# but DO ignore pycache that lives inside the un-ignored build dir
+src/video_to_notebook/build/__pycache__/
 
 # Node / Astro
 node_modules/
