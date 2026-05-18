@@ -172,7 +172,7 @@ video-to-notebook crawl "https://www.bilibili.com/video/BV..." \
 # done: 12 ok, 8 via whisper, 0 no-subs, 0 errors
 ```
 
-`--whisper-model` overrides the model (`small` default, `medium` / `large-v3` for higher quality at the cost of speed). On a single M2 Pro the small model transcribes about 5× real time; large-v3 is ~1×.
+`--whisper-model` overrides the default. On mlx the default is **`mlx-community/whisper-large-v3-turbo`** — large-v3 distilled, ~800 MB weights, ~2× real-time on M-series. Empirically this is the sweet spot for bilingual lectures: produces Simplified Chinese with natural punctuation (vs. `small` which tends to emit Traditional Chinese and drop all punctuation). For absolute best accuracy on English technical terms, pass `--whisper-model mlx-community/whisper-large-v3-mlx` (~3 GB, ~1× real-time). On faster-whisper the default is `small`; pass `large-v3` for the same quality bump.
 
 ### Upgrading from `course-merger` (v1.x)?
 

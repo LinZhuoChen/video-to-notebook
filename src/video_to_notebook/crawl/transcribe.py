@@ -132,11 +132,17 @@ def _workspace(explicit_dir: Path | None) -> Iterator[Path]:
 
 
 class MlxWhisperTranscriber:
-    """Apple Silicon backend. Lazy-imports mlx_whisper on first transcribe()."""
+    """Apple Silicon backend. Lazy-imports mlx_whisper on first transcribe().
+
+    Default model: `mlx-community/whisper-large-v3-turbo` — large-v3 distilled.
+    ~800 MB weights, ~2× real-time on M-series, quality close to full large-v3.
+    Tested on bilingual zh/en lectures: produces Simplified Chinese with
+    natural punctuation (vs. small which often outputs Traditional + no commas).
+    """
 
     backend = "mlx-whisper"
 
-    def __init__(self, model: str = "mlx-community/whisper-small-mlx", language: str | None = None) -> None:
+    def __init__(self, model: str = "mlx-community/whisper-large-v3-turbo", language: str | None = None) -> None:
         self.model = model
         self.language = language
 
@@ -222,7 +228,7 @@ def build_transcriber(
     chosen = backend or _DEFAULT_BACKEND_BY_PLATFORM.get(sys.platform, "faster-whisper")
     if chosen == "mlx-whisper":
         return MlxWhisperTranscriber(
-            model=model or "mlx-community/whisper-small-mlx",
+            model=model or "mlx-community/whisper-large-v3-turbo",
             language=language,
         )
     if chosen == "faster-whisper":

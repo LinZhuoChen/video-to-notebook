@@ -145,7 +145,7 @@ def test_build_transcriber_returns_mlx_on_darwin():
     with patch("video_to_notebook.crawl.transcribe.sys.platform", "darwin"):
         t = build_transcriber()
     assert t.backend == "mlx-whisper"
-    assert t.model == "mlx-community/whisper-small-mlx"
+    assert t.model == "mlx-community/whisper-large-v3-turbo"
 
 
 def test_build_transcriber_returns_faster_elsewhere():

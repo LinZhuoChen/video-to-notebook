@@ -217,8 +217,10 @@ def crawl_cmd(
     whisper_model: str | None = typer.Option(
         None,
         "--whisper-model",
-        help="Whisper model id. mlx default: 'mlx-community/whisper-small-mlx'. "
-             "faster-whisper default: 'small'. For long lectures try 'medium' or 'large-v3'.",
+        help="Whisper model id. mlx default: 'mlx-community/whisper-large-v3-turbo' "
+             "(~800MB, ~2× real-time, simplified-zh + punctuation). "
+             "faster-whisper default: 'small'. For absolute best accuracy try "
+             "'mlx-community/whisper-large-v3-mlx' on mlx or 'large-v3' on faster-whisper.",
     ),
     whisper_lang: str | None = typer.Option(
         None,
