@@ -51,10 +51,13 @@ dev = [
 ]
 # Whisper fallback for videos without published subtitles.
 # mlx-whisper is the fast Apple Silicon path; faster-whisper is the cross-platform CPU/GPU fallback.
+# httpx[socks] keeps huggingface-hub model downloads working when a SOCKS proxy is in the env
+# (Chrome-Code-style setups, VPN egress, etc.) — otherwise the model fetch raises ImportError.
 # Install with `pip install video-to-notebook[whisper]` and pass `--whisper` to `crawl`.
 whisper = [
     "mlx-whisper>=0.4.0; sys_platform == 'darwin' and platform_machine == 'arm64'",
     "faster-whisper>=1.0.0",
+    "httpx[socks]>=0.27.0",
 ]
 
 [project.urls]
