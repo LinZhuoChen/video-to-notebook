@@ -26,7 +26,32 @@ Point it at a few YouTube playlists on the same topic. Your coding agent does th
 
 ## ✨ What you get
 
-<img width="1672" height="941" alt="image" src="https://github.com/user-attachments/assets/1a0f48b5-6c89-438a-9436-51f7f85ea983" />
+```mermaid
+flowchart TB
+    IN["📥 3+ open-course playlists on the same topic<br/>(YouTube · Bilibili — subs or not)"]:::input
+
+    IN --> PIPE
+
+    subgraph PIPE["🛠 video-to-notebook pipeline"]
+        direction LR
+        S1["📥 crawl<br/><i>yt-dlp + Whisper fallback</i>"]
+        S2["🏷️ tag<br/><i>concept labels per chunk</i>"]
+        S3["🔗 cluster<br/><i>unify ontology</i>"]
+        S4["📐 curriculum<br/><i>pedagogical order</i>"]
+        S5["✍️ synthesize<br/><i>textbook chapters</i>"]
+        S6["💡 explain<br/><i>concept entries</i>"]
+        S7["🎨 build<br/><i>Astro 5 static site</i>"]
+        S1 --> S2 --> S3 --> S4 --> S5 --> S6 --> S7
+    end
+
+    PIPE --> O1["📖 Merged textbook<br/><i>chapters in teaching order</i>"]:::output
+    PIPE --> O2["💡 Concept encyclopedia<br/><i>one rich page per concept</i>"]:::output
+    PIPE --> O3["🔎 Cross-course compare view<br/><i>+ Pagefind full-text search</i>"]:::output
+    PIPE --> O4["🎬 Click-to-seek deep links<br/><i>into source-video timestamps</i>"]:::output
+
+    classDef input fill:#fff4d6,stroke:#b8860b,stroke-width:2px,color:#000
+    classDef output fill:#e6f4ea,stroke:#0b5,stroke-width:2px,color:#000
+```
 
 ## 🧭 Design principles
 
@@ -133,12 +158,47 @@ video-to-notebook serve    # http://localhost:4321
 Total cost for a 5-course corpus: **~$2-4** first run, **$0** on re-runs (idempotent).
 
 ## 🏗 How it works
-<img width="1672" height="941" alt="image" src="https://github.com/user-attachments/assets/40f5e8c0-cc4d-4b42-966a-2908393c2aa2" />
 
+Everything orbits around a **single SQLite file** under `.video-to-notebook/` that every stage reads from and writes to. Stages are independent CLI commands, so you can re-run any one of them without touching the others.
+
+```mermaid
+flowchart LR
+    %% Sources (left)
+    YT(["▶️ YouTube"]):::source
+    BL(["📺 Bilibili"]):::source
+
+    %% Crawl stage
+    YT --> C1["📥 crawl<br/>yt-dlp + subs<br/><i>+ Whisper fallback when no captions</i>"]:::stage
+    BL --> C1
+
+    %% Central store
+    C1 --> DB[("🗄️ SQLite<br/>.video-to-notebook/db.sqlite<br/><br/>courses · lectures · chunks<br/>concepts · chunk_concepts · aliases<br/>curriculum_chapters · concept_explanations")]:::store
+
+    %% LLM stages (API or in-session)
+    DB --> T2["🏷️ tag<br/><i>Claude Haiku</i><br/>or in-session"]:::stage
+    DB --> T3["🔗 cluster<br/><i>MiniLM + Claude Sonnet</i><br/>or in-session"]:::stage
+    DB --> T4["📐 curriculum<br/><i>in-session</i>"]:::stage
+    DB --> T5["✍️ synthesize<br/><i>in-session</i>"]:::stage
+    DB --> T6["💡 explain<br/><i>in-session</i>"]:::stage
+    T2 --> DB
+    T3 --> DB
+    T4 --> DB
+    T5 --> DB
+    T6 --> DB
+
+    %% Build & deploy
+    DB --> B1["🎨 build<br/><i>Astro 5 + Pagefind</i>"]:::stage
+    B1 --> D1{{"📦 dist/<br/>→ GitHub Pages / S3 / Vercel / nginx"}}:::output
+
+    classDef source  fill:#fbe9e7,stroke:#c0392b,stroke-width:1.5px,color:#000
+    classDef stage   fill:#fff4d6,stroke:#b8860b,stroke-width:1.5px,color:#000
+    classDef store   fill:#e0ebff,stroke:#2c6dd6,stroke-width:2px,color:#000
+    classDef output  fill:#e6f4ea,stroke:#0b5,stroke-width:2px,color:#000
+```
 
 Each subcommand is **idempotent and resumable**:
 
-- Add a new course → only that course gets crawled/tagged.
+- Add a new course → only that course gets crawled / tagged.
 - Re-run `cluster` → picks up new proposed tags, doesn't re-process settled ones.
 - `build --incremental` → re-renders only what changed.
 
