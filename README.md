@@ -18,6 +18,8 @@ Point it at a few **YouTube or Bilibili** playlists on the same topic. Your codi
 
 [**Live demo: Diffusion Models 教材**](https://linzhuochen.github.io/video-to-notebook/textbook/) · [**Quickstart**](#-quickstart) · [**How it works**](#-how-it-works) · [**Use with Claude Code / Codex / any agent**](#-drive-it-from-your-ai-coding-agent) · [**Roadmap**](#-roadmap)
 
+**English** · [中文](README.zh-CN.md)
+
 ---
 
 </div>
