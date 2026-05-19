@@ -2,27 +2,36 @@
 import Base from '../../../layouts/Base.astro';
 import ConceptOccurrenceTable from '../../../components/ConceptOccurrenceTable.astro';
 import { getCollection } from 'astro:content';
-import { t } from '../../../i18n';
+import { t, currentLanguage } from '../../../i18n';
 
 export async function getStaticPaths() {
   const concepts = await getCollection('concept');
 
   let manifest: any = { explainers: [] };
   try {
-    const data = await import('../../../content/concept-explainers/manifest.json');
+    const data = currentLanguage === 'en'
+      ? await import('../../../content/concept-explainers/en/manifest.json')
+      : await import('../../../content/concept-explainers/zh/manifest.json');
     manifest = data.default || data;
   } catch (e) {}
   const bySlug = new Map<string, any>(
     (manifest.explainers || []).map((e: any) => [e.slug, e]),
   );
 
-  const fragments = import.meta.glob('../../../content/concept-explainers/*.html', {
+  const zhFragments = import.meta.glob('../../../content/concept-explainers/zh/*.html', {
     query: '?raw', import: 'default', eager: true,
   });
+  const enFragments = import.meta.glob('../../../content/concept-explainers/en/*.html', {
+    query: '?raw', import: 'default', eager: true,
+  });
+  const fragments = currentLanguage === 'en' ? enFragments : zhFragments;
+  const folder = currentLanguage === 'en' ? 'en' : 'zh';
 
   let curriculum: any = { chapters: [] };
   try {
-    const data = await import('../../../content/textbook/curriculum.json');
+    const data = currentLanguage === 'en'
+      ? await import('../../../content/textbook/en/curriculum.json')
+      : await import('../../../content/textbook/zh/curriculum.json');
     curriculum = data.default || data;
   } catch (e) {}
   const moduleOrder: string[] = [];
@@ -43,7 +52,7 @@ export async function getStaticPaths() {
     const meta = bySlug.get(c.slug);
     let html = '';
     if (meta) {
-      const fragKey = `../../../content/concept-explainers/${meta.html_fragment}`;
+      const fragKey = `../../../content/concept-explainers/${folder}/${meta.html_fragment}`;
       html = (fragments[fragKey] as string) || '';
     }
     return {

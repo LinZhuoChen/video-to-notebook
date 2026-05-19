@@ -5,7 +5,9 @@ import { t, currentLanguage } from '../../i18n';
 
 let manifest: any = { explainers: [] };
 try {
-  const data = await import('../../content/concept-explainers/manifest.json');
+  const data = currentLanguage === 'en'
+    ? await import('../../content/concept-explainers/en/manifest.json')
+    : await import('../../content/concept-explainers/zh/manifest.json');
   manifest = data.default || data;
 } catch (e) {
   manifest = { explainers: [] };
@@ -14,7 +16,9 @@ const explainedSlugs = new Set(manifest.explainers.map((e: any) => e.slug));
 
 let curriculum: any = { chapters: [] };
 try {
-  const data = await import('../../content/textbook/curriculum.json');
+  const data = currentLanguage === 'en'
+    ? await import('../../content/textbook/en/curriculum.json')
+    : await import('../../content/textbook/zh/curriculum.json');
   curriculum = data.default || data;
 } catch (e) {}
 

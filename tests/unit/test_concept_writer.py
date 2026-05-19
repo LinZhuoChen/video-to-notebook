@@ -38,7 +38,7 @@ def test_writes_manifest_and_copies_explained_concepts(tmp_path: Path):
 
     write_concept_explainer_assets(db_path=db, state_dir=state, site_dir=site)
 
-    target = site / "src" / "content" / "concept-explainers"
+    target = site / "src" / "content" / "concept-explainers" / "zh"
     manifest = json.loads((target / "manifest.json").read_text(encoding="utf-8"))
     slugs = [e["slug"] for e in manifest["explainers"]]
     assert sorted(slugs) == ["backpropagation", "linear-algebra"]
@@ -55,7 +55,7 @@ def test_idempotent(tmp_path: Path):
     _seed(db, state)
     write_concept_explainer_assets(db_path=db, state_dir=state, site_dir=site)
     write_concept_explainer_assets(db_path=db, state_dir=state, site_dir=site)
-    target = site / "src" / "content" / "concept-explainers"
+    target = site / "src" / "content" / "concept-explainers" / "zh"
     manifest = json.loads((target / "manifest.json").read_text(encoding="utf-8"))
     assert len(manifest["explainers"]) == 2
 
@@ -66,6 +66,6 @@ def test_handles_no_explainers(tmp_path: Path):
     site = tmp_path / "site"
     init_db(db)
     write_concept_explainer_assets(db_path=db, state_dir=state, site_dir=site)
-    target = site / "src" / "content" / "concept-explainers"
+    target = site / "src" / "content" / "concept-explainers" / "zh"
     manifest = json.loads((target / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["explainers"] == []

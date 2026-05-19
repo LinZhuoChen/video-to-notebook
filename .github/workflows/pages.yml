@@ -1,11 +1,13 @@
 name: Deploy demo to GitHub Pages
 
-# v2.0.0: deploys an empty Astro shell — site chrome, navigation, dark mode,
-# KaTeX, Pagefind index of the about page. Chapters and concept pages surface
-# their empty states. To deploy a populated demo, run the pipeline locally
-# (`bash examples/frontier-notebook/build.sh`) and commit the generated
-# `template-site/src/content/textbook/*.html` + curriculum.json + concept
-# explainer manifest + fragments, then push — the workflow will pick them up.
+# v2.2.0: bilingual build — runs Astro twice, once with PUBLIC_LANGUAGE=zh
+# (mounted at /) and once with PUBLIC_LANGUAGE=en (mounted at /en/). The en
+# build is merged into the zh dist as a subdirectory before upload. Header
+# language toggle navigates between sibling deployments.
+#
+# Content lives in template-site/src/content/{textbook,concept-explainers}/<lang>/.
+# If en/ is empty (only en/curriculum.json and en/manifest.json placeholders),
+# the en build still succeeds but shows the empty-state pages.
 
 on:
   push:
@@ -38,13 +40,32 @@ jobs:
         working-directory: template-site
         run: npm ci
 
-      - name: Build Astro site (zh — matches checked-in VAE demo content)
+      - name: Build zh (mounted at /)
         working-directory: template-site
         env:
           PUBLIC_LANGUAGE: zh
           SITE_URL: https://${{ github.repository_owner }}.github.io
           BASE_PATH: /${{ github.event.repository.name }}/
-        run: npm run build
+        run: |
+          npm run build
+          mv dist dist-zh
+
+      - name: Build en (mounted at /en/)
+        working-directory: template-site
+        env:
+          PUBLIC_LANGUAGE: en
+          SITE_URL: https://${{ github.repository_owner }}.github.io
+          BASE_PATH: /${{ github.event.repository.name }}/en/
+        run: |
+          npm run build
+          mv dist dist-en
+
+      - name: Merge dist (zh at /, en at /en/)
+        working-directory: template-site
+        run: |
+          mkdir -p dist-zh/en
+          cp -r dist-en/. dist-zh/en/
+          mv dist-zh dist
 
       - name: Upload pages artifact
         uses: actions/upload-pages-artifact@v3

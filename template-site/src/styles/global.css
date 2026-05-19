@@ -216,7 +216,8 @@ body > header {
   box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
-.theme-toggle {
+.theme-toggle,
+.lang-toggle {
   background: var(--surface);
   border: 1px solid var(--border);
   color: var(--text);
@@ -227,7 +228,14 @@ body > header {
   font-size: 1em;
   transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
 }
-.theme-toggle:hover { border-color: var(--accent); color: var(--accent); }
+.theme-toggle:hover,
+.lang-toggle:hover { border-color: var(--accent); color: var(--accent); }
+.lang-toggle {
+  font-size: 0.78em;
+  font-weight: 600;
+  font-family: var(--font-mono);
+}
+.lang-toggle .lang-toggle-label { line-height: 1; }
 .theme-toggle .icon-light { display: none; }
 .theme-toggle .icon-dark { display: block; }
 html.dark .theme-toggle .icon-light { display: block; }

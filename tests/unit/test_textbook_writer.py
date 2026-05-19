@@ -36,7 +36,8 @@ def test_writes_manifest_and_copies_synthesized_only(tmp_path: Path):
 
     write_textbook_assets(db_path=db, state_dir=state, site_dir=site_dir)
 
-    target = site_dir / "src" / "content" / "textbook"
+    # v2.2: content lives under <lang>/ subdir; default language is zh
+    target = site_dir / "src" / "content" / "textbook" / "zh"
     manifest = target / "curriculum.json"
     assert manifest.is_file()
     data = json.loads(manifest.read_text())
@@ -63,7 +64,7 @@ def test_idempotent(tmp_path: Path):
     write_textbook_assets(db_path=db, state_dir=state, site_dir=site_dir)
     write_textbook_assets(db_path=db, state_dir=state, site_dir=site_dir)
 
-    target = site_dir / "src" / "content" / "textbook"
+    target = site_dir / "src" / "content" / "textbook" / "zh"
     assert (target / "1.html").is_file()
     files = sorted(p.name for p in target.iterdir())
     assert "1.html" in files
@@ -76,6 +77,26 @@ def test_handles_no_chapters(tmp_path: Path):
     site_dir = tmp_path / "site"
     init_db(db)  # no chapters seeded
     write_textbook_assets(db_path=db, state_dir=state, site_dir=site_dir)
-    manifest = site_dir / "src" / "content" / "textbook" / "curriculum.json"
+    manifest = site_dir / "src" / "content" / "textbook" / "zh" / "curriculum.json"
     data = json.loads(manifest.read_text())
     assert data["chapters"] == []
+
+
+def test_respects_build_meta_language(tmp_path: Path):
+    """When build_meta.language='en', content goes to en/ instead of zh/."""
+    db = tmp_path / "db.sqlite"
+    state = tmp_path / ".video-to-notebook"
+    site_dir = tmp_path / "site"
+    _seed(db, state)
+    with connect(db) as conn:
+        conn.execute(
+            "INSERT INTO build_meta (key, value) VALUES ('language', 'en')"
+        )
+
+    write_textbook_assets(db_path=db, state_dir=state, site_dir=site_dir)
+
+    en_target = site_dir / "src" / "content" / "textbook" / "en"
+    zh_target = site_dir / "src" / "content" / "textbook" / "zh"
+    assert (en_target / "curriculum.json").is_file()
+    assert (en_target / "1.html").is_file()
+    assert not zh_target.exists()

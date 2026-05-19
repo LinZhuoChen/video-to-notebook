@@ -7,7 +7,9 @@ import { t, currentLanguage } from '../../i18n';
 export async function getStaticPaths() {
   let chapters: any[] = [];
   try {
-    const data = await import('../../content/textbook/curriculum.json');
+    const data = currentLanguage === 'en'
+      ? await import('../../content/textbook/en/curriculum.json')
+      : await import('../../content/textbook/zh/curriculum.json');
     chapters = (data.default || data).chapters || [];
   } catch (e) {
     return [];
@@ -20,11 +22,14 @@ export async function getStaticPaths() {
   const moduleIdx = (m: string) => (moduleOrder.indexOf(m) % 5) + 1;
 
   const synthesized = chapters.filter((c: any) => c.status === 'synthesized');
-  const fragments = import.meta.glob('../../content/textbook/*.html', { query: '?raw', import: 'default', eager: true });
+  const zhFragments = import.meta.glob('../../content/textbook/zh/*.html', { query: '?raw', import: 'default', eager: true });
+  const enFragments = import.meta.glob('../../content/textbook/en/*.html', { query: '?raw', import: 'default', eager: true });
+  const fragments = currentLanguage === 'en' ? enFragments : zhFragments;
+  const folder = currentLanguage === 'en' ? 'en' : 'zh';
   return synthesized.map((ch: any, idx: number) => {
     const prev = idx > 0 ? synthesized[idx - 1] : null;
     const next = idx < synthesized.length - 1 ? synthesized[idx + 1] : null;
-    const fragKey = `../../content/textbook/${ch.html_fragment}`;
+    const fragKey = `../../content/textbook/${folder}/${ch.html_fragment}`;
     const html = (fragments[fragKey] as string) || '';
     return {
       params: { order: String(ch.order_idx) },

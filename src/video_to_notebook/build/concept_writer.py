@@ -15,14 +15,34 @@ from video_to_notebook.db.session import connect
 MANIFEST_VERSION = "1"
 
 
+def _read_project_language(db_path: Path) -> str:
+    """Read build_meta.language; default to 'zh' for legacy projects."""
+    try:
+        with connect(db_path) as conn:
+            row = conn.execute(
+                "SELECT value FROM build_meta WHERE key='language'"
+            ).fetchone()
+        if row and row[0] in ("zh", "en"):
+            return row[0]
+    except Exception:
+        pass
+    return "zh"
+
+
 def write_concept_explainer_assets(
     *,
     db_path: Path,
     state_dir: Path,
     site_dir: Path,
 ) -> None:
-    """Emit site/src/content/concept-explainers/{manifest.json + <slug>.html}."""
-    target = site_dir / "src" / "content" / "concept-explainers"
+    """Emit site/src/content/concept-explainers/<lang>/{manifest.json + <slug>.html}.
+
+    Builds per-language because the synthesised HTML prose itself is in
+    one language. The Astro site picks zh/ or en/ at build time from
+    PUBLIC_LANGUAGE.
+    """
+    lang = _read_project_language(db_path)
+    target = site_dir / "src" / "content" / "concept-explainers" / lang
     target.mkdir(parents=True, exist_ok=True)
 
     entries: list[dict[str, Any]] = []
