@@ -7,7 +7,7 @@
 
 **Built for Claude Code & OpenAI Codex.** Read open-course videos as one merged notebook — textbook + concept encyclopedia in a single static site.
 
-Point it at a few YouTube playlists on the same topic. Your coding agent does the heavy lifting — crawls the videos, tags every transcript chunk against your ontology, clusters them into a clean concept graph, designs a pedagogical chapter order, and writes each chapter + concept page. **No separate Anthropic API key required**: every LLM stage runs in-session through your agent's existing Claude Code or Codex subscription. Pagefind search and bilingual (中文 / English) output ship at the flip of a flag.
+Point it at a few **YouTube or Bilibili** playlists on the same topic. Your coding agent does the heavy lifting — crawls the videos, tags every transcript chunk against your ontology, clusters them into a clean concept graph, designs a pedagogical chapter order, and writes each chapter + concept page. **No separate Anthropic API key required**: every LLM stage runs in-session through your agent's existing Claude Code or Codex subscription. Pagefind search and bilingual (中文 / English) output ship at the flip of a flag.
 
 [![CI](https://github.com/LinZhuoChen/video-to-notebook/actions/workflows/ci.yml/badge.svg)](https://github.com/LinZhuoChen/video-to-notebook/actions/workflows/ci.yml)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-3776AB?logo=python&logoColor=white)](https://www.python.org/)
@@ -22,12 +22,34 @@ Point it at a few YouTube playlists on the same topic. Your coding agent does th
 
 </div>
 
-> 🚧 **Early days — expect rough edges.** `video-to-notebook` is in active development; v2.0.0 is the first public release after the `course-merger` → `video-to-notebook` rename. If you hit a bug, a confusing prompt, an off-target chapter, or a crawler that refuses to play nicely with a real playlist, please [**open an issue**](https://github.com/LinZhuoChen/video-to-notebook/issues/new/choose) with the failing command + a few lines of log — that's by far the fastest way to get it fixed. Feature requests, ontology files for new domains, and crawler adapters for non-YouTube platforms are all welcome too.
+> 🚧 **Early days — expect rough edges.** `video-to-notebook` is in active development; v2.0.0 is the first public release after the `course-merger` → `video-to-notebook` rename. If you hit a bug, a confusing prompt, an off-target chapter, or a crawler that refuses to play nicely with a real playlist, please [**open an issue**](https://github.com/LinZhuoChen/video-to-notebook/issues/new/choose) with the failing command + a few lines of log — that's by far the fastest way to get it fixed. Feature requests, ontology files for new domains, and crawler adapters for platforms beyond YouTube + Bilibili (Coursera, edX, MIT-OCW, …) are all welcome too.
 
 ## ✨ What you get
 
-<img width="1672" height="941" alt="image" src="https://github.com/user-attachments/assets/24dbc0fb-4a4a-4007-ba9e-0a8b20299a7d" />
-
+<table>
+<tr>
+<td width="50%" valign="top" align="center">
+<a href="https://linzhuochen.github.io/video-to-notebook/textbook/">
+  <img src="assets/screenshots/textbook-toc.png" alt="Textbook table of contents — 21 chapters across 5 modules" />
+</a>
+<sub><b>📖 Textbook TOC</b> — 21 chapters, 5 modules, pedagogical order</sub>
+</td>
+<td width="50%" valign="top" align="center">
+<a href="https://linzhuochen.github.io/video-to-notebook/concepts/">
+  <img src="assets/screenshots/concepts-grid.png" alt="Concept encyclopedia — 33 illustrated concepts" />
+</a>
+<sub><b>💡 Concept encyclopedia</b> — 33 illustrated entries, per-module accent</sub>
+</td>
+</tr>
+<tr>
+<td colspan="2" align="center">
+<a href="https://linzhuochen.github.io/video-to-notebook/textbook/1/">
+  <img src="assets/screenshots/textbook-chapter.png" alt="Chapter reading view with sidebar TOC, TL;DR callout, mini-map, source-clip links" />
+</a>
+<sub><b>📐 Chapter reading view</b> — left sidebar TOC · TL;DR callout · right mini-map · source-clip deep links</sub>
+</td>
+</tr>
+</table>
 
 ## 🧭 Design principles
 
@@ -124,7 +146,13 @@ export ANTHROPIC_API_KEY=sk-ant-...
 mkdir my-study-site && cd my-study-site
 
 video-to-notebook init --language en                                # or `--language zh` (default)
+
+# YouTube playlist
 video-to-notebook crawl "https://www.youtube.com/playlist?list=PLxxx" --name cs336
+
+# Bilibili — single video, season list, or series. Cookies required (see § Bilibili below).
+video-to-notebook crawl "https://www.bilibili.com/video/BVxxx/" --name vizuara-llm --cookies-from chrome
+
 video-to-notebook tag      --ontology examples/ontology-llm.yaml  # ~$0.10/course
 video-to-notebook cluster  --ontology examples/ontology-llm.yaml  # ~$0.30/run
 video-to-notebook build
@@ -436,7 +464,7 @@ The build script chains crawl/tag/cluster/build, reads `courses.toml`, and lands
 
 ## ⚖️ Disclaimer
 
-`video-to-notebook` is a **tool**. The user is responsible for ensuring they have the right to crawl, process, and redistribute any content fed through this pipeline. This includes YouTube Terms of Service governing programmatic content access, the original creator's license on the lecture content, and fair use / transformative use considerations in the user's jurisdiction.
+`video-to-notebook` is a **tool**. The user is responsible for ensuring they have the right to crawl, process, and redistribute any content fed through this pipeline. This includes YouTube / Bilibili Terms of Service governing programmatic content access, the original creator's license on the lecture content, and fair use / transformative use considerations in the user's jurisdiction.
 
 The tool's authors disclaim responsibility for content generated by users. **Personal study use is generally low risk. Public redistribution or commercial use of synthesized content may not be.** Consult the source materials' licenses before going beyond personal use.
 
@@ -455,6 +483,6 @@ See [CONTRIBUTING.md](CONTRIBUTING.md). PRs welcome — particularly new crawler
 Made with 🤖 + ☕ by [chenlinzhuo](https://github.com/chenlinzhuo).
 Built atop [Claude Code](https://claude.com/claude-code), [Astro](https://astro.build/), [yt-dlp](https://github.com/yt-dlp/yt-dlp), [Pagefind](https://pagefind.app/), [KaTeX](https://katex.org/).
 
-If `video-to-notebook` saved you a weekend of YouTube binging, give it a ⭐ on GitHub.
+If `video-to-notebook` saved you a weekend of YouTube / Bilibili binging, give it a ⭐ on GitHub.
 
 </div>
