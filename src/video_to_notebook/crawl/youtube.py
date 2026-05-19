@@ -7,6 +7,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
+from video_to_notebook.crawl.base import yt_dlp_cookie_args
 from video_to_notebook.crawl.exceptions import PlaylistFetchError
 
 
@@ -18,9 +19,14 @@ class YouTubeCrawler:
 
     # ---- playlist enumeration -------------------------------------------------
 
-    def list_playlist(self, url: str) -> list[dict]:
-        cmd = [
-            "yt-dlp",
+    def list_playlist(
+        self,
+        url: str,
+        cookies_from: str | None = None,
+        cookies_file: Path | None = None,
+    ) -> list[dict]:
+        cmd = ["yt-dlp", *yt_dlp_cookie_args(cookies_from, cookies_file)]
+        cmd += [
             "--flat-playlist",
             "--no-download",
             "--print",
@@ -61,15 +67,14 @@ class YouTubeCrawler:
         video_url: str,
         lang_priority: list[str],
         cookies_from: str | None,
+        cookies_file: Path | None = None,
     ) -> str | None:
         """Try `--write-subs` then `--write-auto-subs`. Return raw VTT or None."""
         for write_flag in ("--write-subs", "--write-auto-subs"):
             for lang in lang_priority:
                 with self._workspace() as work:
                     prefix = work / "sub"
-                    cmd = ["yt-dlp"]
-                    if cookies_from:
-                        cmd += ["--cookies-from-browser", cookies_from]
+                    cmd = ["yt-dlp", *yt_dlp_cookie_args(cookies_from, cookies_file)]
                     cmd += [
                         write_flag,
                         "--skip-download",

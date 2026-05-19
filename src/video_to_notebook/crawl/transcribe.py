@@ -82,15 +82,16 @@ def download_audio(
     video_url: str,
     *,
     cookies_from: str | None,
+    cookies_file: Path | None = None,
     work_dir: Path,
     audio_format: str = "m4a",
     timeout: int = 600,
 ) -> Path:
     """yt-dlp --extract-audio. Returns the path to the downloaded audio file."""
+    from video_to_notebook.crawl.base import yt_dlp_cookie_args
+
     out_template = work_dir / "audio.%(ext)s"
-    cmd = ["yt-dlp"]
-    if cookies_from:
-        cmd += ["--cookies-from-browser", cookies_from]
+    cmd = ["yt-dlp", *yt_dlp_cookie_args(cookies_from, cookies_file)]
     cmd += [
         "--extract-audio",
         "--audio-format", audio_format,
@@ -245,6 +246,7 @@ def transcribe_video_to_vtt(
     *,
     video_url: str,
     cookies_from: str | None,
+    cookies_file: Path | None = None,
     transcriber: Transcriber,
     work_dir: Path | None = None,
 ) -> str | None:
@@ -252,7 +254,10 @@ def transcribe_video_to_vtt(
     try:
         with _workspace(work_dir) as work:
             audio_path = download_audio(
-                video_url, cookies_from=cookies_from, work_dir=work
+                video_url,
+                cookies_from=cookies_from,
+                cookies_file=cookies_file,
+                work_dir=work,
             )
             segments = transcriber.transcribe(audio_path)
             if not segments:

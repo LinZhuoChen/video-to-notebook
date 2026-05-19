@@ -16,10 +16,19 @@ from video_to_notebook.db.session import connect
 class _CrawlerLike(Protocol):
     platform: str
 
-    def list_playlist(self, url: str) -> list[dict]: ...
+    def list_playlist(
+        self,
+        url: str,
+        cookies_from: str | None = None,
+        cookies_file: Path | None = None,
+    ) -> list[dict]: ...
 
     def download_subtitle_vtt(
-        self, video_url: str, lang_priority: list[str], cookies_from: str | None
+        self,
+        video_url: str,
+        lang_priority: list[str],
+        cookies_from: str | None,
+        cookies_file: Path | None = None,
     ) -> str | None: ...
 
 
@@ -45,6 +54,7 @@ def run_crawl(
     course_title: str,
     lang_priority: list[str],
     cookies_from: str | None,
+    cookies_file: Path | None = None,
     target_tokens: int = 500,
     transcriber: Transcriber | None = None,
 ) -> CrawlReport:
@@ -56,7 +66,7 @@ def run_crawl(
     """
 
     now = datetime.now(UTC).isoformat()
-    entries = crawler.list_playlist(url)
+    entries = crawler.list_playlist(url, cookies_from=cookies_from, cookies_file=cookies_file)
     chunker = Chunker(target_tokens=target_tokens)
 
     ok = 0
@@ -95,7 +105,10 @@ def run_crawl(
 
             try:
                 vtt = crawler.download_subtitle_vtt(
-                    entry["video_url"], lang_priority, cookies_from
+                    entry["video_url"],
+                    lang_priority,
+                    cookies_from,
+                    cookies_file=cookies_file,
                 )
             except BilibiliCookieError:
                 raise
@@ -115,6 +128,7 @@ def run_crawl(
                 vtt = transcribe_video_to_vtt(
                     video_url=entry["video_url"],
                     cookies_from=cookies_from,
+                    cookies_file=cookies_file,
                     transcriber=transcriber,
                 )
                 from_whisper = vtt is not None

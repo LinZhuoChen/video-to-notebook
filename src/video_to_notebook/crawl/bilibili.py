@@ -8,6 +8,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
+from video_to_notebook.crawl.base import yt_dlp_cookie_args
 from video_to_notebook.crawl.exceptions import BilibiliCookieError, PlaylistFetchError
 
 __all__ = ["BilibiliCookieError", "BilibiliCrawler", "PlaylistFetchError"]
@@ -55,9 +56,14 @@ class BilibiliCrawler:
     def __init__(self, _work_dir: Path | None = None) -> None:
         self._work_dir = _work_dir
 
-    def list_playlist(self, url: str) -> list[dict]:
-        cmd = [
-            "yt-dlp",
+    def list_playlist(
+        self,
+        url: str,
+        cookies_from: str | None = None,
+        cookies_file: Path | None = None,
+    ) -> list[dict]:
+        cmd = ["yt-dlp", *yt_dlp_cookie_args(cookies_from, cookies_file)]
+        cmd += [
             "--flat-playlist",
             "--no-download",
             "--print",
@@ -95,18 +101,19 @@ class BilibiliCrawler:
         video_url: str,
         lang_priority: list[str],
         cookies_from: str | None,
+        cookies_file: Path | None = None,
     ) -> str | None:
-        if not cookies_from:
+        if not cookies_from and cookies_file is None:
             raise BilibiliCookieError(
-                "Bilibili requires a logged-in browser. Pass --cookies-from edge|chrome|firefox."
+                "Bilibili requires authentication. Pass --cookies-from edge|chrome|firefox "
+                "or --cookies-file path/to/cookies.txt (exported from a browser extension)."
             )
 
         for lang in lang_priority:
             with self._workspace() as work:
                 prefix = work / "sub"
-                cmd = [
-                    "yt-dlp",
-                    "--cookies-from-browser", cookies_from,
+                cmd = ["yt-dlp", *yt_dlp_cookie_args(cookies_from, cookies_file)]
+                cmd += [
                     "--write-subs",
                     "--skip-download",
                     "--sub-format", "vtt",

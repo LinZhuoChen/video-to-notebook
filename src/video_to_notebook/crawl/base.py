@@ -2,9 +2,29 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Protocol
 
 from video_to_notebook.crawl.subtitles import Cue
+
+
+def yt_dlp_cookie_args(
+    cookies_from: str | None,
+    cookies_file: Path | None = None,
+) -> list[str]:
+    """Build the yt-dlp argv slice for cookie sourcing.
+
+    `cookies_file` wins if both are given — a Netscape-format cookies.txt
+    exported from a browser extension is the most portable option and
+    sidesteps macOS Keychain restrictions that break `--cookies-from-browser
+    chrome` on stock setups (where yt-dlp can't decrypt v10-encrypted
+    SESSDATA cookies without an interactive Keychain prompt).
+    """
+    if cookies_file is not None:
+        return ["--cookies", str(cookies_file)]
+    if cookies_from:
+        return ["--cookies-from-browser", cookies_from]
+    return []
 
 
 @dataclass(frozen=True, slots=True)
@@ -78,12 +98,21 @@ class Crawler(Protocol):
 
     platform: str  # "youtube" | "bilibili"
 
-    def list_playlist(self, url: str) -> list[dict]:
+    def list_playlist(
+        self,
+        url: str,
+        cookies_from: str | None = None,
+        cookies_file: Path | None = None,
+    ) -> list[dict]:
         """Return a list of {idx, title, video_url} for each entry."""
         ...
 
     def download_subtitle_vtt(
-        self, video_url: str, lang_priority: list[str], cookies_from: str | None
+        self,
+        video_url: str,
+        lang_priority: list[str],
+        cookies_from: str | None,
+        cookies_file: Path | None = None,
     ) -> str | None:
         """Return the raw VTT text, or None if no subs are available."""
         ...

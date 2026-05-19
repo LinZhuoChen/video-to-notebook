@@ -200,7 +200,19 @@ def crawl_cmd(
     cookies_from: CookieBrowser | None = typer.Option(
         None,
         "--cookies-from",
-        help="Browser to extract cookies from (required for Bilibili).",
+        help="Browser to extract cookies from (one of edge/chrome/firefox/safari/brave/opera). "
+             "On macOS, Chrome v10-encrypted cookies need Keychain access; if --cookies-from-browser "
+             "chrome silently fails, fall back to --cookies-file.",
+    ),
+    cookies_file: Path | None = typer.Option(
+        None,
+        "--cookies-file",
+        help="Path to a Netscape-format cookies.txt (export from a browser extension like "
+             "'Get cookies.txt LOCALLY'). Most portable cookie source — works around macOS "
+             "Keychain restrictions and bilibili anti-scraping that breaks --cookies-from-browser. "
+             "Wins over --cookies-from when both are passed.",
+        exists=True,
+        dir_okay=False,
     ),
     whisper: bool = typer.Option(
         False,
@@ -271,6 +283,7 @@ def crawl_cmd(
             course_title=name or course_slug,
             lang_priority=lang or default_lang,
             cookies_from=cookies_from.value if cookies_from else None,
+            cookies_file=cookies_file,
             transcriber=transcriber,
         )
     except BilibiliCookieError as e:
