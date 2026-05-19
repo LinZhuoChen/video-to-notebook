@@ -13,6 +13,12 @@ from video_to_notebook.crawl.exceptions import BilibiliCookieError, PlaylistFetc
 __all__ = ["BilibiliCookieError", "BilibiliCrawler", "PlaylistFetchError"]
 
 _P_PARAM_RE = re.compile(r"\?p=\d+")
+_BV_ID_RE = re.compile(r"^BV[A-Za-z0-9]{8,16}$")
+# Multi-part single-video URLs look like  https://www.bilibili.com/video/BVxxx/
+# (each ?p=N is an episode WITHIN one BV). Anything else (space.bilibili.com,
+# /list/, /season/, /favlist/, search results, ...) is a list-of-videos where
+# each entry has its own distinct BV id.
+_MULTIPART_URL_RE = re.compile(r"bilibili\.com/video/BV[A-Za-z0-9]+/?")
 
 
 def _ep_url(base_url: str, idx: int) -> str:
@@ -21,6 +27,26 @@ def _ep_url(base_url: str, idx: int) -> str:
         return _P_PARAM_RE.sub(f"?p={idx}", base_url)
     sep = "&" if "?" in base_url else "?"
     return f"{base_url}{sep}p={idx}"
+
+
+def _entry_url(playlist_url: str, video_id: str, idx: int) -> str:
+    """Resolve a per-episode video URL from a yt-dlp flat-playlist entry.
+
+    Two cases — we distinguish by looking at the playlist URL shape:
+    - `bilibili.com/video/BVxxx/` is a multi-part single video; entries share
+      the same BV ID and the episode is selected via `?p=N` injected into
+      the same URL.
+    - Anything else (space pages, season/series lists, fav lists, search
+      results) is a list-of-videos where each entry has its own distinct BV
+      ID. `?p=N` on those is meaningless, so we hit the canonical per-video
+      page `https://www.bilibili.com/video/<BV>/` directly.
+    """
+    if _MULTIPART_URL_RE.search(playlist_url):
+        return _ep_url(playlist_url, idx)
+    if _BV_ID_RE.match(video_id):
+        return f"https://www.bilibili.com/video/{video_id}/"
+    # Last-resort fallback — keep legacy behaviour rather than 404.
+    return _ep_url(playlist_url, idx)
 
 
 class BilibiliCrawler:
@@ -59,7 +85,7 @@ class BilibiliCrawler:
                     "idx": idx,
                     "video_id": video_id.strip(),
                     "title": title.strip(),
-                    "video_url": _ep_url(url, idx),
+                    "video_url": _entry_url(url, video_id.strip(), idx),
                 }
             )
         return entries
