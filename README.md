@@ -174,6 +174,32 @@ video-to-notebook crawl "https://www.bilibili.com/video/BV..." \
 
 `--whisper-model` overrides the default. On mlx the default is **`mlx-community/whisper-large-v3-turbo`** — large-v3 distilled, ~800 MB weights, ~2× real-time on M-series. Empirically this is the sweet spot for bilingual lectures: produces Simplified Chinese with natural punctuation (vs. `small` which tends to emit Traditional Chinese and drop all punctuation). For absolute best accuracy on English technical terms, pass `--whisper-model mlx-community/whisper-large-v3-mlx` (~3 GB, ~1× real-time). On faster-whisper the default is `small`; pass `large-v3` for the same quality bump.
 
+### 📺 Bilibili: season playlists & cookie auth
+
+The Bilibili crawler accepts three URL shapes, all of them properly enumerated by `crawl`:
+
+| URL shape | Example | Behaviour |
+|---|---|---|
+| Single video (multi-part) | `https://www.bilibili.com/video/BVxxx/` | Each `?p=N` becomes one lecture |
+| Space season list | `https://space.bilibili.com/<uid>/lists/<id>?type=season` | Each entry is a separate BV; resolves to its own canonical video page |
+| Series / fav list | `https://space.bilibili.com/<uid>/channel/seriesdetail?sid=<id>` | Same as season |
+
+**Authentication**: Bilibili requires logged-in cookies for both playlist enumeration and audio download. Two options:
+
+```bash
+# A) Read cookies from a browser session (simplest if it works)
+video-to-notebook crawl "<bilibili-url>" --name <slug> --cookies-from chrome --whisper
+
+# B) Use a manually-exported cookies.txt (most portable — works around
+#    macOS Keychain blocking yt-dlp from decrypting Chrome v10 cookies,
+#    and survives bilibili's aggressive anti-scraping that breaks
+#    unauthenticated requests with HTTP 412)
+video-to-notebook crawl "<bilibili-url>" --name <slug> \
+    --cookies-file ~/path/to/bilibili-cookies.txt --whisper
+```
+
+For option B, install a Chrome extension like **"Get cookies.txt LOCALLY"**, navigate to `bilibili.com` while logged in, export Netscape-format cookies. Save **outside** `~/Downloads`, `~/Desktop`, `~/Documents` (those are TCC-protected on macOS and yt-dlp can't read them) — `~/note/`, `~/code/`, or any subfolder of `~/Documents/` (not `~/Documents/` itself) all work.
+
 ### Upgrading from `course-merger` (v1.x)?
 
 In **v2.0.0** the project was renamed from `course-merger` to `video-to-notebook`. Existing projects migrate in three commands — no re-crawl, no re-tag, the SQLite schema is unchanged:
@@ -388,11 +414,9 @@ The build script chains crawl/tag/cluster/build, reads `courses.toml`, and lands
 
 ## 🗺 Roadmap
 
-**Shipped:** v1.0 foundation · v1.1 in-session mode · v1.2 textbook generator · v1.3 concept encyclopedia + design-system polish · v1.4 multi-agent support (Codex + Cursor + Continue alongside Claude Code) · v2.0 project renamed to `video-to-notebook`, source-fidelity + textbook-depth quality discipline, chapter chunk-selection regression fixed, full zh/en i18n on prompts + Astro UI, automatic template overlay-sync on every `build` · **v2.1 Whisper fallback** — videos without published captions now transcribe locally via `mlx-whisper` (Apple Silicon) or `faster-whisper` (cross-platform), feeding the synthesised VTT back into the same chunk pipeline (see [CHANGELOG.md](CHANGELOG.md)).
+**Shipped:** v1.0 foundation · v1.1 in-session mode · v1.2 textbook generator · v1.3 concept encyclopedia + design-system polish · v1.4 multi-agent support (Codex + Cursor + Continue alongside Claude Code) · v2.0 project renamed to `video-to-notebook`, source-fidelity + textbook-depth quality discipline, chapter chunk-selection regression fixed, full zh/en i18n on prompts + Astro UI, automatic template overlay-sync on every `build` · v2.1 Whisper fallback — videos without published captions transcribe locally via `mlx-whisper` (Apple Silicon) or `faster-whisper` (cross-platform), feeding the synthesised VTT back into the same chunk pipeline · **v2.1.1 robust Bilibili** — season / list / series URLs now resolve to per-BV canonical pages (fixed silent dedup bug where every entry got the same audio); new `--cookies-file <path>` flag for Netscape-format cookies.txt, working around macOS Keychain blocking and bilibili's 412 anti-scraping; tested end-to-end on a real 14-video 8-hour B站 course (see [CHANGELOG.md](CHANGELOG.md)).
 
 **Deferred:**
-
-- [ ] **Robust Bilibili support** — current crawler is YouTube-first; harden Bilibili playlist parsing, cookie refresh, P-multi (分P) handling, and CC-subtitle vs auto-caption discrimination so a B站 course works as smoothly as a YouTube one.
 - [ ] **Live filter on compare view** client-side `?courses=cs336,gpu-mode` selection
 - [ ] **`review` CLI** human-in-the-loop dispatch for `ambiguous` cluster decisions
 - [ ] **Multi-language concept aliasing** dedicated Chinese ↔ English concept name pairs (current i18n covers UI + generated prose, not slug-level aliasing)

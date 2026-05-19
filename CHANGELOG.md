@@ -2,6 +2,36 @@
 
 All notable changes to video-to-notebook (formerly `course-merger`). Follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/).
 
+## [2.1.1] — 2026-05-19
+
+### Fixed — Bilibili season URLs were silently downloading the same video N times
+
+`BilibiliCrawler.list_playlist` always emitted `<playlist_url>?p=N` as the per-entry `video_url`, regardless of URL shape. On `space.bilibili.com/<uid>/lists/<id>?type=season` (and similar list / series / favlist pages) the entries are DISTINCT videos with their own BV ids, NOT parts of a single multi-part video — yt-dlp silently fell back to the default video and inserted N duplicate transcript rows. Hit during real-world end-to-end testing on a 14-video 楚国刮大风 AI 第三季 course: all 13 lectures landed with identical 8855-char transcripts.
+
+New `_entry_url(playlist_url, video_id, idx)` helper distinguishes by URL shape:
+- `bilibili.com/video/BV…/` (multi-part single video) → keep legacy `?p=N`
+- Anything else (`space.bilibili.com`, `/list/`, `/season/`, `/favlist/`, search) → emit `https://www.bilibili.com/video/<BV>/`
+
+New test `test_list_playlist_season_yields_canonical_per_bv_urls` covers the season case with three distinct BV ids; the existing multi-part test still passes.
+
+### Added — `--cookies-file <path>` flag for portable Netscape-format auth
+
+macOS Chrome stores SESSDATA v10-encrypted in Keychain; `--cookies-from-browser chrome` routinely fails silently on stock setups when TCC denies the `security` daemon's `find-generic-password` call. Compounded by bilibili tightening anti-scraping (every URL returns HTTP 412 unauthenticated, even single-video pages), `--cookies-from-browser` becomes a hard block. Workaround: export cookies via a browser extension and pass the file path directly.
+
+```bash
+video-to-notebook crawl <url> --name <slug> \
+    --cookies-file ~/path/to/bilibili-cookies.txt --whisper
+```
+
+- New `yt_dlp_cookie_args(cookies_from, cookies_file)` helper in `crawl/base.py`; `cookies_file` wins when both are passed.
+- `list_playlist`, `download_subtitle_vtt`, `download_audio`, `transcribe_video_to_vtt` all gain `cookies_file: Path | None = None`. `bilibili.list_playlist` now also threads cookies through — previously it called yt-dlp unauthenticated, which bilibili now rejects.
+- `BilibiliCookieError` message updated to mention `--cookies-file` as an alternative.
+- CLI: `--cookies-file <path>` Typer option with `exists=True, dir_okay=False` validation. Mutually-exclusive by precedence (file wins).
+
+### Docs
+
+- README: new "📺 Bilibili: season playlists & cookie auth" subsection documents URL shapes + auth options + macOS TCC quirks (don't put the cookies.txt in `~/Downloads`, `~/Desktop`, or `~/Documents` root). Roadmap: "Robust Bilibili support" moved from Deferred to Shipped.
+
 ## [2.1.0] — 2026-05-18
 
 ### Added — Whisper fallback for no-subtitle videos
