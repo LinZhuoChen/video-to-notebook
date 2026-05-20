@@ -116,7 +116,14 @@ class BilibiliCrawler:
                 cmd += [
                     "--write-subs",
                     "--skip-download",
-                    "--sub-format", "vtt",
+                    # Bilibili's AI-generated subtitles (ai-zh / ai-en) are SRT
+                    # only — yt-dlp's `--sub-format vtt` would silently fall
+                    # back to "use SRT" and the file would land as `*.srt`,
+                    # bypassing the `*.vtt` glob below. `--convert-subs vtt`
+                    # tells the post-processor to download whatever format is
+                    # available and convert it in-place to VTT, so the glob
+                    # always matches.
+                    "--convert-subs", "vtt",
                     "--sub-lang", lang,
                     "--no-playlist",
                     "-o", str(prefix),

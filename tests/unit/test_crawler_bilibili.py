@@ -103,3 +103,46 @@ def test_list_playlist_raises_on_nonzero_returncode():
     fake_run = _fake_completed(stderr="ERROR: BVxxx not found", returncode=1)
     with patch("subprocess.run", return_value=fake_run), pytest.raises(PlaylistFetchError):
         BilibiliCrawler().list_playlist("https://www.bilibili.com/video/BVxxx/")
+
+
+def test_download_subtitle_uses_convert_subs_for_srt_only_languages(tmp_path: Path):
+    """Regression: Bilibili's ai-zh / ai-en subtitles are SRT-only. The previous
+    invocation passed ``--sub-format vtt`` which yt-dlp silently downgrades to
+    ``use SRT`` (printing 'No subtitle format found matching "vtt"'), landing
+    the file as ``sub.ai-zh.srt``. The crawler's ``work.glob('sub*.vtt')``
+    misses it → every Bilibili video silently flips to ``no_subs`` status.
+
+    Fix: use ``--convert-subs vtt`` so yt-dlp downloads whatever format is
+    available and runs the SubtitlesConvertor post-processor to produce VTT
+    in place. This test pins the yt-dlp invocation so anyone refactoring it
+    can't accidentally reintroduce the bug.
+    """
+    crawler = BilibiliCrawler(_work_dir=tmp_path)
+
+    captured_cmd: list[list[str]] = []
+
+    def fake_run(cmd, *args, **kwargs):
+        captured_cmd.append(list(cmd))
+        # Simulate yt-dlp converting the downloaded SRT to VTT in-place.
+        (tmp_path / "sub.ai-zh.vtt").write_text("WEBVTT\n\nfake zh")
+        return _fake_completed()
+
+    with patch("subprocess.run", side_effect=fake_run):
+        result = crawler.download_subtitle_vtt(
+            "https://www.bilibili.com/video/BVxxx/",
+            lang_priority=["ai-zh"],
+            cookies_from="edge",
+        )
+
+    assert result == "WEBVTT\n\nfake zh"
+    cmd = captured_cmd[0]
+    assert "--convert-subs" in cmd, (
+        f"yt-dlp must use --convert-subs vtt (not --sub-format vtt) "
+        f"so SRT-only ai-zh subtitles still land as VTT. Got: {cmd}"
+    )
+    assert "vtt" in cmd[cmd.index("--convert-subs") + 1]
+    # And specifically NOT the buggy old flag.
+    assert "--sub-format" not in cmd, (
+        f"Found --sub-format in yt-dlp args; this is the pre-fix code path "
+        f"that silently dropped Bilibili's ai-zh subtitles. Got: {cmd}"
+    )
