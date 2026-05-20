@@ -1,0 +1,643 @@
+<style>
+  .vae-ch { line-height: 1.7; }
+  .vae-ch svg { display: block; margin: 1.2rem auto; max-width: 100%; height: auto; }
+  .vae-ch .clip-frame { max-width: 720px; margin: 1.4rem auto; }
+  .vae-ch .clip-frame iframe { width: 100%; aspect-ratio: 16/9; border: 0; border-radius: 6px; }
+  .vae-ch .clip-frame figcaption { color: var(--text-muted); font-size: 0.85rem; margin-top: 0.4rem; text-align: center; }
+  .vae-ch .tldr { background: var(--surface-soft); border-left: 4px solid var(--module-accent); padding: 1rem 1.2rem; border-radius: 0 6px 6px 0; margin: 1.4rem 0; }
+  .vae-ch .tldr h2 { margin-top: 0; font-size: 1.05rem; }
+  .vae-ch .callout { padding: 0.7rem 1rem; margin: 1rem 0; border-radius: 0 6px 6px 0; }
+  .vae-ch .callout-info { background: #eef6fc; border-left: 4px solid #2b80c4; }
+  .vae-ch .callout-note { background: #f3f0fa; border-left: 4px solid #6f4dd0; }
+  .vae-ch .callout-warning { background: #fff6e0; border-left: 4px solid #d4a017; }
+  .vae-ch .callout-tip { background: #e8f5e9; border-left: 4px solid #0b5; }
+  .vae-ch .callout-quote, .vae-ch .source-quote { background: var(--surface-soft); border-left: 3px solid var(--border-strong); padding: 0.5rem 1rem; margin: 0.8rem 0; font-style: italic; color: var(--text-muted); }
+  .vae-ch .my-addition { background: #fff7d6; border-left: 4px solid #b8860b; padding: 0.7rem 1rem; margin: 1rem 0; border-radius: 0 6px 6px 0; }
+  .vae-ch pre { background: #1f1f1f; color: #f6f4ee; padding: 1rem; border-radius: 6px; font-size: 0.86rem; line-height: 1.55; overflow-x: auto; }
+  .vae-ch code:not(pre code) { background: var(--surface-soft); padding: 0.1rem 0.35rem; border-radius: 3px; font-size: 0.9em; }
+  .vae-ch h2 { border-bottom: 1px solid var(--border); padding-bottom: 0.3rem; margin-top: 2.4rem; }
+  .vae-ch h3 { color: var(--module-accent); margin-top: 1.6rem; }
+  .vae-ch .deriv-step { margin: 0.8rem 0; padding: 0.6rem 0.8rem; background: var(--surface-soft); border-radius: 4px; }
+  .vae-ch .deriv-step strong { color: var(--module-accent); }
+  @keyframes vae-pulse { 0%, 100% { r: 6; } 50% { r: 9; } }
+  .vae-ch .z-dot { animation: vae-pulse 2.4s ease-in-out infinite; }
+</style>
+
+<article class="vae-ch">
+
+<h1>2. VAE: Compressing Data into a Latent Space</h1>
+
+<p style="font-size:0.95rem; color:var(--text-muted);">Primary source: Vizuara <em>Principles of Diffusion Models</em> Lecture 2 (instructor: Dr. Raj Dandekar); secondary: CMU 10-799 Lecture 1.</p>
+
+<div class="tldr">
+  <h2>📌 TL;DR</h2>
+  <p><strong>VAE = Autoencoder + a probability viewpoint + variational inference.</strong> It upgrades the "compress-then-reconstruct" bottleneck from a single <em>point</em> to a <em>distribution</em> $\mathcal{N}(\mu, \sigma^2)$. The objective is to maximise the data log-likelihood $\log p(x)$. But $\log p(x) = \log \int p(x|z) p(z) \, dz$ is intractable in high dimensions, so we introduce an approximate posterior $q(z|x)$ (the encoder), and via Jensen's inequality we get the <strong>ELBO</strong> (Evidence Lower BOund):</p>
+  $$\log p(x) \;\geq\; \mathbb{E}_{q(z|x)}[\log p(x|z)] \;-\; D_{\mathrm{KL}}\!\big(q(z|x) \,\|\, p(z)\big)$$
+  <p>Maximising ELBO does two things simultaneously:</p>
+  <ul>
+    <li><strong>Reconstruction term</strong>: the decoder reconstructs $x$ from $z$ accurately.</li>
+    <li><strong>Regularisation term</strong>: the encoder's latent distribution stays close to the prior $\mathcal{N}(0, I)$.</li>
+  </ul>
+  <p>To backprop through the sampling step $z \sim q(z|x)$, we use the <strong>reparameterisation trick</strong> $z = \mu + \sigma \odot \epsilon$.</p>
+  <p><strong>Why open the textbook with VAE?</strong> Because DDPM is essentially a $T$-step hierarchical VAE — its training loss is just the ELBO unrolled. Every brick we lay in this chapter (latent variables, variational inference, ELBO, KL, reparameterisation) gets reused.</p>
+</div>
+
+<h2>I. Why start diffusion from VAE?</h2>
+
+<p>Dr. Raj opens Lecture 2 by stressing that understanding diffusion requires nailing VAE first. Three reasons:</p>
+
+<ol>
+  <li><strong>Same mathematical spine</strong>: DDPM's training loss is the ELBO unrolled across $T$ hierarchical steps. If you don't know how to derive ELBO from $\log p(x)$, the DDPM loss equations look like hieroglyphics.</li>
+  <li><strong>Same idea</strong>: VAE's "compress to a latent, then decode back" structure becomes "step-by-step noise to latent, then step-by-step denoise back" in diffusion. Diffusion is VAE <em>unrolled in time</em>.</li>
+  <li><strong>First principles</strong>: vanilla VAE → hierarchical VAE → DDPM. Each step deepens the previous one. Skipping VAE straight to DDPM is dangerous.</li>
+</ol>
+
+<blockquote class="callout-quote">
+The instructor invokes Karpathy: "<em>Whenever you learn something from scratch, you understand the gaps in your knowledge.</em>" — this chapter's job is to take the scattered VAE material on the internet and <strong>knead it into one 0-to-1 cognitive ramp</strong>.
+</blockquote>
+
+<h2>II. Problem setup: 100 students writing "hello"</h2>
+
+<p>Dr. Raj's running example throughout Lecture 2:</p>
+
+<blockquote class="source-quote">
+Suppose your class has 100 students; each writes "hello" on a piece of paper. Every handwriting is different — some slant left, some slant right; some are neat, some are messy; some are cursive, some are not.<br><br>
+Now someone asks you to build a machine: <em>press a button → the machine prints a paper with "hello" on it, in the style of someone in this class.</em>
+</blockquote>
+
+<p>In formal language:</p>
+
+<blockquote>We want to build a <strong>sampler</strong> (a machine) whose outputs follow the <em>true probability distribution</em> of how students in this class write "hello."</blockquote>
+
+<p>This is exactly the core goal of deep generative modeling — <strong>learn the real data distribution and sample from it</strong>.</p>
+
+<div class="callout callout-note">
+🧭 <strong>Intuition anchor</strong>: throughout this chapter, picture VAE as "that hello machine." Every mathematical symbol exists to make this machine <strong>formal and trainable</strong>.
+</div>
+
+<h2>III. First-principles thinking: what determines handwriting?</h2>
+
+<p>The natural thought: <strong>handwriting is determined by a small set of hidden factors</strong>. From Lecture 2 the instructor lists:</p>
+
+<ul>
+  <li>The <strong>pressure</strong> applied when writing</li>
+  <li>Whether the writing <strong>slants</strong> left or right</li>
+  <li>The letter <strong>width</strong> (wide / narrow)</li>
+  <li>The writing <strong>speed</strong></li>
+  <li>The level of <strong>neatness</strong></li>
+</ul>
+
+<p>None of these are visible in the final image, but they <em>completely determine</em> the shape of the writing. So the naive idea is:</p>
+
+<ol>
+  <li>Find all the hidden factors that affect handwriting.</li>
+  <li>Learn a mapping <code>f(hidden factors) → handwriting image</code>.</li>
+  <li>Feed any combination of hidden factors into $f$ and get a piece of handwriting.</li>
+</ol>
+
+<p>The instructor gives this set of hidden factors a vivid name: <strong>"secret recipe."</strong></p>
+
+<blockquote class="callout-quote">
+If a student's secret recipe is "slightly right-leaning, thin strokes, medium speed, medium neatness," their hello is almost completely determined.
+</blockquote>
+
+<p>Picture this as hardware: imagine an old-school machine with five knobs on the front panel (one per hidden factor), each settable to low/medium/high. You set the knobs, press the button, the machine prints a paper — the hello corresponding to that recipe.</p>
+
+<p>This machine that <strong>takes a secret recipe and outputs an image</strong> has a formal name in VAE: <strong>the Decoder</strong>.</p>
+
+<h2>IV. Latent Variables: formalising "secret recipe"</h2>
+
+<p>The instructor introduces the term:</p>
+
+<blockquote><strong>secret recipe = latent variables</strong>, denoted $z$.</blockquote>
+
+<p>Why "latent"? Because they are hidden, invisible factors — but they govern the observed data.</p>
+
+<p><strong>Key convention</strong>: for the rest of the lecture, to keep things visualisable, assume only <strong>two latent variables</strong> $z_1, z_2$:</p>
+
+<ul>
+  <li>$z_1$ = slantness</li>
+  <li>$z_2$ = neatness</li>
+</ul>
+
+<div class="callout callout-warning">
+⚠️ <strong>In reality we don't know what $z$ is</strong>. In the hello example we pretend to know the semantics of $z$ (slant + neat) to build intuition. <em>In a real problem the network learns $z$ itself</em>, and what each dimension of $z$ "means" semantically is usually uninterpretable. That's both the strength and the weakness of neural networks.
+</div>
+
+<h3>4.1 Why "latent"?</h3>
+
+<p>The instructor uses a diving metaphor: <strong>like a diver descending to the seabed and surfacing again</strong>:</p>
+
+<ul>
+  <li>You want to generate something on the surface (the image);</li>
+  <li>But first you have to dive down to find the "undercurrents" that produce it (the latent variables);</li>
+  <li>Then surface back up with that information.</li>
+</ul>
+
+<p><strong>Generative modeling is essentially "probing the depths"</strong> — finding the latent factors that drive surface-level variation.</p>
+
+<h3>4.2 Visualising the 2-D latent space</h3>
+
+<p>Set $z_1$ on the x-axis and $z_2$ on the y-axis. We get a 2-D plane:</p>
+
+<ul>
+  <li>Every point on the plane corresponds to a specific handwriting style.</li>
+  <li>Right side of the x-axis → right-leaning; left side → left-leaning.</li>
+  <li>Further from the origin on the y-axis → messier; close to origin → neater.</li>
+  <li>100 students → 100 points on the plane; the distribution of those 100 points is the probability distribution over the latent space.</li>
+</ul>
+
+<p>An important observation:</p>
+
+<blockquote>A 28×28 hello image has 784 pixel values. We compressed it down to <strong>two numbers</strong> ($z_1, z_2$).</blockquote>
+
+<p>This is the other face of VAE: <strong>dimensionality reduction / representation learning</strong>. The latent space is usually <em>far lower-dimensional</em> than the data space (784 → 2 is a 392× compression).</p>
+
+<div class="callout callout-tip">
+💡 <strong>The instructor's foreshadowing</strong>: if you plot the 100 students in latent space, they roughly cluster around the origin in an ellipsoid. This hints at: <strong>the true latent factors of handwriting plausibly follow a Gaussian distribution $\mathcal{N}(0, I)$</strong> (most people are average, extremes are rare). This observation becomes VAE's <em>prior assumption</em> $p(z) = \mathcal{N}(0, I)$ — enforced via the KL term.
+</div>
+
+<h2>V. Inside the decoder: from latent to pixels</h2>
+
+<p>We've drawn the decoder's "interface": input $z$ (2-D), output image (784-D). But <strong>what actually happens inside the machine</strong>?</p>
+
+<h3>5.1 Pixel-level representation</h3>
+
+<p>A digital image = 28 × 28 = 784 pixel values, each pixel 0 (black) or 1 (white). The most naive decoder:</p>
+
+<blockquote>Take $z$, output 784 0/1 values, <em>deterministically</em> drawing a digit.</blockquote>
+
+<p>But this has a problem: <strong>the same $z$ always yields the exact same image</strong>. Yet in reality when we use Stable Diffusion or Midjourney, <em>the same prompt produces different images</em> — the output is <strong>probabilistic</strong>.</p>
+
+<h3>5.2 A probabilistic decoder: each pixel outputs a distribution</h3>
+
+<p>Upgrade: <strong>each pixel doesn't output a single value but a probability distribution</strong> (typically Gaussian or Bernoulli).</p>
+
+<ul>
+  <li>For each pixel $i$, the decoder outputs $(\mu_i, \sigma_i)$;</li>
+  <li>The actual pixel value is sampled from $\mathcal{N}(\mu_i, \sigma_i^2)$;</li>
+  <li>Black pixel → $\mu \approx 0$; white pixel → $\mu \approx 1$; $\sigma$ controls "the allowed grey-scale jitter."</li>
+</ul>
+
+<p>Now <strong>the same $z$ can produce slightly different images each draw</strong> — much closer to the real generative process.</p>
+
+<div class="callout callout-note">
+🛠️ <strong>Practical simplification</strong>: the instructor points out that in the practical code later, a <strong>deterministic decoder</strong> (just the mean, no sigma) is used to keep the implementation simple.<br>
+• Deterministic decoder: 784 outputs<br>
+• Probabilistic decoder: 784 × 2 = 1568 outputs<br>
+For vanilla MNIST VAE the simplification is fine. <em>But the probabilistic framing is still kept formally in the ELBO derivation.</em>
+</div>
+
+<h3>5.3 Decoder = neural network</h3>
+
+<p>Now the decoder's essence is clear: <strong>it's a neural network</strong> $f_\theta(z) \to x$, with $\theta$ as the network's parameters.</p>
+
+<ul>
+  <li>Input: a low-dim latent (say 2-D);</li>
+  <li>Hidden layers: a few fully connected layers;</li>
+  <li>Output: a high-dim pixel image (784-D).</li>
+</ul>
+
+<p>Formal notation:</p>
+
+$$p_\theta(x|z)$$
+
+<p>Meaning: "given the latent $z$, the probability of producing image $x$." This is the <strong>decoder distribution</strong>.</p>
+
+<h2>VI. Why do we need an encoder? Finding a "map" of latent space</h2>
+
+<p>We've been saying "assume the digit 5 lies in some region of latent space" — but <strong>where does this assumption come from</strong>?</p>
+
+<blockquote>How do you know the digit 5 is on the top-left of the latent space and not the bottom-right?</blockquote>
+
+<p>If you don't know this, generating a 5 means:</p>
+
+<ul>
+  <li><strong>Brute-force scanning every point in the latent space</strong>;</li>
+  <li>Feeding each point into the decoder;</li>
+  <li>Checking which points produce images that look like 5.</li>
+</ul>
+
+<p>That's <strong>completely intractable</strong> — like fishing for a needle in the ocean.</p>
+
+<p><strong>The encoder's job</strong>: given a real image $x$ (say a 5), the encoder directly tells us <em>the region in latent space most likely to have produced this image</em>.</p>
+
+<blockquote>Instead of "carpet bombing," we get "follow the map."</blockquote>
+
+<h3>6.1 Encoder = a neural network in the reverse direction</h3>
+
+$$q_\phi(z|x)$$
+
+<ul>
+  <li>Input: image $x$ (784-D);</li>
+  <li>Output: parameters of the latent distribution $(\mu, \sigma^2)$;</li>
+  <li>$\phi$ is the encoder's parameter set.</li>
+</ul>
+
+<div class="callout callout-note">
+📝 <strong>P and Q notation convention</strong>:<br>
+• <strong>$p_\theta(x|z)$</strong> = decoder (parameters $\theta$): given latent, produce image.<br>
+• <strong>$q_\phi(z|x)$</strong> = encoder (parameters $\phi$): given image, infer latent.<br>
+The order looks "reversed" because P is the true generative direction ($z \to x$), and Q is the encoder's learnt approximate posterior ($x \to z$). These letters are the standard VAE / variational-inference convention.
+</div>
+
+<h3>6.2 Why does the encoder output a "distribution" rather than a "point"? This is where "Variational" comes from</h3>
+
+<p>This is the chapter's <strong>most-easily-skipped key point</strong>.</p>
+
+<p><strong>Plain autoencoder</strong>: encoder gives each image a single <em>point</em>.</p>
+<ul>
+  <li>5 → $(-3, 2)$</li>
+  <li>1 → $(3, -3)$</li>
+  <li>2 → $(\ldots)$</li>
+</ul>
+
+<p>Problem: <strong>the space between the points is empty</strong>! If you sample at $(0, 0)$ — some "middle ground" — and feed it to the decoder, the output is almost always garbage noise. The latent space is <em>discrete and disconnected</em>; you can't freely sample new examples from it.</p>
+
+<p><strong>Variational Autoencoder</strong>: encoder gives each image a <em>region</em> (a distribution).</p>
+<ul>
+  <li>5 → $\mathcal{N}(\mu_5, \Sigma_5)$, a region "where 5s are likely to live";</li>
+  <li>1 → $\mathcal{N}(\mu_1, \Sigma_1)$, another region.</li>
+</ul>
+
+<p>These regions <strong>overlap</strong>, and points in the overlap could decode to a 5 or a 1 (or a blend). <em>There are no gaps between the regions</em> — the latent space becomes continuous.</p>
+
+<blockquote>"Variational" comes from this: the encoder outputs a <strong>variational</strong> distribution rather than a fixed point.</blockquote>
+
+<h3>6.3 Why is this step so critical?</h3>
+
+<ul>
+  <li><strong>You can generate new samples</strong>: sampling any point in latent space gives a reasonable image (no more garbage).</li>
+  <li><strong>Smooth interpolation</strong>: walking along a line in latent space gives a smooth transition from 5 to 1.</li>
+  <li><strong>Prevents overfitting</strong>: the encoder can't memorise each image to a single point; it has to learn the structure "nearby images should live in nearby latent regions."</li>
+</ul>
+
+<svg viewBox="0 0 600 220" role="img" aria-label="encoder output: distributions, not points">
+  <g font-family="ui-sans-serif" font-size="11" fill="var(--text)">
+    <text x="150" y="20" text-anchor="middle" font-weight="600">Plain AE (points)</text>
+    <text x="450" y="20" text-anchor="middle" font-weight="600">VAE (distributions)</text>
+
+    <g transform="translate(40, 40)">
+      <rect x="0" y="0" width="220" height="160" rx="6" fill="var(--red-soft)" stroke="var(--red)"/>
+      <circle cx="60" cy="60" r="4" fill="var(--blue)"/>
+      <text x="60" y="50" text-anchor="middle" font-size="10">5</text>
+      <circle cx="160" cy="80" r="4" fill="var(--blue)"/>
+      <text x="160" y="70" text-anchor="middle" font-size="10">1</text>
+      <circle cx="110" cy="120" r="4" fill="var(--blue)"/>
+      <text x="110" y="140" text-anchor="middle" font-size="10">2</text>
+      <text x="110" y="155" text-anchor="middle" font-size="10" fill="var(--red)">gaps between points → garbage on sampling</text>
+    </g>
+
+    <g transform="translate(340, 40)">
+      <rect x="0" y="0" width="220" height="160" rx="6" fill="var(--module-accent-soft)" stroke="var(--module-accent)"/>
+      <ellipse cx="60" cy="60" rx="30" ry="20" fill="var(--blue)" opacity="0.4"/>
+      <text x="60" y="50" text-anchor="middle" font-size="10">5 region</text>
+      <ellipse cx="160" cy="80" rx="30" ry="20" fill="var(--blue)" opacity="0.4"/>
+      <text x="160" y="70" text-anchor="middle" font-size="10">1 region</text>
+      <ellipse cx="110" cy="120" rx="35" ry="20" fill="var(--blue)" opacity="0.4"/>
+      <text x="110" y="155" text-anchor="middle" font-size="10" fill="var(--module-accent)">overlapping regions → continuous latent space</text>
+    </g>
+  </g>
+</svg>
+
+<h2>VII. Probabilistic view: the latent-variable model</h2>
+
+<p>Switching to the <strong>probability-theory view</strong>, to set up the ELBO derivation.</p>
+
+<h3>7.1 The basic setup</h3>
+
+<p>Joint distribution:</p>
+
+$$p(x, z) = p(x|z) \, p(z)$$
+
+<p>Where:</p>
+<ul>
+  <li><strong>$p(z)$</strong> = <strong>prior</strong>: usually $p(z) = \mathcal{N}(0, I)$. That's why a trained VAE's latent space is spherical Gaussian.</li>
+  <li><strong>$p(x|z)$</strong> = <strong>likelihood</strong>: the probability of generating $x$ given $z$ — modelled by the decoder.</li>
+</ul>
+
+<p>The objective is to maximise the <strong>marginal likelihood of data</strong>:</p>
+
+$$p(x) = \int p(x|z) \, p(z) \, dz$$
+
+<p>Intuition: enumerate all possible latents $z$, weight each by how likely the decoder thinks it produces $x$, and sum (weighted by how likely each $z$ is to occur).</p>
+
+<h3>7.2 Optimisation target</h3>
+
+<p>Over the entire dataset $D = \{x_1, \dots, x_N\}$, we want:</p>
+
+$$\max_\theta \prod_{i=1}^N p_\theta(x_i) \;\Leftrightarrow\; \max_\theta \sum_{i=1}^N \log p_\theta(x_i)$$
+
+<p>This is <strong>maximum likelihood estimation</strong>. The instructor anchors the intuition with a counterexample:</p>
+
+<blockquote class="callout-quote">
+If you put a real training image into the decoder and it tells you "$p = 0.001$," the decoder is clearly broken — this image is literally from the true distribution, yet the model thinks it's almost impossible.
+</blockquote>
+
+<p>So we want to <strong>maximise $\log p(x)$</strong>.</p>
+
+<h2>VIII. Why is $\log p(x)$ hard to compute?</h2>
+
+$$\log p(x) = \log \int p(x|z) \, p(z) \, dz$$
+
+<p>This integral is <strong>intractable in high dimensions</strong>. Concrete obstacles:</p>
+
+<ol>
+  <li><strong>The curse of dimensionality</strong>: if $z$ is 100-D, this is a 100-D integral. Even with numerical integration, slicing each axis into 10 segments requires $10^{100}$ samples.</li>
+  <li><strong>No analytic form</strong>: $p(x|z)$ is a neural network — no closed form.</li>
+  <li><strong>Monte Carlo sampling explodes in variance</strong>: if you try $z \sim p(z)$ for a Monte Carlo estimate:
+  $$p(x) \approx \frac{1}{K} \sum_{k=1}^K p(x|z_k), \quad z_k \sim p(z)$$
+  you'll find <em>almost every $z$ sampled from $\mathcal{N}(0, I)$ cannot decode to $x$</em> (their $p(x|z) \approx 0$). Effective sample size is tiny; variance explodes.</li>
+</ol>
+
+<div class="callout-quote">Instructor verbatim: "We can't integrate over the entire universe."</div>
+
+<h3>8.1 Can Bayes' rule rescue us?</h3>
+
+<p>In theory:</p>
+
+$$p(z|x) = \frac{p(x|z) \, p(z)}{p(x)}$$
+
+<p>But $p(x)$ sits in the denominator! <strong>Computing $p(z|x)$ is exactly as hard as computing $p(x)$</strong>. So the "true posterior" $p(z|x)$ is also intractable.</p>
+
+<p><strong>This is where variational inference enters.</strong></p>
+
+<h2>IX. Variational inference: an approximate posterior</h2>
+
+<h3>9.1 Core idea</h3>
+
+<p>Since the true posterior $p(z|x)$ is intractable, use a <strong>parameterisable, easy-to-sample</strong> distribution $q_\phi(z|x)$ to <em>approximate</em> it. Typically:</p>
+
+$$q_\phi(z|x) = \mathcal{N}\!\big(z; \mu_\phi(x), \sigma^2_\phi(x)\big)$$
+
+<p>Where $\mu_\phi(x), \sigma_\phi(x)$ are outputs of the encoder neural network. <strong>The encoder is literally the variational approximation.</strong></p>
+
+<h3>9.2 The pivotal algebraic identity</h3>
+
+<p>The next step is <strong>the linchpin of variational inference</strong> — read it three times:</p>
+
+$$\log p(x) = \underbrace{\mathrm{ELBO}(x)}_{\text{computable}} + \underbrace{D_{\mathrm{KL}}\!\big(q_\phi(z|x) \,\|\, p(z|x)\big)}_{\geq 0,\text{ not computable}}$$
+
+<p>$\log p(x)$ equals <strong>ELBO + a non-negative KL term</strong>. So:</p>
+
+$$\log p(x) \geq \mathrm{ELBO}(x)$$
+
+<p>ELBO is the <strong>lower bound</strong> on $\log p(x)$ — hence the name <em>Evidence Lower BOund</em> ($\log p(x)$ is the "evidence").</p>
+
+<p><strong>The crucial insight</strong>:</p>
+
+<ul>
+  <li>We can't maximise $\log p(x)$ directly (intractable);</li>
+  <li>But we <strong>can</strong> maximise the ELBO (tractable);</li>
+  <li>Maximising ELBO does two good things at once:
+    <ol>
+      <li>Pushes the lower bound of $\log p(x)$ higher → indirectly maximises $\log p(x)$;</li>
+      <li>Shrinks $D_{\mathrm{KL}}(q \,\|\, p_\text{true})$ → the encoder approximates the true posterior better.</li>
+    </ol>
+  </li>
+</ul>
+
+<blockquote class="callout-quote">
+The instructor's red-green diagram: "Imagine the green curve is $\log p(x)$ (unreachable). The red curve is the ELBO — always below green. As long as you push red up, green can't be lower than red."
+</blockquote>
+
+<h2>X. Full ELBO derivation (one step per line, with annotations)</h2>
+
+<p>The most important math of this chapter. Every step has a "why."</p>
+
+<div class="deriv-step">
+<strong>Step 1: Write out $\log p(x)$</strong>
+$$\log p(x) = \log \int p(x|z) \, p(z) \, dz$$
+<em>Why</em>: directly using the definition of $p(x)$ via marginalisation.
+</div>
+
+<div class="deriv-step">
+<strong>Step 2: Multiply by 1 (the importance-sampling trick)</strong>
+$$= \log \int p(x|z) \, p(z) \cdot \frac{q_\phi(z|x)}{q_\phi(z|x)} \, dz \;=\; \log \int q_\phi(z|x) \cdot \frac{p(x|z) \, p(z)}{q_\phi(z|x)} \, dz$$
+<em>Why</em>: multiplying by $q/q = 1$ doesn't change the integral, but lets us rewrite it as an expectation over $q$:
+$$= \log \mathbb{E}_{q_\phi(z|x)}\!\left[\frac{p(x|z) \, p(z)}{q_\phi(z|x)}\right]$$
+This converts "integral over $z$" into "expectation under samples from $q$" — and $q$ is something we can sample from (a Gaussian).
+</div>
+
+<div class="deriv-step">
+<strong>Step 3: Apply Jensen's inequality</strong>
+For the concave function $\log$, we have $\log \mathbb{E}[Y] \geq \mathbb{E}[\log Y]$:
+$$\geq \mathbb{E}_{q_\phi(z|x)}\!\left[\log \frac{p(x|z) \, p(z)}{q_\phi(z|x)}\right]$$
+<em>Why</em>: log is concave, so "log of expectation" $\geq$ "expectation of log." <strong>This step moves the log inside the integral</strong>, letting us split it open later.<br>
+<em>Cost</em>: we turned equality into inequality — the lost slack is exactly $D_{\mathrm{KL}}(q \| p_\text{true})$ later.
+</div>
+
+<div class="deriv-step">
+<strong>Step 4: Split the log</strong>
+$$= \mathbb{E}_{q_\phi(z|x)}\!\left[\log p(x|z) + \log p(z) - \log q_\phi(z|x)\right]$$
+<em>Why</em>: $\log(abc) = \log a + \log b + \log c$. Standard log arithmetic.
+</div>
+
+<div class="deriv-step">
+<strong>Step 5: Regroup</strong>
+$$= \mathbb{E}_{q_\phi(z|x)}[\log p(x|z)] + \mathbb{E}_{q_\phi(z|x)}\!\left[\log \frac{p(z)}{q_\phi(z|x)}\right]$$
+$$= \mathbb{E}_{q_\phi(z|x)}[\log p(x|z)] - \mathbb{E}_{q_\phi(z|x)}\!\left[\log \frac{q_\phi(z|x)}{p(z)}\right]$$
+<em>Why</em>: bundle the two prior-related terms into one log-ratio.
+</div>
+
+<div class="deriv-step">
+<strong>Step 6: Recognise the KL divergence</strong>
+$$\boxed{\log p(x) \geq \mathbb{E}_{q_\phi(z|x)}[\log p(x|z)] \;-\; D_{\mathrm{KL}}\!\big(q_\phi(z|x) \,\|\, p(z)\big)}$$
+<em>Why</em>: the second term is exactly the KL-divergence definition: $D_{\mathrm{KL}}(q \| p) = \mathbb{E}_q[\log(q/p)]$. Importantly, <strong>this KL is between $q$ and the prior $p(z)$, not the true posterior $p(z|x)$</strong> — so it <em>is</em> computable!
+</div>
+
+<p>That's the <strong>ELBO</strong>:</p>
+
+$$\mathrm{ELBO} = \underbrace{\mathbb{E}_{q_\phi(z|x)}[\log p(x|z)]}_{\text{reconstruction}} \;-\; \underbrace{D_{\mathrm{KL}}\!\big(q_\phi(z|x) \,\|\, p(z)\big)}_{\text{regularisation}}$$
+
+<h2>XI. What the two ELBO terms mean (engrave them in memory)</h2>
+
+<h3>11.1 ① Reconstruction term</h3>
+
+<blockquote>"Pass $x$ through the encoder to get $z$, then through the decoder to get $x'$. We want $x' \approx x$."</blockquote>
+
+<ul>
+  <li>Sample a $z$ from $q_\phi(z|x)$ (the encoder's output);</li>
+  <li>Compute $\log p_\theta(x|z)$ — "how likely the decoder thinks the original image $x$ is, given this $z$";</li>
+  <li>We want this value high → <strong>the decoder reconstructs $x$ accurately</strong>.</li>
+</ul>
+
+<p>In practice for images, this is implemented as a <strong>pixel-level loss</strong>:</p>
+<ul>
+  <li>Continuous pixel values → Gaussian likelihood → equivalent to <strong>MSE loss</strong>;</li>
+  <li>0/1 binary pixels → Bernoulli likelihood → equivalent to <strong>binary cross-entropy (BCE)</strong> — which is what the instructor uses on MNIST.</li>
+</ul>
+
+<h3>11.2 ② Regularisation term</h3>
+
+<blockquote>"The encoder's output distribution $q_\phi(z|x)$ should stay close to the prior $p(z) = \mathcal{N}(0, I)$."</blockquote>
+
+<ul>
+  <li>This term measures the "distance" between the encoder's output and a spherical Gaussian.</li>
+  <li>Without it, the encoder would cheat: map every image to a narrow $\delta$-distribution ($\sigma \to 0$) and the decoder would memorise. The latent space would degenerate back to discrete points — i.e. plain autoencoder.</li>
+  <li>The KL term <strong>forces</strong> the encoder to output broader distributions centred near the origin → distributions of different images overlap → the latent space becomes continuous.</li>
+  <li>Also, <strong>because the entire latent space is close to $\mathcal{N}(0, I)$, to generate new samples we just sample $z \sim \mathcal{N}(0, I)$ and decode</strong> — this is how VAE produces samples from "nothing."</li>
+</ul>
+
+<h3>11.3 The Earth-to-Mars cat teleportation</h3>
+
+<p>From Lecture 2, an unusually vivid metaphor:</p>
+
+<blockquote class="callout-quote">
+Say you want to teleport a cat from Earth to Mars. Sending every atom is impossible (too much data). So you <strong>compress the cat into a "recipe" $z$</strong> (the latent), transmit it, and decode it on Mars.<br><br>
+• <strong>Reconstruction goal</strong>: the cat decoded on Mars should look like the cat on Earth.<br>
+• <strong>Regularisation goal</strong>: the transmitted recipe must use a "standard language" — namely $\mathcal{N}(0, I)$. Otherwise the receivers on Mars can't read it.
+</blockquote>
+
+<h2>XII. The reparameterisation trick</h2>
+
+<p>We have a loss (–ELBO). The next step is <strong>backpropagating gradients</strong>. But there's a sticking point.</p>
+
+<h3>12.1 The problem: sampling blocks gradients</h3>
+
+<p>Inside the ELBO we have to "<strong>sample $z$ from $q_\phi(z|x)$</strong>" and then feed $z$ into the decoder.</p>
+
+<ul>
+  <li>$q_\phi$'s $\mu, \sigma$ are produced by the encoder (parameters $\phi$);</li>
+  <li>We want $\partial \mathrm{ELBO} / \partial \phi$;</li>
+  <li>But the <strong>"sample" operation is non-differentiable</strong> — it's a random operator with no gradient flowing from $z$ back to $\mu, \sigma$.</li>
+</ul>
+
+<h3>12.2 The fix: squeeze the randomness out</h3>
+
+<p>Rewrite $z$ as:</p>
+
+$$z = \mu + \sigma \odot \epsilon, \quad \epsilon \sim \mathcal{N}(0, I)$$
+
+<p>(where $\odot$ is element-wise multiplication)</p>
+
+<p><strong>The beauty</strong>:</p>
+<ul>
+  <li>$z$ is now a <strong>deterministic function</strong> of $\mu, \sigma$ (once $\epsilon$ is given);</li>
+  <li>All randomness is packed into $\epsilon$, which is <em>parameter-independent</em>;</li>
+  <li>$\partial z / \partial \mu = 1$, $\partial z / \partial \sigma = \epsilon$, so <strong>gradients flow back to the encoder cleanly</strong>.</li>
+</ul>
+
+<h3>12.3 In code</h3>
+
+<pre><code>mu, log_var = encoder(x)        # encoder outputs μ and log(σ²)
+std = torch.exp(0.5 * log_var)  # σ = exp(0.5 * log σ²)
+eps = torch.randn_like(std)     # ε ~ N(0, I)
+z = mu + std * eps              # reparameterised sample</code></pre>
+
+<div class="callout callout-note">
+🧰 <strong>Why does the encoder output $\log(\sigma^2)$ instead of $\sigma$?</strong><br>
+• $\sigma$ must be $&gt; 0$, but neural network outputs can be any real number.<br>
+• Letting the network output $\log(\sigma^2) \in \mathbb{R}$ (unconstrained) and then exponentiating <strong>guarantees positivity and numerical stability</strong>.<br>
+• When you see <code>log_var</code> in real VAE code, this is why.
+</div>
+
+<h3>12.4 The same trick is used in DDPM</h3>
+
+<p>Every step of DDPM denoising uses the reparameterisation trick to sample. This is not a VAE-specific trick — it's a <em>universal tool for all "generative models with random variables that need to be differentiable."</em> See <a href="/concepts/reparameterization-trick/">the concept page: reparameterisation trick</a>.</p>
+
+<h2>XIII. The VAE loss function (practical)</h2>
+
+<p>Negate the ELBO to get a loss to minimise:</p>
+
+$$\boxed{L_{\text{VAE}} = \underbrace{-\mathbb{E}_{q_\phi(z|x)}[\log p_\theta(x|z)]}_{\text{reconstruction loss}} \;+\; \underbrace{D_{\mathrm{KL}}\!\big(q_\phi(z|x) \,\|\, p(z)\big)}_{\text{KL regularisation}}}$$
+
+<h3>13.1 Closed-form KL (Gaussian–Gaussian)</h3>
+
+<p>When $q_\phi(z|x) = \mathcal{N}(\mu, \sigma^2)$ and $p(z) = \mathcal{N}(0, I)$, the KL has a <strong>closed form</strong>:</p>
+
+$$D_{\mathrm{KL}}\!\big(\mathcal{N}(\mu, \sigma^2) \,\|\, \mathcal{N}(0, 1)\big) = \frac{1}{2}\sum_{i=1}^d \big(\mu_i^2 + \sigma_i^2 - \log \sigma_i^2 - 1\big)$$
+
+<p>where $d$ is the latent dimension. Term-by-term:</p>
+
+<ul>
+  <li><strong>$\mu_i^2$</strong>: penalises means away from 0 (centres the distribution).</li>
+  <li><strong>$\sigma_i^2$</strong>: penalises too-wide $\sigma$ (prevents the distribution from spreading out).</li>
+  <li><strong>$-\log \sigma_i^2$</strong>: penalises too-small $\sigma$ (prevents the distribution from collapsing to a point).</li>
+  <li><strong>$-1$</strong>: constant; ensures KL is exactly 0 when $\mu = 0, \sigma = 1$.</li>
+</ul>
+
+<h3>13.2 Two flavours of reconstruction loss</h3>
+
+<ul>
+  <li><strong>MNIST (binary pixels)</strong>: BCE
+  <pre><code>recon_loss = F.binary_cross_entropy(x_recon, x, reduction='sum')</code></pre>
+  </li>
+  <li><strong>Natural images (continuous pixels)</strong>: MSE
+  <pre><code>recon_loss = F.mse_loss(x_recon, x, reduction='sum')</code></pre>
+  </li>
+</ul>
+
+<div class="callout callout-warning">
+⚠️ <strong>Why <code>sum</code> and not <code>mean</code></strong>: the KL term gives <em>one scalar per sample</em>; the reconstruction term must <em>sum over all pixels per sample</em> to match the dimensional balance. Otherwise KL ends up several orders of magnitude smaller than reconstruction and gets ignored.<br><br>
+This is the classic VAE training pitfall — <strong>KL term gets drowned out</strong> → the model degenerates into a plain autoencoder. The fix is either <code>sum</code>, or weight the KL up (β-VAE).
+</div>
+
+<h2>XIV. PyTorch implementation skeleton</h2>
+
+<p>A <strong>minimal runnable</strong> MNIST VAE, demonstrating every concept above in code:</p>
+
+<pre><code>import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+class VAE(nn.Module):
+    def __init__(self, x_dim=784, h_dim=400, z_dim=2):
+        super().__init__()
+        # ===== Encoder: 784 -> 400 -> (2 mu, 2 log_var) =====
+        self.fc1 = nn.Linear(x_dim, h_dim)
+        self.fc_mu = nn.Linear(h_dim, z_dim)
+        self.fc_log_var = nn.Linear(h_dim, z_dim)
+        # ===== Decoder: 2 -> 400 -> 784 =====
+        self.fc2 = nn.Linear(z_dim, h_dim)
+        self.fc3 = nn.Linear(h_dim, x_dim)
+
+    def encode(self, x):
+        h = F.relu(self.fc1(x))
+        return self.fc_mu(h), self.fc_log_var(h)
+
+    def reparameterize(self, mu, log_var):
+        # Reparameterisation trick: z = mu + sigma * epsilon
+        std = torch.exp(0.5 * log_var)
+        eps = torch.randn_like(std)
+        return mu + std * eps
+
+    def decode(self, z):
+        h = F.relu(self.fc2(z))
+        return torch.sigmoid(self.fc3(h))  # squash output to [0, 1]
+
+    def forward(self, x):
+        mu, log_var = self.encode(x.view(-1, 784))
+        z = self.reparameterize(mu, log_var)
+        return self.decode(z), mu, log_var
+
+
+def vae_loss(x_recon, x, mu, log_var):
+    recon = F.binary_cross_entropy(x_recon, x.view(-1, 784), reduction='sum')
+    # KL = -0.5 * sum(1 + log_var - mu^2 - exp(log_var))
+    kl = -0.5 * torch.sum(1 + log_var - mu.pow(2) - log_var.exp())
+    return recon + kl</code></pre>
+
+<div class="my-addition">
+🟡 <strong>Author's note (looking ahead to Stable Diffusion)</strong>: a vanilla VAE in 2026 looks "old" — but it didn't die. It became infrastructure. Every latent-diffusion model relies on a <em>pretrained</em> VAE to bridge "high-resolution image ↔ latent" — the diffusion process operates in the latent space. Every line of encoder / decoder code you just wrote is a simplified version of the front-end and back-end of Stable Diffusion's pipeline (we get to that in Chapter 18).
+</div>
+
+<figure class="clip-frame">
+  <iframe src="https://www.youtube.com/embed/LqQNvuLqyfk?start=1304" title="Vizuara L9: yellow dot wandering through 2-D latent space" allowfullscreen></iframe>
+  <figcaption>📺 Vizuara <em>Principles of Diffusion Models</em> Lecture 2 (around 21:44) — animation of a sample dot wandering through 2-D latent space.</figcaption>
+</figure>
+
+<div class="takeaways" style="background:#0b5; color:#fff; padding:1.4rem; border-radius:8px; margin-top:2rem;">
+  <h3 style="margin-top:0; color:#fff;">What to commit to memory (the instructor's anchors)</h3>
+  <ol>
+    <li><strong>VAE = "build a machine that samples"</strong> (the hello machine). Press a button, get a new sample — its distribution should match the training data.</li>
+    <li><strong>"Secret recipe" = latent variable $z$</strong>. Find hidden factors → build a $z \to x$ mapping → the sampling problem is half-solved.</li>
+    <li><strong>Plain AE gives "points"; VAE gives "distributions"</strong> — this single change turns the latent space continuous and lets us sample anywhere.</li>
+    <li><strong>$\log p(x)$ is intractable → ELBO is its lower bound</strong> (the instructor's Earth-to-Mars cat-teleportation metaphor). Jensen's inequality + the KL split give the 6-step derivation.</li>
+    <li><strong>ELBO = reconstruction − KL</strong>. Reconstruction makes the decoder match the original; KL forces the encoder's output close to $\mathcal{N}(0, I)$.</li>
+    <li><strong>The reparameterisation trick</strong> $z = \mu + \sigma \epsilon$ makes random sampling differentiable — VAE's training lifeblood, and reused throughout DDPM.</li>
+    <li>Engineering details: network outputs $\log \sigma^2$ (positivity + numerical stability); use <code>sum</code> not <code>mean</code> to keep dimensional balance; MNIST uses BCE, natural images use MSE; reconstruction tests (encode → decode the same image) are a diagnostic independent of generation — if reconstruction fails, sampling will definitely fail.</li>
+  </ol>
+</div>
+
+</article>

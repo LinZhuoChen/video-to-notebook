@@ -1,0 +1,550 @@
+<style>
+  .ar-vs-diff { line-height: 1.75; }
+  .ar-vs-diff svg { display: block; margin: 1.2rem auto; max-width: 100%; height: auto; }
+  .ar-vs-diff .clip-frame { max-width: 720px; margin: 1.4rem auto; }
+  .ar-vs-diff .clip-frame iframe { width: 100%; aspect-ratio: 16/9; border: 0; border-radius: 6px; }
+  .ar-vs-diff .clip-frame figcaption { color: var(--text-muted); font-size: 0.85rem; margin-top: 0.4rem; text-align: center; }
+  .ar-vs-diff .tldr { background: var(--surface-soft); border-left: 4px solid var(--module-accent); padding: 1rem 1.2rem; border-radius: 0 6px 6px 0; margin: 1.4rem 0; }
+  .ar-vs-diff .tldr h2 { margin-top: 0; font-size: 1.05rem; }
+  .ar-vs-diff .callout { padding: 0.7rem 1rem; margin: 1rem 0; border-radius: 0 6px 6px 0; }
+  .ar-vs-diff .callout-info { background: #eef6fc; border-left: 4px solid #2b80c4; }
+  .ar-vs-diff .callout-note { background: #f3f0fa; border-left: 4px solid #6f4dd0; }
+  .ar-vs-diff .callout-warning { background: #fff6e0; border-left: 4px solid #d4a017; }
+  .ar-vs-diff .callout-tip { background: #e8f5e9; border-left: 4px solid #0b5; }
+  .ar-vs-diff .callout-quote, .ar-vs-diff .source-quote { background: var(--surface-soft); border-left: 3px solid var(--border-strong); padding: 0.5rem 1rem; margin: 0.8rem 0; font-style: italic; color: var(--text-muted); }
+  .ar-vs-diff .my-addition { background: #fff7d6; border-left: 4px solid #b8860b; padding: 0.7rem 1rem; margin: 1rem 0; border-radius: 0 6px 6px 0; }
+  .ar-vs-diff pre { background: #1f1f1f; color: #f6f4ee; padding: 1rem; border-radius: 6px; font-size: 0.86rem; line-height: 1.55; overflow-x: auto; }
+  .ar-vs-diff code:not(pre code) { background: var(--surface-soft); padding: 0.1rem 0.35rem; border-radius: 3px; font-size: 0.9em; }
+  .ar-vs-diff h2 { border-bottom: 1px solid var(--border); padding-bottom: 0.3rem; margin-top: 2.4rem; }
+  .ar-vs-diff h3 { color: var(--module-accent); margin-top: 1.6rem; }
+  .ar-vs-diff .deriv-step { margin: 0.8rem 0; padding: 0.6rem 0.8rem; background: var(--surface-soft); border-radius: 4px; }
+  .ar-vs-diff .deriv-step strong { color: var(--module-accent); }
+  .ar-vs-diff table { width: 100%; border-collapse: collapse; margin: 1.4rem 0; font-size: 0.92rem; }
+  .ar-vs-diff th, .ar-vs-diff td { border-bottom: 1px solid var(--border); padding: 0.6rem 0.8rem; text-align: left; vertical-align: top; }
+  .ar-vs-diff th { background: var(--surface-soft); font-weight: 600; }
+  .ar-vs-diff .takeaways { background: #f1f5ea; border-left: 4px solid #5a8a2a; padding: 1rem 1.2rem; border-radius: 0 6px 6px 0; margin: 1.6rem 0; }
+  .ar-vs-diff .takeaways strong { color: #3d5e1c; }
+  @keyframes ar-arrow-march {
+    0% { transform: translateX(0); opacity: 0.3; }
+    50% { opacity: 1; }
+    100% { transform: translateX(28px); opacity: 0.3; }
+  }
+  .ar-vs-diff .march-arrow { animation: ar-arrow-march 1.8s ease-in-out infinite; }
+  @keyframes diff-clean {
+    0%, 100% { opacity: 0.25; }
+    50% { opacity: 1; }
+  }
+  .ar-vs-diff .diff-token-fade { animation: diff-clean 2.2s ease-in-out infinite; }
+</style>
+
+<article class="ar-vs-diff">
+
+<h1>1. Why Diffusion? AR vs Diffusion</h1>
+
+<p style="font-size:0.95rem; color:var(--text-muted);">Primary source: Vizuara <em>Diffusion Language Models from Scratch</em>, Lectures 1 / 5 / 6 (instructor: Dr. Raj Dandekar — <a href="https://www.youtube.com/watch?v=RqT8j_Bj8SA">YouTube playlist</a>); secondary: same series Lectures 7–11 (ARM architecture and training-loop deep dive); CMU 10-799 S26 Lecture 1 (instructor: Kelly Hu). This chapter teaches no concrete formula. Its job is to plant <strong>one counterintuitive research question</strong> in your head — "image and video have surrendered to diffusion; why does text still cling to autoregressive?" — and to lay out <em>the ARM scaffold you have to understand first</em> before that question can be answered.</p>
+
+<div class="tldr">
+  <h2>📌 TL;DR</h2>
+  <p><strong>This is the "thesis hook" of the entire textbook.</strong> In Lecture 5 Dr. Raj puts a public puzzle Andrej Karpathy keeps raising right on the lectern: today nearly every top-tier image generator (Stable Diffusion / Midjourney / SORA) runs diffusion, and nearly every top-tier text generator (GPT / Claude / Gemini) runs autoregressive. <em>It's the same "learn a probability distribution" task — why is the paradigm dictated by the modality? Is there a bias in our heads?</em></p>
+  <p>This chapter puts the two paradigms side by side:</p>
+  <ul>
+    <li><strong>Autoregressive (AR)</strong>: factor the joint distribution via the chain rule into "next token given prefix," generating one position at a time, strictly left-to-right.</li>
+    <li><strong>Diffusion</strong>: treat an entire passage of text as a vector in high-dimensional token space, start from full noise, and refine <em>all positions simultaneously</em> step by step. "Why does this work for images and not for text?" — the remaining 20 chapters are entirely devoted to answering that.</li>
+  </ul>
+  <p>The instructor also gives a slogan that comes back again and again — <strong>"diffusion LM = ARM × 80% + 3 new concepts"</strong>. You cannot skip AR and learn diffusion LM directly. So this chapter first lays out the <em>shape</em> of both paths, and seeds the "three-stage LLM architecture (input / processor / output)" scaffold that every later chapter reuses.</p>
+</div>
+
+<h2>I. The chapter's "thesis hook": the counterintuitive question Karpathy keeps asking</h2>
+
+<p>The chapter title is "Why diffusion," but in Vizuara <em>Diffusion Language Models from Scratch</em> Lecture 5, Dr. Raj Dandekar phrases the question more sharply: <em>diffusion has already won image, video, and audio — why is text still relying on a paradigm whose seed ideas date back to the 1950s?</em></p>
+
+<blockquote class="source-quote">
+Instructor verbatim (Lecture 5): "It seems like a natural question that why can't diffusion models — why should they only be used for images? Is there some bias in our mind? This is exactly what Andrej Karpathy also talks about. He says that most of the image generation tools actually use diffusion and not auto-regression. ... It's only text which has been left behind. So it is a bit of a mystery to me and many others that why for some reason text prefers auto-generation but image, video prefer diffusion. Why should this be? <strong>These are the kind of counterintuitive questions which researchers should ask.</strong>"
+</blockquote>
+
+<p>Unpacked, this short paragraph contains three different things:</p>
+
+<ol>
+  <li><strong>A factual claim</strong>: in image/video almost everything is diffusion; in text almost everything is AR. This isn't a theoretical choice — it's an industry-scale preference divergence.</li>
+  <li><strong>A research stance</strong>: the instructor invokes Karpathy's methodology directly — <em>good research often starts with a question that feels "counterintuitive."</em> If you can articulate "why does modality X use paradigm A and modality Y use paradigm B? Is that a real reason or just a bias?", you've started walking down a meaningful rabbit hole.</li>
+  <li><strong>A project direction</strong>: the Vizuara course, and Module 6 of this textbook (discrete & language diffusion), follow exactly that question down. This chapter is just the entry.</li>
+</ol>
+
+<div class="callout callout-info">
+🧭 <strong>Write this question on the cover page of your notebook</strong> — "<em>Why has language stuck with AR while images and video surrendered to diffusion?</em>" Every formula in the next 20 chapters, every ablation number, every benchmark table, is evidence accumulating toward this question's answer. By the end of the textbook you should be able to answer it in three sentences.
+</div>
+
+<h3>1.1 Cornell MDLM turned the "counterintuitive" framing into a formal research paper</h3>
+
+<p>In Lecture 5 Dr. Raj points at a 2024 "weather-vane" paper as background: Cornell's <strong>MDLM</strong> (Sahoo et al., <em>"Simple and Effective Masked Diffusion Language Models"</em>). The paper's introduction literally writes out the same puzzle the instructor poses — "<em>why should images and video generation models have all the fun?</em>" — and converts it into a formal study.</p>
+
+<div class="my-addition">
+🟡 <strong>Author's note (beyond the source):</strong> after MDLM, the 2024–2026 line stacked rapidly: SEDD (Lou et al. 2024, score-entropy discrete diffusion); LLaDA (Nie et al. 2025, the first 8B-scale diffusion LM to approach same-size LLaMA performance); Mercury (Inception Labs 2025, commercial API). All of these rest on the same foundation — "diffusion LM = 80% ARM + 3 new concepts" — which is why this textbook's structure is: <em>first nail down the 80% that is ARM</em>, then unpack those 3 new concepts in chapters 19–21.
+</div>
+
+<h2>II. Karpathy's methodology anchor: "from scratch"</h2>
+
+<p>Lecture 1 (introducing the course) starts with the instructor laying out his <strong>research stance</strong>:</p>
+
+<blockquote class="source-quote">
+"When I started thinking about diffusion language models, I thought it was very difficult — the initial phase took a very long amount of time to really understand what's going on. But the final implementation, building it fully from scratch and comparing it with auto-regressive models, was fairly straightforward and simple."
+</blockquote>
+
+<p>This echoes the Karpathy maxim that every practitioner has run into at least once:</p>
+
+<blockquote class="source-quote">
+"Whenever you learn something from scratch, you understand the gaps in your knowledge."
+</blockquote>
+
+<p>So the method of this textbook (and of the Vizuara course it shadows) is not "read a survey paper and summarise it." It is <strong>write both ARM and diffusion LM out as PyTorch code from zero, line by line, with commentary</strong>. In Lecture 11 the instructor lays this out explicitly:</p>
+
+<blockquote class="source-quote">
+"Before moving on to the diffusion model architecture and assembling it from scratch, I actually want to show you that we can build a small language model based on the traditional ARM architecture fully from scratch." (using the TinyStories dataset)
+</blockquote>
+
+<p>This ethos shapes how the chapter is written. We don't stop at "AR is this, diffusion is that" at the conceptual level. Instead we hand you a key — <strong>the three-stage ARM architecture</strong> — early, because every later chapter uses that key to open a different door.</p>
+
+<h2>III. Autoregressive models (ARM): a fancy name for a simple idea</h2>
+
+<p>In Lecture 6 the instructor walks to the whiteboard and starts with what is essentially a "de-mystification" move — he wants you <em>not to be intimidated by the jargon</em>:</p>
+
+<blockquote class="source-quote">
+"Auto-regressive models — they're also called as ARMs now — but they're just <strong>a fancy way to understand a very simple concept</strong>. The way language models work is as follows: they are trained for something which is called as a next-token prediction task. ... <em>When a language model is trained, they are always trained to predict one token at a time.</em>"
+</blockquote>
+
+<p>Translate that into formal language. Given a piece of text $x = (x_1, x_2, \ldots, x_T)$ (where $x_t$ is the $t$-th token), AR models apply the <strong>chain rule of probability</strong> directly:</p>
+
+$$p(x_1, x_2, \ldots, x_T) \;=\; \prod_{t=1}^{T} p(x_t \mid x_1, x_2, \ldots, x_{t-1})$$
+
+<div class="deriv-step">
+<strong>Why</strong>: this step is an <em>identity</em>, not an approximation. Any joint probability factorises this way; the only assumption is that "given the prefix, the conditional distribution over the next token exists" — which trivially holds for discrete tokens.
+</div>
+
+<p>Each factor $p(x_t \mid x_{<t})$ is a classification problem: <em>given the previous $t-1$ tokens, which vocabulary entry is the next one?</em> At training time you supervise every position with cross-entropy; at inference you sample one token at a time, left to right.</p>
+
+<h3>3.1 Writing out the "once upon a time" example end-to-end</h3>
+
+<p>The instructor uses the same prompt repeatedly to make this concrete:</p>
+
+<blockquote class="source-quote">
+"During inference time, if I give a prompt that 'once upon a time' and I want the language model to continue..."
+</blockquote>
+
+<p>What does it actually do? Answer: <strong>it cannot spit out the whole continuation in a single shot</strong>. The work loop looks like this:</p>
+
+<ol>
+  <li>Read <code>once upon a time</code> → produce token 1 (say <code>there</code>).</li>
+  <li>Read <code>once upon a time there</code> → produce token 2 (say <code>was</code>).</li>
+  <li>Read <code>once upon a time there was</code> → produce token 3 (say <code>a</code>).</li>
+  <li>… and so on, until the model decides to emit <code>&lt;EOS&gt;</code>.</li>
+</ol>
+
+<p>Three properties to internalise:</p>
+
+<ul>
+  <li><strong>Order rigidity</strong>: the model must go left-to-right; the input at step $t$ is always "prompt + the previous $t-1$ tokens."</li>
+  <li><strong>One-directional conditioning</strong>: the model has only ever seen "prefix → next token." It has never seen "suffix → previous token." This is the source of the <em>reversal curse</em> we discuss below.</li>
+  <li><strong>What's emitted is set in stone</strong>: once token 1 is <code>there</code>, every subsequent step builds on top of it. There is no going back to revise it.</li>
+</ul>
+
+<h2>IV. ARM architecture: the three-stage scaffold (input → processor → output)</h2>
+
+<p>In Lecture 8 the instructor introduces what becomes the <strong>recurring scaffold</strong> for the entire textbook:</p>
+
+<blockquote class="source-quote">
+"The LLM architecture as a whole is divided into three stages. The first stage is the input stage. The second stage is the processor stage and the third stage is the output stage."
+</blockquote>
+
+<p>The reason this matters is captured immediately afterwards in Lecture 7:</p>
+
+<blockquote class="source-quote">
+"It turns out that for diffusion language models, their architecture is <strong>80% similar to traditional language models</strong> with the addition of these three concepts. So you can think of a diffusion language model as these key characteristics plus 80% of an ARM architecture."
+</blockquote>
+
+<p>In other words: <strong>every diffusion-LM chapter in the second half of this textbook reuses this ARM scaffold</strong>. So we spend one section getting the shape right.</p>
+
+<h3>4.1 The input stage</h3>
+
+<p>From Lecture 8:</p>
+
+<blockquote class="source-quote">
+"Machine learning models, language models — they can't understand text. So we need to somehow convert this text into numerical format. That's where the first stage of the LLM architecture actually begins."
+</blockquote>
+
+<p>The input stage does three things:</p>
+
+<ol>
+  <li><strong>Tokenize</strong>: split "once upon a time a little" into token ids (e.g. <code>[2470, 1746, 257, 640, 257, 1310]</code>).</li>
+  <li><strong>Token embedding</strong>: send each id through a lookup table to get a 768-dim vector (GPT-2 small's hidden size).</li>
+  <li><strong>Positional embedding</strong>: add a vector that encodes "this is the $k$-th token." The two vectors sum to produce the input embedding.</li>
+</ol>
+
+<p>The instructor stresses (Lecture 9) that at this point the vectors are <em>"dumb"</em> — each token knows it represents "bright," but it doesn't know what its neighbours in the sentence are doing. That is the problem attention is about to solve.</p>
+
+<h3>4.2 The processor stage: a stack of Transformer blocks</h3>
+
+<p>The processor is the heart of the ARM. It is composed of $N$ identical <strong>Transformer blocks</strong> stacked on top of each other. In Lecture 11 the instructor notes:</p>
+
+<blockquote class="source-quote">
+"We don't have one transformer block but we have multiple such transformer blocks which are stacked together. ... there might be 12, 24, or even 96."
+</blockquote>
+
+<p>Inside a single block, Lectures 9–10 break the structure into 6 sub-components — the same 6 components reappear unchanged in later diffusion-LM chapters, so commit them to memory now:</p>
+
+<table>
+  <thead>
+    <tr><th>Sub-module</th><th>What it does</th><th>Instructor's plain-English framing</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>Layer Norm (pre)</td><td>Subtract mean, divide by std per vector</td><td>"mean of zero, variance of one"</td></tr>
+    <tr><td>Multi-Head Attention</td><td>Tokens look at each other; input vectors become context vectors</td><td>"the context vector is much richer than the input vector"</td></tr>
+    <tr><td>Dropout</td><td>Randomly zero out some elements</td><td>"the team-project metaphor — lazy teammates get removed, the rest must <em>pick up the slack</em>"</td></tr>
+    <tr><td>Residual / Shortcut</td><td>Add block input directly to block output</td><td>"an alternative path for the gradient → prevents vanishing"</td></tr>
+    <tr><td>Layer Norm (post) + FFN</td><td>Two-layer MLP with 4× expansion, GELU activation</td><td>"an expansion and a contraction block"</td></tr>
+    <tr><td>Dropout + Residual</td><td>Same as above</td><td>"layer norm / dropout / residual show up repeatedly in transformers"</td></tr>
+  </tbody>
+</table>
+
+<p>In Lecture 11 the instructor calls out something with research taste:</p>
+
+<blockquote class="source-quote">
+"All of these are <em>not new ideas</em>. They were existing in deep learning for a long time. But this transformer block which stacks all of it together is pretty new."
+</blockquote>
+
+<p>And in Lecture 10 he gives an unusually concrete <strong>"team-project" metaphor</strong> for dropout — worth quoting in full because it's the right shape for the intuition:</p>
+
+<blockquote class="source-quote">
+"I always think of it like a group project. If there are four team members, there are always those two people who don't do anything. How do you prevent this? Well, if one of the persons who is doing all the work suddenly is sick and is not able to work, the other person has to pick up the slack. That's a similar concept of dropout. If there are some lazy neurons, suddenly if the neighbouring neurons are switched off during one dropout forward pass, this neuron has no other option but to <strong>pick up the slack</strong> and learn weights that improve the generalization performance."
+</blockquote>
+
+<p>This metaphor is not just charming — it captures the <em>causal chain</em>: random zeroing → forces every neuron to be "independently useful" → reduces over-reliance on neighbours → boosts generalisation. The textbook will return to this idea in the classifier-free-guidance chapter — "randomly drop the condition signal" — which is essentially dropout applied to the conditioning channel.</p>
+
+<p>For residual / shortcut connections, the instructor's Lecture-10 explanation:</p>
+
+<blockquote class="source-quote">
+"If multiple gradients directly multiply with each other by the time we back-propagate and reach towards the initial layers, the gradient might vanish, learning stagnates. To prevent this we give an <strong>alternative path for the gradient to flow</strong>, and this prevents the vanishing gradient problem and makes sure learning does not stagnate."
+</blockquote>
+
+<p>Tie the two purposes together as one mnemonic: <em>Dropout prevents over-fitting; Residual prevents vanishing gradient</em>. These are the two standard regularisation moves that crystallised during the ResNet era (2015) and got welded into every Transformer block (2017). Diffusion-era models keep them unchanged.</p>
+
+<h3>4.2.1 FFN: 4× expansion + GELU activation</h3>
+
+<p>The most-underrated sub-module in the processor is the <strong>Feed-Forward Network (FFN)</strong> sitting after attention. In Lecture 10:</p>
+
+<blockquote class="source-quote">
+"We have a feed-forward neural network. That's essentially an <strong>expansion and a contraction block</strong>. The inputs are with dimension 768, we have a hidden layer whose dimensions are <em>four times</em> the input dimension, and then we contract it back to the output layer. The output layer has the same dimensions as the input which is 768. The activation generally preferred is <strong>GELU</strong>. The way it differs from ReLU is that ReLU's negative entries are fully zero. GELU's negative entries are <em>not fully zero</em> — it's something smoother. This has proven to be a bit better experimentally compared to ReLU when training language models."
+</blockquote>
+
+<p>Break this down: FFN stretches the token representation from 768 to 3072 dims for a non-linear transformation, then squeezes back to 768. This "wide → narrow" bottleneck is widely thought to be <em>where factual storage actually lives</em> — recent mechanistic-interpretability work (e.g. Anthropic's 2024 Sparse Auto-Encoder line) decomposes features mostly in the FFN's 3072 hidden dimension. This textbook won't expand that line, but the principle to internalise is: <strong>attention handles "tokens looking at each other"; FFN handles "computation inside each token"</strong> — a clean division of labour.</p>
+
+<div class="callout callout-tip">
+💡 <strong>The instructor's foreshadowing</strong>: in Module 2-3 you'll see that diffusion's "denoising U-Net" and DiT (Diffusion Transformer) still contain these same 6 sub-components — except attention is no longer masking the future, the loss is no longer classification, and there's an extra "time-step embedding" injection channel. <em>If these 6 sub-components are seared into your memory, 80% of your work is already done.</em>
+</div>
+
+<h3>4.3 Dimension preservation: 768 stays 768 the entire way</h3>
+
+<p>From Lecture 10:</p>
+
+<blockquote class="source-quote">
+"We started with an embedding size of 768. ... layer normalization preserves it. The attention block preserves it. Dropout preserves it. ... <strong>The output of the transformer block has the same dimensions as the input.</strong>"
+</blockquote>
+
+<p>This "hidden size constant throughout" design is critical — it lets Transformer blocks <em>stack indefinitely</em> without re-aligning dimensions, and it lets residual connections add legally everywhere. This is the engineering reason ARMs can scale to 96 layers and hundreds of billions of parameters.</p>
+
+<h3>4.4 The output stage: project onto vocabulary</h3>
+
+<p>From Lecture 10:</p>
+
+<blockquote class="source-quote">
+"Once we come out of the transformer block, we reach the final layer which is the output layer. ... we apply layer normalization, and then there's the <strong>output head</strong>. This is very important and we need to understand this <em>also if we want to understand diffusion language models, because this thing also changes</em>."
+</blockquote>
+
+<p>The output head takes each token's 768-dim vector and <strong>linearly projects to vocab_size dims</strong> (typically 50 000–100 000), producing a logit per vocabulary entry; softmax gives a distribution. At training time you cross-entropy against the true next-token id; at inference you sample from that distribution.</p>
+
+<div class="callout callout-warning">
+⚠️ <strong>The instructor's heads-up</strong>: this output head <em>gets modified</em> in diffusion LMs. Diffusion LMs do not predict "the next token" — they predict "<em>what was originally at each masked position</em>." Same shape, different semantics. This is one concrete spot where the 80% / 20% split lives.
+</div>
+
+<h3>4.5 Training loop: feeding TinyStories one batch at a time</h3>
+
+<p>From Lecture 11 the instructor gives the <strong>"from-scratch" ARM training pipeline</strong> end-to-end — every subsequent chapter follows this template:</p>
+
+<blockquote class="source-quote">
+"If you look at the pipeline now, it's as follows: <strong>(1)</strong> we get the TinyStories data. <strong>(2)</strong> we tokenize it. <strong>(3)</strong> we create input and output pairs. <strong>(4)</strong> we pass the input sequences through this architecture. <strong>(5)</strong> we get the output. <strong>(6)</strong> we find the loss between the predictions and the targets. <strong>(7)</strong> we update the parameters. Then we get a new batch and this loop continues. That's pre-training of language models."
+</blockquote>
+
+<p>In Lecture 10 the instructor demonstrates a subtle but important engineering point — one training sequence actually produces <em>multiple</em> supervised samples. Take "every effort moves you" (4 tokens):</p>
+
+<ul>
+  <li>input 1 = <code>every</code>, target 1 = <code>effort</code></li>
+  <li>input 2 = <code>every effort</code>, target 2 = <code>moves</code></li>
+  <li>input 3 = <code>every effort moves</code>, target 3 = <code>you</code></li>
+  <li>input 4 = <code>every effort moves you</code>, target 4 = <code>forward</code> (hypothetical continuation)</li>
+</ul>
+
+<p>So <strong>a length-$L$ training sequence in AR mode yields $L$ supervision samples</strong>, and <em>all $L$ of their forward computations can be batched into one Transformer pass</em>. This is the engineering value of teacher forcing. Compare this to diffusion training: each training step can only use one timestep $t$ (one noise level), so the supervision-per-sample efficiency is structurally different.</p>
+
+<div class="callout callout-note">
+🛠️ <strong>The instructor on learning attitude</strong> (Lecture 1, echoing Karpathy's maxim): "I will show you how I personally learn — including my real conversations with Gemini. When you learn something from scratch, you find the <em>gaps in your knowledge</em>. That's how you really understand." Follow the textbook by <em>writing one snippet of code or rederiving one formula per chapter</em>. Watching the video / reading the PDF is passive. <strong>Replication is the only honest measure of understanding.</strong>
+</div>
+
+<h2>V. AR's engineering advantages: why text stays with it</h2>
+
+<p>At this point you might fairly ask: if image and video have moved to diffusion, is text staying with AR pure inertia? The instructor doesn't spell out the answer directly, but it's in the engineering details — AR has several genuine advantages <em>specific to the language modality</em>:</p>
+
+<ol>
+  <li><strong>Parallel training + KV-cache inference</strong>: at training time, causal masking lets you compute every position's next-token loss in one forward pass (teacher forcing). At inference, the KV cache lets each step compute only the new token's query / attention — the keys and values for already-generated tokens are reused. The result: AR's <em>per-step inference cost is $O(L)$, not $O(L^2)$</em>. In diffusion, every step must recompute attention over every position, and this acceleration pattern doesn't directly carry over.</li>
+  <li><strong>Text is naturally a discrete ordered sequence</strong>: unlike images, where pixel order is "just a layout," in text the token order <em>is part of the semantics</em> — "the cat chased the mouse" ≠ "the mouse chased the cat." The "left → right" assumption of AR fits the reading/writing direction, and it fits the physical process of human language generation (you speak one word at a time).</li>
+  <li><strong>Scaling laws fully validated</strong>: from GPT-1 to GPT-4, the AR + Transformer recipe has had eight years to <em>nail down</em> the three-axis scaling story (parameters / data / compute). Chinchilla gave the optimal ratio; MoE gave the parameter-sparsity path; RoPE / ALiBi cracked long context. Switching paradigm means walking that entire scaling road again, at enormous engineering R&D cost. No major lab is volunteering for that risk yet.</li>
+  <li><strong>Mature evaluation</strong>: the whole MMLU / HumanEval / GSM8K benchmark suite is designed around "prompt → AR continuation." A diffusion LM has to simultaneously prove "I can run these benchmarks and do well" <em>and</em> "I can do new things AR cannot do" (infilling, parallel decoding, control). That's double the burden of proof.</li>
+</ol>
+
+<div class="callout callout-note">
+🧭 <strong>This section is the "devil's-advocate" defence</strong>: the chapter's thesis hook asks "why has image surrendered but language has not?" A cheap answer is "inertia," but the instructor refuses cheap answers — AR has <em>structural</em> advantages in the language modality, and these aren't erased by a few diffusion-LM papers. Acknowledging that makes the genuine wins of diffusion LM (infilling / bidirectional / parallel) look correspondingly heavier when they finally land.
+</div>
+
+<h2>VI. AR's hard limits: reversal curse + slow inference</h2>
+
+<p>AR also has two real walls the instructor names in Lecture 5 — limitations that diffusion-LM chapters keep coming back to challenge.</p>
+
+<h3>6.1 The reversal curse</h3>
+
+<p>The instructor's example is specific:</p>
+
+<blockquote class="source-quote">
+"Ask the model <em>'Who is Tom Cruise's mother?'</em> — it answers Mary Lee Pfeiffer. But ask the reverse, <em>'Who is Mary Lee Pfeiffer's son?'</em> — it often can't answer. This is reversal reasoning, and AR models are intrinsically bad at it."
+</blockquote>
+
+<p>The cause is the "one-directional conditioning" property from §III. AR training data is always "prefix → suffix," so "Tom Cruise"'s representation has <em>embedded the fact</em> that his mother is Mary Lee. But "Mary Lee"'s representation has never been explicitly required to embed the reverse fact "son is Tom Cruise." This is not a problem scale fixes — it's a blind spot baked into <em>the geometry of the training objective itself</em>.</p>
+
+<h3>6.2 Slow inference: 14 steps vs 75 steps</h3>
+
+<p>A specific number the instructor returns to (Lecture 6 in particular):</p>
+
+<blockquote class="source-quote">
+"To generate text of the same length, <strong>diffusion takes roughly 14 steps</strong>, <strong>AR takes 75 steps</strong> — diffusion inference is much faster."
+</blockquote>
+
+<p>Read carefully: AR's "75 steps" is <em>sequence length</em>, diffusion's "14 steps" is <em>denoising steps</em>. They are not the same kind of step. But assuming per-step cost is comparable, "half the steps" translates directly into inference latency — for real-time applications (chat, code completion) that's a meaningful difference.</p>
+
+<div class="callout callout-note">
+🛠️ <strong>Practical calibration</strong>: 14 vs 75 are the instructor's "typical" numbers to give you intuition. LLaDA-8B used 32 denoising steps to approach LLaMA-8B at the 8B scale; Mercury and successor systems push this into the single digits. Take both numbers as <em>order-of-magnitude</em>, not benchmarks.
+</div>
+
+<h2>VII. The diffusion view: text as a probability distribution in high-dim token space</h2>
+
+<p>This section is the chapter's <strong>most important cognitive jump</strong> — it's the entry to the remaining 20 chapters. From Lecture 5:</p>
+
+<blockquote class="source-quote">
+"We used to think about images like this: break the image into pixels; the diffusion model learns the probability distribution of 'meaningful images' in that high-dim pixel space, and you sample from it. <strong>The same thing can be done for text: break the text into tokens; the diffusion learns 'meaningful text' as a probability distribution in high-dim token space</strong> — 'meaningful' meaning grammar and logic are both correct, which occupies a very small region of that high-dim space."
+</blockquote>
+
+<p>Translate to maths:</p>
+
+<ul>
+  <li>Let vocabulary size be $V$ and sequence length $L$. A passage of text is a vector $\mathbf{x} \in \{1,\ldots,V\}^L$.</li>
+  <li>The total count of possible $\mathbf{x}$ is $V^L$ — astronomical ($50000^{1024}$).</li>
+  <li>The "<em>valid</em>" (grammatically and logically correct) texts are an extremely thin region inside that $V^L$ space.</li>
+  <li><strong>AR</strong>: sample that thin region one position at a time using the chain rule.</li>
+  <li><strong>Diffusion</strong>: start from pure noise / all-MASK and let all positions <em>simultaneously</em> walk toward that thin region — each step uses a neural network to <em>jointly</em> refine every position.</li>
+</ul>
+
+<svg viewBox="0 0 760 320" role="img" aria-label="AR token-by-token vs Diffusion parallel-refinement timeline comparison">
+  <text x="120" y="22" font-size="14" font-weight="600" fill="#0a6e3a">Autoregressive: one token at a time, left to right</text>
+  <text x="500" y="22" font-size="14" font-weight="600" fill="#1d4ed8">Diffusion: all positions in parallel</text>
+
+  <g transform="translate(20, 40)" font-family="ui-monospace, monospace" font-size="13">
+    <text x="0" y="20" fill="#6b6b6b">step 1</text>
+    <rect x="50" y="6" width="40" height="20" rx="3" fill="#0a6e3a"/><text x="56" y="21" fill="#fff">Once</text>
+    <rect x="92" y="6" width="40" height="20" rx="3" fill="#e8e5db"/>
+    <rect x="134" y="6" width="40" height="20" rx="3" fill="#e8e5db"/>
+    <rect x="176" y="6" width="40" height="20" rx="3" fill="#e8e5db"/>
+    <rect x="218" y="6" width="40" height="20" rx="3" fill="#e8e5db"/>
+    <text class="march-arrow" x="262" y="21" fill="#0a6e3a">→</text>
+
+    <text x="0" y="58" fill="#6b6b6b">step 2</text>
+    <rect x="50" y="44" width="40" height="20" rx="3" fill="#0a6e3a"/><text x="56" y="59" fill="#fff">Once</text>
+    <rect x="92" y="44" width="40" height="20" rx="3" fill="#0a6e3a"/><text x="100" y="59" fill="#fff">upon</text>
+    <rect x="134" y="44" width="40" height="20" rx="3" fill="#e8e5db"/>
+    <rect x="176" y="44" width="40" height="20" rx="3" fill="#e8e5db"/>
+    <rect x="218" y="44" width="40" height="20" rx="3" fill="#e8e5db"/>
+
+    <text x="0" y="96" fill="#6b6b6b">step 3</text>
+    <rect x="50" y="82" width="40" height="20" rx="3" fill="#0a6e3a"/>
+    <rect x="92" y="82" width="40" height="20" rx="3" fill="#0a6e3a"/>
+    <rect x="134" y="82" width="40" height="20" rx="3" fill="#0a6e3a"/><text x="146" y="97" fill="#fff">a</text>
+    <rect x="176" y="82" width="40" height="20" rx="3" fill="#e8e5db"/>
+    <rect x="218" y="82" width="40" height="20" rx="3" fill="#e8e5db"/>
+
+    <text x="0" y="134" fill="#6b6b6b">step 5</text>
+    <rect x="50" y="120" width="40" height="20" rx="3" fill="#0a6e3a"/><text x="56" y="135" fill="#fff">Once</text>
+    <rect x="92" y="120" width="40" height="20" rx="3" fill="#0a6e3a"/><text x="100" y="135" fill="#fff">upon</text>
+    <rect x="134" y="120" width="40" height="20" rx="3" fill="#0a6e3a"/><text x="146" y="135" fill="#fff">a</text>
+    <rect x="176" y="120" width="40" height="20" rx="3" fill="#0a6e3a"/><text x="184" y="135" fill="#fff">time</text>
+    <rect x="218" y="120" width="40" height="20" rx="3" fill="#0a6e3a"/><text x="226" y="135" fill="#fff">…</text>
+    <text x="0" y="176" font-size="11" fill="#6b6b6b">step count = sequence length; emitted tokens are frozen</text>
+  </g>
+
+  <line x1="370" y1="40" x2="370" y2="300" stroke="#d4d2c8" stroke-dasharray="3,3"/>
+
+  <g transform="translate(390, 40)" font-family="ui-monospace, monospace" font-size="13">
+    <text x="0" y="20" fill="#6b6b6b">step 1</text>
+    <rect class="diff-token-fade" x="50" y="6" width="40" height="20" rx="3" fill="#cfd9eb"/><text x="62" y="21" fill="#6b6b6b">▒</text>
+    <rect class="diff-token-fade" x="92" y="6" width="40" height="20" rx="3" fill="#cfd9eb"/><text x="104" y="21" fill="#6b6b6b">▒</text>
+    <rect class="diff-token-fade" x="134" y="6" width="40" height="20" rx="3" fill="#cfd9eb"/><text x="146" y="21" fill="#6b6b6b">▒</text>
+    <rect class="diff-token-fade" x="176" y="6" width="40" height="20" rx="3" fill="#cfd9eb"/><text x="188" y="21" fill="#6b6b6b">▒</text>
+    <rect class="diff-token-fade" x="218" y="6" width="40" height="20" rx="3" fill="#cfd9eb"/><text x="230" y="21" fill="#6b6b6b">▒</text>
+
+    <text x="0" y="58" fill="#6b6b6b">step 2</text>
+    <rect x="50" y="44" width="40" height="20" rx="3" fill="#9bb4d8"/><text x="56" y="59" fill="#fff">Once</text>
+    <rect x="92" y="44" width="40" height="20" rx="3" fill="#cfd9eb"/><text x="104" y="59" fill="#6b6b6b">▒</text>
+    <rect x="134" y="44" width="40" height="20" rx="3" fill="#9bb4d8"/><text x="146" y="59" fill="#fff">a</text>
+    <rect x="176" y="44" width="40" height="20" rx="3" fill="#cfd9eb"/><text x="188" y="59" fill="#6b6b6b">▒</text>
+    <rect x="218" y="44" width="40" height="20" rx="3" fill="#9bb4d8"/><text x="226" y="59" fill="#fff">…</text>
+
+    <text x="0" y="96" fill="#6b6b6b">step 3</text>
+    <rect x="50" y="82" width="40" height="20" rx="3" fill="#1d4ed8"/><text x="56" y="97" fill="#fff">Once</text>
+    <rect x="92" y="82" width="40" height="20" rx="3" fill="#9bb4d8"/><text x="100" y="97" fill="#fff">upon</text>
+    <rect x="134" y="82" width="40" height="20" rx="3" fill="#1d4ed8"/><text x="146" y="97" fill="#fff">a</text>
+    <rect x="176" y="82" width="40" height="20" rx="3" fill="#9bb4d8"/><text x="184" y="97" fill="#fff">time</text>
+    <rect x="218" y="82" width="40" height="20" rx="3" fill="#1d4ed8"/><text x="226" y="97" fill="#fff">…</text>
+
+    <text x="0" y="134" fill="#6b6b6b">step 5</text>
+    <rect x="50" y="120" width="40" height="20" rx="3" fill="#1d4ed8"/><text x="56" y="135" fill="#fff">Once</text>
+    <rect x="92" y="120" width="40" height="20" rx="3" fill="#1d4ed8"/><text x="100" y="135" fill="#fff">upon</text>
+    <rect x="134" y="120" width="40" height="20" rx="3" fill="#1d4ed8"/><text x="146" y="135" fill="#fff">a</text>
+    <rect x="176" y="120" width="40" height="20" rx="3" fill="#1d4ed8"/><text x="184" y="135" fill="#fff">time</text>
+    <rect x="218" y="120" width="40" height="20" rx="3" fill="#1d4ed8"/><text x="226" y="135" fill="#fff">…</text>
+    <text x="0" y="176" font-size="11" fill="#6b6b6b">step count ≪ sequence length; any position can be rewritten</text>
+  </g>
+
+  <g transform="translate(20, 240)" font-size="12" fill="#3a3a3a">
+    <text x="0" y="14">• AR: each step fixes exactly 1 token; step count = sequence length</text>
+    <text x="0" y="34">• Diffusion: each step denoises all positions simultaneously — the instructor's "all positions in parallel"</text>
+    <text x="0" y="54">• The key difference: time complexity goes from O(L) to O(T), with T typically ≪ L</text>
+  </g>
+</svg>
+
+<h3>7.1 "Tokenize text → diffusion in high-dim token space" is the real paradigm jump</h3>
+
+<p>Many people used to assume diffusion could only work with <em>continuous</em> data (images, audio). The instructor's move in Lecture 5 is precisely to point out: <strong>once you tokenise the text into a high-dim discrete space, "learning a probability distribution in that space" is no different in kind from doing it for images</strong>. How you actually "diffuse" in discrete space — replacing tokens with MASK / injecting continuous noise via absolute-position embeddings / something else — is what Module 6 develops. This chapter only asks you to accept the <em>conceptual</em> move.</p>
+
+<p>There is one technical hurdle to surface right now though: <strong>discrete tokens don't have a natural "add a tiny bit of Gaussian noise" operation</strong>. In images you can smoothly interpolate $x_t = \sqrt{\bar\alpha_t} x_0 + \sqrt{1-\bar\alpha_t} \epsilon$; in text, token ids are discrete — you cannot say "the token <code>cat</code> plus a little noise = <code>cat.0173</code>." That object doesn't exist. The core contribution of MDLM / SEDD / their successors is precisely to <em>define a reasonable "discrete noise process"</em> — the simplest version: "at probability $p_t$ replace this token with <code>&lt;MASK&gt;</code>, where $p_t$ ramps from 0 to 1 over time." That's the first of the "3 new concepts" the instructor promised.</p>
+
+<h3>7.2 What "paradigm" actually means</h3>
+
+<p>The instructor uses the word "range" in Lecture 5 instead of "paradigm," but the semantics are the same — the same "learn a data distribution" task admits <em>multiple valid solutions</em>:</p>
+
+<ul>
+  <li><strong>AR / chain rule view</strong>: decompose the joint into a sequence of "conditional next."</li>
+  <li><strong>VAE / variational view</strong>: introduce a latent $z$ and maximise the ELBO (Chapters 2-3).</li>
+  <li><strong>Diffusion / denoising view</strong>: define a Markov noising chain and train a network to reverse it (Chapters 4-8).</li>
+  <li><strong>Score view</strong>: learn $\nabla_x \log p(x)$ and sample with Langevin (Chapters 9-10).</li>
+  <li><strong>Flow view</strong>: learn a continuous-time velocity field; push noise into data via an ODE (Chapters 12-15).</li>
+</ul>
+
+<p>These five lines are mathematically equivalent or inter-derivable — but <em>engineering-wise, data-wise, modality-wise</em>, each has its comfort zone. <strong>"Why does image pick diffusion and text pick AR"</strong> is the question of "in <em>this</em> modality, which line has the best engineering ledger." There is no one-sentence answer; the remaining 20 chapters give it one piece at a time.</p>
+
+<h2>VIII. The contrast table (7 comparison points the instructor accumulated across multiple lectures)</h2>
+
+<table>
+  <thead>
+    <tr><th>Dimension</th><th>Autoregressive (AR)</th><th>Diffusion</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>Prediction target</td><td>Next token $p(x_t \mid x_{<t})$</td><td>Recover all MASKed / noised tokens simultaneously</td></tr>
+    <tr><td>Conditioning direction</td><td>Strictly causal (left → right)</td><td>Bidirectional (any position attends any position)</td></tr>
+    <tr><td>Inference steps (typical)</td><td>~75 steps / 75 tokens</td><td>~14 steps (step count ≪ sequence length)</td></tr>
+    <tr><td>Can revise?</td><td>No — emitted tokens are frozen</td><td>Yes — later denoising steps can rewrite</td></tr>
+    <tr><td>Infilling (fill-in-the-blank)</td><td>Not natively supported; needs prompt tricks</td><td>Native (MASKed positions just get filled)</td></tr>
+    <tr><td>Reversal reasoning</td><td>"Who is Mary Lee's son?" often fails</td><td>Bidirectional training → more symmetric</td></tr>
+    <tr><td>Training scaling experience</td><td>Fully validated from GPT-1 to GPT-4</td><td>Only since 2024 has it been comparable at 8B scale</td></tr>
+  </tbody>
+</table>
+
+<div class="callout callout-note">
+🧭 <strong>How to read this table</strong>: it is not "diffusion wins" or "AR wins." It is 7 specific <em>design trade-offs</em>. Module 6 (Chapters 19–21) will tell you, point by point, which trade-offs diffusion LM has closed or pulled ahead on, and which still leave AR with a clear advantage.
+</div>
+
+<h2>IX. The Vizuara "80% + 3 new concepts" pledge</h2>
+
+<p>From Lecture 7, the instructor's load-bearing promise — and effectively the <strong>writing outline of this textbook</strong>:</p>
+
+<blockquote class="source-quote">
+"To truly understand diffusion language models, we actually really need to understand how auto-regressive models — I may also call this traditional language models — are built from scratch. ... For diffusion language models, their architecture is 80% similar to traditional language models with the addition of these three concepts."
+</blockquote>
+
+<p>What are these "3 new concepts"? The instructor doesn't reveal them in this chapter, but they're surfaced step-by-step in later chapters (the textbook routing):</p>
+
+<ol>
+  <li><strong>Forward noise / MASK process</strong> (Chapter 4 covers the image version; Chapter 19 covers the discrete version) — "training only sees prefixes" is replaced by "training sees the full sentence with parts corrupted."</li>
+  <li><strong>Time-step conditioning / noise schedule</strong> (set up in Chapters 4–6) — the network needs to know "which denoising step are we on right now."</li>
+  <li><strong>Loss changes from next-token CE to a denoising objective</strong> (Chapters 7–8; discrete version in 20–21) — the loss flips, but the Transformer backbone block stays the same.</li>
+</ol>
+
+<div class="callout callout-info">
+🔭 <strong>This section is the textbook's scaffold preview</strong>: Module 1 (VAE / ELBO) builds the mathematical foundation; Module 2 (DDPM) presents the "full version" of image diffusion; Modules 3–4 (Score / Flow) upgrade the viewpoint; Module 5 (sampling / latent) handles engineering acceleration; Module 6 (discrete / language) is where we finally return to Karpathy's question. You are in Chapter 1 — there are <em>20 chapters between you and the answer to the thesis hook</em>.
+</div>
+
+<h2>X. Why pick Vizuara as the primary source?</h2>
+
+<p>From Dr. Raj's self-introduction in Lecture 1:</p>
+
+<blockquote class="source-quote">
+"Hello everyone, this is Dr. Raj Dandekar. I'm very excited to present this learning material. ... when I started thinking about diffusion language models, I thought it was very difficult and the initial phase took a very long amount of time to really understand what's going on. But the final implementation, building it fully from scratch, comparing it with auto-regressive models, was fairly straightforward."
+</blockquote>
+
+<p>The textbook uses Vizuara's <em>Diffusion Language Models from Scratch</em> (21 lectures) as the <strong>primary source</strong> rather than any survey paper, for three reasons:</p>
+
+<ol>
+  <li><strong>"From scratch" PyTorch code</strong> — every formula maps to a code block; no hand-waving about architectures. This is in the same spirit as Karpathy's nano-GPT line.</li>
+  <li><strong>Direct comparison of AR and diffusion</strong> — the course doesn't pretend diffusion is some unfamiliar alien; it acknowledges that 80% is ARM and tells you precisely which 20% is the innovation.</li>
+  <li><strong>Recency</strong> — recorded in 2025–2026, covering MDLM / LLaDA / Mercury and the latest industrial systems.</li>
+</ol>
+
+<p>Secondary sources are CMU 10-799 S26 (Kelly Hu) and Vizuara's parallel image-diffusion course. The three together give:</p>
+
+<ul>
+  <li><strong>Vizuara LM</strong>: engineering view, PyTorch implementation, discrete text diffusion.</li>
+  <li><strong>Vizuara image</strong>: physical intuition (forward diffusion ↔ thermodynamics), probability-distribution-walking metaphors.</li>
+  <li><strong>CMU 10-799</strong>: mathematical rigour (ELBO derivation, score-matching geometry), and the phrase "the greatest mathematical trick of all time" for variational tricks.</li>
+</ul>
+
+<figure class="clip-frame">
+  <iframe src="https://www.youtube.com/embed/3awVF05VUuM?start=143" title="Vizuara L5: Karpathy's counterintuitive question — original clip" allowfullscreen></iframe>
+  <figcaption>📺 Vizuara <em>Diffusion Language Models from Scratch</em> Lecture 5 (around 2:23) — Dr. Raj Dandekar restates Karpathy's central puzzle: "why text prefers AR but image / video prefer diffusion?"</figcaption>
+</figure>
+
+<h2>XI. Reader map: where to go from here</h2>
+
+<p>After this chapter you should <strong>not be able to write any diffusion code yet</strong> — that's by design. The deliverable of this chapter is <em>research taste</em> and <em>structural scaffolding</em>, not technical details. Reading path forward:</p>
+
+<ul>
+  <li>Go immediately: <a href="/textbook/2/">Chapter 2 — VAE: Compressing Data into a Latent Space</a>. Reason: DDPM is essentially a $T$-step hierarchical VAE. Skipping VAE and jumping into diffusion drops an entire mathematical spine.</li>
+  <li>Then: <a href="/textbook/3/">Chapter 3 — ELBO: The Evidence Lower Bound</a>. Reason: ELBO is the parent template of every diffusion loss to come.</li>
+  <li>After: Chapters 4–8 (DDPM end-to-end derivation); Chapters 9–11 (Score / SDE perspective); Chapters 12–15 (Flow Matching and Consistency); Chapters 16–18 (samplers and latent diffusion); <strong>Chapters 19–21 (returning to this chapter's thesis hook — discrete diffusion and language models)</strong>.</li>
+</ul>
+
+<div class="my-addition">
+🟡 <strong>Author's note (beyond the source):</strong>
+<ul>
+  <li>Image generation surrendered to diffusion between 2020–2022 — DDPM (Ho et al. 2020) → DDIM (Song et al. 2020) → Imagen / DALL·E 2 / Stable Diffusion (2022). Pixel-level AR models (PixelCNN / PixelRNN) are now thoroughly retired.</li>
+  <li>Text diffusion only entered industrial deployment in 2024–2026 — MDLM (Sahoo et al. 2024) → LLaDA-8B (Nie et al. 2025) → Mercury (Inception Labs 2025). Only at 8B scale does diffusion LM start approaching same-size LLaMA; larger scales are still being chased.</li>
+  <li>The "is AR inertia or technical necessity" question has no academic consensus today. This textbook's working hypothesis: <em>AR's eight-year head start in KV-cache and scaling-law engineering is hard to close in a few papers; diffusion LM's real killer apps are likely the "non-autoregressive" use cases — infilling, control, agentic tasks — not direct chat replacement of AR</em>.</li>
+</ul>
+</div>
+
+<div class="takeaways">
+<strong>Seven anchors to commit to memory from this chapter</strong>
+<ol>
+  <li><strong>The thesis hook</strong> (dual source: Karpathy + Dr. Raj): "<em>Why has language stuck with AR while images and video surrendered to diffusion?</em>" Every formula in the next 20 chapters is evidence for the answer.</li>
+  <li><strong>Research methodology anchor</strong>: good research starts with <em>counterintuitive</em> questions; "from scratch" learning exposes the <em>gaps in your knowledge</em> — Karpathy's maxim, and this textbook's ethos.</li>
+  <li><strong>AR's formal definition</strong>: $p(x_1,\ldots,x_T)=\prod_t p(x_t\mid x_{<t})$, which the instructor calls "a fancy way to understand a very simple concept." Concrete example: prompt <code>once upon a time</code> → one token per step.</li>
+  <li><strong>The three-stage ARM scaffold</strong>: input (tokenize + embedding) → processor ($N$ Transformer blocks, each containing 6 components: LayerNorm / Attention / Dropout / Residual / FFN / Dropout+Residual) → output (LayerNorm + projection to vocab + cross-entropy). The hidden dimension 768 stays unchanged throughout. The same scaffold is reused unchanged for the next 20 chapters.</li>
+  <li><strong>AR's two real walls</strong>: the reversal curse ("who is Mary Lee Pfeiffer's son?") and slow inference (same length: AR ~75 steps, diffusion ~14 steps).</li>
+  <li><strong>The cognitive jump to the diffusion view</strong>: tokenise text into high-dim token space; "learn a probability distribution in that space" is no different in kind from doing so for images — "why should images and video generation models have all the fun?" (Sahoo et al., MDLM 2024).</li>
+  <li><strong>The "80% + 3" pledge</strong>: diffusion LM = ARM × 80% + 3 new concepts. So you cannot skip AR. This is the fundamental reason this textbook spends the first 8 chapters on maths and DDPM, and only returns to language in Module 6.</li>
+</ol>
+</div>
+
+</article>

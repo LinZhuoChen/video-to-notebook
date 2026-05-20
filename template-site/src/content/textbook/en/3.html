@@ -1,0 +1,404 @@
+<style>
+  .elbo-ch { line-height: 1.7; }
+  .elbo-ch svg { display: block; margin: 1.2rem auto; max-width: 100%; height: auto; }
+  .elbo-ch .clip-frame { max-width: 720px; margin: 1.4rem auto; }
+  .elbo-ch .clip-frame iframe { width: 100%; aspect-ratio: 16/9; border: 0; border-radius: 6px; }
+  .elbo-ch .clip-frame figcaption { color: var(--text-muted); font-size: 0.85rem; margin-top: 0.4rem; text-align: center; }
+  .elbo-ch .tldr { background: var(--surface-soft); border-left: 4px solid var(--module-accent); padding: 1rem 1.2rem; border-radius: 0 6px 6px 0; margin: 1.4rem 0; }
+  .elbo-ch .tldr h2 { margin-top: 0; font-size: 1.05rem; }
+  .elbo-ch .callout { padding: 0.7rem 1rem; margin: 1rem 0; border-radius: 0 6px 6px 0; }
+  .elbo-ch .callout-info { background: #eef6fc; border-left: 4px solid #2b80c4; }
+  .elbo-ch .callout-note { background: #f3f0fa; border-left: 4px solid #6f4dd0; }
+  .elbo-ch .callout-warning { background: #fff6e0; border-left: 4px solid #d4a017; }
+  .elbo-ch .callout-tip { background: #e8f5e9; border-left: 4px solid #0b5; }
+  .elbo-ch .callout-quote, .elbo-ch .source-quote { background: var(--surface-soft); border-left: 3px solid var(--border-strong); padding: 0.5rem 1rem; margin: 0.8rem 0; font-style: italic; color: var(--text-muted); }
+  .elbo-ch .my-addition { background: #fff7d6; border-left: 4px solid #b8860b; padding: 0.7rem 1rem; margin: 1rem 0; border-radius: 0 6px 6px 0; }
+  .elbo-ch pre { background: #1f1f1f; color: #f6f4ee; padding: 1rem; border-radius: 6px; font-size: 0.86rem; line-height: 1.55; overflow-x: auto; }
+  .elbo-ch code:not(pre code) { background: var(--surface-soft); padding: 0.1rem 0.35rem; border-radius: 3px; font-size: 0.9em; }
+  .elbo-ch h2 { border-bottom: 1px solid var(--border); padding-bottom: 0.3rem; margin-top: 2.4rem; }
+  .elbo-ch h3 { color: var(--module-accent); margin-top: 1.6rem; }
+  .elbo-ch .deriv-step { margin: 0.8rem 0; padding: 0.6rem 0.8rem; background: var(--surface-soft); border-radius: 4px; }
+  .elbo-ch .deriv-step strong { color: var(--module-accent); }
+  @keyframes elbo-lift { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-6px); } }
+  .elbo-ch .lift-arrow { animation: elbo-lift 2.6s ease-in-out infinite; transform-origin: center; }
+</style>
+
+<article class="elbo-ch">
+
+<h1>3. ELBO: The Evidence Lower Bound</h1>
+
+<p style="font-size:0.95rem; color:var(--text-muted);">Primary source: Vizuara <em>Principles of Diffusion Models</em> Lecture 2 (Dr. Raj Dandekar); secondary: CMU 10-799 S26 Lecture 1 (Kelly Hu). This chapter cracks open the step from the previous chapter — "$\log p(x)$ is intractable → replace with ELBO" — because it is the parent template for every diffusion loss in the rest of the textbook.</p>
+
+<div class="tldr">
+  <h2>📌 TL;DR</h2>
+  <p><strong>ELBO (Evidence Lower BOund) is a quantity we <em>can</em> compute, used as a proxy for the quantity we want but cannot compute — $\log p(x)$.</strong></p>
+  <p>Core inequality:</p>
+  $$\log p(x) \;\geq\; \underbrace{\mathbb{E}_{q(z|x)}[\log p(x|z)]}_{\text{reconstruction}} \;-\; \underbrace{D_{\mathrm{KL}}\!\big(q(z|x) \,\|\, p(z)\big)}_{\text{KL regulariser}} \;=\; \mathrm{ELBO}(x)$$
+  <p>The proof needs only three moves: (1) multiply by $q/q = 1$ inside the integral to rewrite it as an expectation under $q$; (2) apply Jensen's inequality to push $\log$ inside the expectation; (3) split the log and recognise the prior-related part as KL divergence.</p>
+  <p>Three names to memorise: $\log p(x)$ is called the <strong>evidence</strong>; ELBO is its <strong>lower bound</strong>; the gap between them is exactly $D_{\mathrm{KL}}(q \,\|\, \text{true posterior})$. So pushing ELBO up does two things at once — approximate the true log-likelihood, and push the variational $q$ toward the true posterior.</p>
+  <p><strong>Why read this chapter</strong>: VAE training (last chapter) is literally ELBO maximisation; DDPM training (starting Chapter 5) is ELBO unrolled across $T$ steps. Every "scary-looking" diffusion loss formula later has these three lines as its spine. We also lay down one meta-line: <strong>ELBO is not some alien — it belongs to the maximum-likelihood-estimation lineage, just the version we have to fall back on when $p(x)$ itself is intractable.</strong></p>
+</div>
+
+<h2>I. Meta: every loss function is some flavour of maximum likelihood</h2>
+
+<p>Before we plunge into ELBO's algebraic gymnastics, pause and ask a simpler question: <strong>why do we want to compute $\log p(x)$ in the first place? Why not just use MSE, CrossEntropy, BCE — the more "engineering-feeling" losses?</strong></p>
+
+<p>The unifying answer: <em>all of those are maximum-likelihood estimation in disguise</em>.</p>
+
+<ul>
+  <li><strong>Regression with MSE</strong> = MLE under "model output is the mean of a Gaussian": $-\log \mathcal{N}(y; \mu_\theta(x), \sigma^2)$ unrolls to a constant plus $\|y - \mu_\theta(x)\|^2$.</li>
+  <li><strong>Binary classification with BCE</strong> = MLE under "model output is a Bernoulli probability."</li>
+  <li><strong>Language modelling with cross-entropy</strong> = MLE under "next-token is categorical."</li>
+  <li><strong>Generative modelling?</strong> Theoretically we'd also like to maximise $\log p_\theta(x)$. The problem: when the model contains a latent variable $z$, $p_\theta(x) = \int p_\theta(x|z) p(z) \, dz$ is intractable in high dimensions. <em>That's the entire reason ELBO exists.</em></li>
+</ul>
+
+<div class="my-addition">
+🟡 <strong>Author's note</strong>: this "every loss is MLE" view gives the chapter a psychological anchor — <strong>we're not learning some weird new thing, we're using MLE to solve a degenerate case of MLE</strong>. $\log p_\theta(x)$ is what we genuinely want to maximise; ELBO is its "engineering-computable proxy." Once you internalise that, the VAE loss from last chapter, the ELBO derived here, and the DDPM $L_{\text{simple}}$ in Chapter 5 line up as <strong>the same stick</strong> — all variants of "MLE under a latent-variable structure."
+</div>
+
+<h2>II. Why detour through all this? Can't we maximise $\log p(x)$ directly?</h2>
+
+<p>Every generative model's "ideal target" is straightforward to write:</p>
+
+$$\max_\theta \sum_{i=1}^N \log p_\theta(x_i)$$
+
+<p>Given a training set, tune $\theta$ so the model assigns high probability to real data. If we could do this directly the world would be wonderful. But once the model has a latent variable $z$,</p>
+
+$$p_\theta(x) = \int p_\theta(x|z) \, p(z) \, dz$$
+
+<p>this integral is <strong>intractable</strong> in high dimensions. Three reasons (recap from last chapter):</p>
+
+<ol>
+  <li><strong>Curse of dimensionality</strong>. $z$ is typically tens to hundreds of dimensions; the sample count for numerical integration explodes exponentially.</li>
+  <li><strong>No analytic form</strong>. $p_\theta(x|z)$ is a neural network; no closed-form anti-derivative.</li>
+  <li><strong>Naive Monte Carlo has explosive variance</strong>. Sampling $z_k \sim p(z) = \mathcal{N}(0, I)$ and averaging $p(x|z_k)$ — most $z$ sampled from the prior <em>don't decode to $x$ at all</em> ($p(x|z_k) \approx 0$), so effective sample size is tiny.</li>
+</ol>
+
+<div class="callout-quote">
+Dr. Raj's recurring framing in Lecture 2: "<em>We can't integrate over the entire universe.</em>" We cannot enumerate every possible $z$.
+</div>
+
+<h3>2.1 Feel the "intractable" with a number</h3>
+
+<p>"High-dim integral can't be computed" goes numb after hearing it enough — here's a concrete number. Suppose $z$ is 100-D (typical VAE scale). For the naivest numerical integration, slicing each dimension into 10 steps requires $10^{100}$ grid points. The number of particles in the universe is about $10^{80}$. In other words, <strong>using every particle in the universe as a grid point isn't enough</strong>. This isn't "slow" — it's "physically impossible." So we must find another path.</p>
+
+<h3>2.2 The Earth-to-Mars cat metaphor (now repurposed)</h3>
+
+<p>From Lecture 2, Dr. Raj's vivid story about <em>why</em> $p(x)$ is intractable and why we must find a substitute to optimise:</p>
+
+<blockquote class="source-quote">
+Say you want to teleport a cat from Earth to Mars. Sending every atom is impossible. So you compress the cat into a "recipe" $z$ (the latent), transmit it, and decode it on Mars.<br><br>
+• <strong>Reconstruction goal</strong>: the cat decoded on Mars should look like the cat on Earth.<br>
+• <strong>Regularisation goal</strong>: the recipe must use a "standard language" — namely $\mathcal{N}(0, I)$ — or the receivers can't read it.
+</blockquote>
+
+<p>Adding an ELBO-flavoured layer to this metaphor:</p>
+
+<ul>
+  <li>"The probability the cat actually exists" $p(x)$ is like "the cat materialising fully and simultaneously on the Martian surface." That probability is universe-scale tiny — uncomputable.</li>
+  <li>What we <em>can</em> compute is: <em>given a recipe $z$, the probability of decoding into this cat</em> $p(x|z)$, plus <em>whether the recipe is well-formed</em> $p(z)$ versus $q(z|x)$.</li>
+  <li>Combining the two computable quantities (with the right signs and expectations) gives ELBO — a proxy objective whose expression we <strong>can write down, take gradients of, and backpropagate through</strong>.</li>
+</ul>
+
+<div class="callout callout-info">
+🧭 <strong>All the magic of this chapter in one sentence</strong>: since $p(x)$ is intractable, find a quantity $L$ such that $L \leq \log p(x)$ and $L$ is tractable. Maximise $L$ — "lifting the lower bound" indirectly lifts $\log p(x)$ too. <strong>ELBO is that $L$.</strong>
+</div>
+
+<h2>III. CMU side: Kelly Hu calls this "the greatest mathematical trick of all time"</h2>
+
+<p>Vizuara approaches the derivation intuition-first (hello machine → maths). CMU 10-799's instructor Kelly Hu takes a nearly reverent tone toward the same algebraic move. She calls the step "multiply by $q/q$ inside the integral, then apply Jensen" <strong>"the greatest mathematical trick of all time."</strong></p>
+
+<blockquote class="source-quote">
+Kelly (paraphrased): when you see $\log p(x) = \log \int p(x, z) \, dz$ and it's intractable, <em>don't</em> try to attack the integral head-on. Multiply by 1, turn the integral into an expectation, push the log inside — this is the entire reason the field of variational inference exists.
+</blockquote>
+
+<p>This chapter unpacks the "greatest trick" into six steps, each with a "why."</p>
+
+<h2>IV. Notation refresher</h2>
+
+<p>Every letter in the ELBO derivation comes from the VAE chapter, but in case you skipped it:</p>
+
+<ul>
+  <li><strong>$x$</strong>: observed data (e.g. a handwritten "hello" image).</li>
+  <li><strong>$z$</strong>: latent variable (secret recipe).</li>
+  <li><strong>$p(z)$</strong>: <strong>prior</strong>, typically $\mathcal{N}(0, I)$. "How latents are distributed before seeing any image."</li>
+  <li><strong>$p_\theta(x|z)$</strong>: <strong>likelihood / decoder</strong> with parameters $\theta$. "Given recipe $z$, the probability of producing image $x$."</li>
+  <li><strong>$p(x)$</strong>: <strong>marginal likelihood / evidence</strong>. $p(x) = \int p(x|z) p(z) \, dz$. The quantity we want to maximise. <em>Intractable.</em></li>
+  <li><strong>$p(z|x)$</strong>: <strong>true posterior</strong>. By Bayes, $p(z|x) = \frac{p(x|z)p(z)}{p(x)}$ — but $p(x)$ in the denominator makes it equally intractable.</li>
+  <li><strong>$q_\phi(z|x)$</strong>: <strong>variational approximate posterior / encoder</strong>, parameters $\phi$. Its job is to approximate $p(z|x)$. Typically $q_\phi(z|x) = \mathcal{N}(\mu_\phi(x), \sigma^2_\phi(x))$.</li>
+</ul>
+
+<div class="callout callout-warning">
+⚠️ <strong>The two KLs that get confused all the time</strong>:<br>
+• $D_{\mathrm{KL}}(q_\phi(z|x) \,\|\, p(z))$ — q vs <strong>prior</strong>, <em>tractable</em>, closed-form for Gaussian-Gaussian. This is the ELBO's regularisation term.<br>
+• $D_{\mathrm{KL}}(q_\phi(z|x) \,\|\, p(z|x))$ — q vs <strong>true posterior</strong>, <em>intractable</em> (because $p(z|x)$ is intractable). This is the gap between $\log p(x)$ and ELBO.<br>
+Same numerator-denominator shape, different second term — one tiny pipe character apart and the chapter falls apart.
+</div>
+
+<h2>V. The full ELBO derivation (six steps, each with Why)</h2>
+
+<p>The heart of this chapter. If you can close the book and reproduce these six lines, you understand ELBO.</p>
+
+<div class="deriv-step">
+<strong>Step 1: Start from the definition of evidence</strong>
+$$\log p(x) \;=\; \log \int p(x, z) \, dz \;=\; \log \int p(x|z) \, p(z) \, dz$$
+<em>Why</em>: $p(x)$ is $x$'s marginal — write it as an integral over the joint $p(x, z) = p(x|z) p(z)$, then take log because we want to maximise log-likelihood.<br>
+<em>Difficulty</em>: this integral is intractable in high-dim $z$.
+</div>
+
+<div class="deriv-step">
+<strong>Step 2: Multiply by $q(z|x) / q(z|x) = 1$ — Kelly's "greatest mathematical trick"</strong>
+$$= \log \int p(x|z) \, p(z) \cdot \frac{q_\phi(z|x)}{q_\phi(z|x)} \, dz \;=\; \log \int q_\phi(z|x) \cdot \frac{p(x|z) \, p(z)}{q_\phi(z|x)} \, dz$$
+<em>Why</em>: multiplying by "itself over itself" inside the integral doesn't change the value, but the structure becomes "density $q_\phi(z|x)$ times a function." That lets us rewrite the integral as an expectation under $q$ (which we <em>can</em> sample from).
+$$= \log \mathbb{E}_{q_\phi(z|x)}\!\left[\frac{p(x|z) \, p(z)}{q_\phi(z|x)}\right]$$
+<strong>Note: every move so far is an equality.</strong> No information lost yet.
+</div>
+
+<div class="deriv-step">
+<strong>Step 3: Apply Jensen's inequality</strong>
+$\log$ is concave. For a concave $f$ and random variable $Y$, Jensen says $f(\mathbb{E}[Y]) \geq \mathbb{E}[f(Y)]$. With $f = \log$:
+$$\log \mathbb{E}[Y] \geq \mathbb{E}[\log Y]$$
+Applied here:
+$$\log p(x) \;\geq\; \mathbb{E}_{q_\phi(z|x)}\!\left[\log \frac{p(x|z) \, p(z)}{q_\phi(z|x)}\right]$$
+<em>Why</em>: moving $\log$ from "outside the expectation" to "inside" is the qualitative leap — inside, we can split the log and identify familiar KL structure; outside, the log on an expectation is opaque.<br>
+<em>Cost</em>: equality becomes inequality. The lost slack is exactly $D_{\mathrm{KL}}(q_\phi(z|x) \,\|\, p(z|x))$ — proven in §VI.
+</div>
+
+<div class="deriv-step">
+<strong>Step 4: Split the log</strong>
+$$= \mathbb{E}_{q_\phi(z|x)}\!\big[\log p(x|z) + \log p(z) - \log q_\phi(z|x)\big]$$
+<em>Why</em>: $\log(abc) = \log a + \log b + \log c$, and $\log(a/b) = \log a - \log b$. Pure algebra.<br>
+ELBO is now "showing" — the first term is the decoder term; the remaining two combine into a KL.
+</div>
+
+<div class="deriv-step">
+<strong>Step 5: Bundle the prior-related terms</strong>
+$$= \mathbb{E}_{q_\phi(z|x)}[\log p(x|z)] \;+\; \mathbb{E}_{q_\phi(z|x)}\!\left[\log \frac{p(z)}{q_\phi(z|x)}\right]$$
+$$= \mathbb{E}_{q_\phi(z|x)}[\log p(x|z)] \;-\; \mathbb{E}_{q_\phi(z|x)}\!\left[\log \frac{q_\phi(z|x)}{p(z)}\right]$$
+<em>Why</em>: the second term is "expectation under $q$ of $\log(q/p)$" — exactly the form of KL divergence.
+</div>
+
+<div class="deriv-step">
+<strong>Step 6: Recognise the KL — write ELBO</strong>
+$$\boxed{\;\log p(x) \;\geq\; \underbrace{\mathbb{E}_{q_\phi(z|x)}[\log p(x|z)]}_{\text{recon}} \;-\; \underbrace{D_{\mathrm{KL}}\!\big(q_\phi(z|x) \,\|\, p(z)\big)}_{\text{KL regulariser}} \;=\; \mathrm{ELBO}(x)\;}$$
+<em>Why</em>: by definition $D_{\mathrm{KL}}(q \| p) := \mathbb{E}_q[\log(q/p)]$.<br>
+<em>Key point</em>: this KL is between $q$ and the <strong>prior $p(z)$</strong> (e.g. $\mathcal{N}(0, I)$), <strong>not</strong> the true posterior $p(z|x)$. The former has a closed form between two Gaussians, <em>tractable</em>. The latter is not. This is exactly why ELBO is computable.
+</div>
+
+<div class="callout callout-tip">
+💡 <strong>Section III's "greatest trick" = Steps 2 + 3</strong>.
+<ul>
+  <li>Step 2 packages the intractable integral as an expectation under $q$ — looks like "multiplying by 1, doing nothing," yet opens every door downstream.</li>
+  <li>Step 3 uses Jensen to push $\log$ inside the expectation — pays a cost (inequality) in exchange for a decomposable form.</li>
+</ul>
+Together they constitute the entire technical core of variational inference. Every diffusion or score-based model's loss derivation is basically these two moves applied on different probability structures.
+</div>
+
+<h2>VI. Why is $\log p(x) - \mathrm{ELBO} = D_{\mathrm{KL}}(q \,\|\, p_{\text{true posterior}})$?</h2>
+
+<p>Step 3 paid a cost — <strong>how big is the $\geq$ gap?</strong> The answer is a beautiful identity:</p>
+
+$$\log p(x) \;=\; \mathrm{ELBO}(x) \;+\; D_{\mathrm{KL}}\!\big(q_\phi(z|x) \,\|\, p(z|x)\big)$$
+
+<p>Short proof. Start from the definition of KL divergence:</p>
+
+$$D_{\mathrm{KL}}\!\big(q(z|x) \| p(z|x)\big) \;=\; \mathbb{E}_q\!\left[\log \frac{q(z|x)}{p(z|x)}\right]$$
+
+<p>Substitute Bayes $p(z|x) = p(x|z) p(z) / p(x)$ in the denominator:</p>
+
+$$= \mathbb{E}_q\!\left[\log \frac{q(z|x) \, p(x)}{p(x|z) \, p(z)}\right]$$
+
+<p>Split the log and pull $\log p(x)$ out of the expectation (it doesn't depend on $z$):</p>
+
+$$= \log p(x) \;-\; \underbrace{\big(\mathbb{E}_q[\log p(x|z)] - D_{\mathrm{KL}}(q(z|x) \| p(z))\big)}_{= \mathrm{ELBO}(x)}$$
+
+<p>So $\log p(x) = \mathrm{ELBO}(x) + D_{\mathrm{KL}}(q \,\|\, p_{\text{true posterior}})$. KL is non-negative, hence $\log p(x) \geq \mathrm{ELBO}(x)$. Equality holds iff $q(z|x) = p(z|x)$ — the variational approximation perfectly matches the true posterior.</p>
+
+<div class="callout callout-tip">
+💡 <strong>This identity says: maximising ELBO does two things at once</strong>:
+<ol>
+  <li>$\log p(x)$ is a fixed number for a given $x$, so "pushing ELBO up" $\Leftrightarrow$ "shrinking $D_{\mathrm{KL}}(q \| p_{\text{true posterior}})$" — i.e. <strong>training the encoder to better approximate the true posterior</strong>.</li>
+  <li>Since $\log p(x) \geq \mathrm{ELBO}$, pushing ELBO up raises the "ceiling that $\log p(x)$ has to clear" — indirectly <strong>training the decoder so the data likelihood increases</strong>.</li>
+</ol>
+One loss does two jobs — the elegance that makes variational inference beautiful.
+</div>
+
+<h2>VII. ELBO on a number line: Jensen's "lift"</h2>
+
+<svg viewBox="0 0 640 280" role="img" aria-label="Jensen inequality geometric lift">
+  <g font-family="ui-sans-serif" font-size="12" fill="var(--text)">
+    <line x1="60" y1="240" x2="600" y2="240" stroke="var(--border-strong)" stroke-width="1.2"/>
+    <line x1="60" y1="40" x2="60" y2="240" stroke="var(--border-strong)" stroke-width="1.2"/>
+    <text x="610" y="244" font-size="11" fill="var(--text-muted)">θ, φ (parameter space)</text>
+    <text x="40" y="36" font-size="11" fill="var(--text-muted)">value</text>
+
+    <path d="M 80 90 Q 220 60 360 80 T 580 110" fill="none" stroke="#2b80c4" stroke-width="2.2" stroke-dasharray="5 4"/>
+    <text x="380" y="74" fill="#2b80c4" font-weight="600">log p(x) (unreachable)</text>
+
+    <path d="M 80 180 Q 220 140 360 170 T 580 200" fill="none" stroke="#0b5" stroke-width="2.6"/>
+    <text x="380" y="222" fill="#0b5" font-weight="600">ELBO(x) (computable, optimisable)</text>
+
+    <g class="lift-arrow">
+      <line x1="240" y1="150" x2="240" y2="92" stroke="#d4a017" stroke-width="2"/>
+      <polygon points="240,84 235,96 245,96" fill="#d4a017"/>
+    </g>
+    <text x="252" y="120" fill="#d4a017" font-size="11">gap = D<tspan font-size="9" baseline-shift="sub">KL</tspan>(q ∥ true posterior)</text>
+
+    <circle cx="220" cy="60" r="4" fill="#2b80c4"/>
+    <circle cx="220" cy="140" r="4" fill="#0b5"/>
+    <text x="120" y="265" font-size="10.5" fill="var(--text-muted)">Push ELBO up → gap shrinks → the dashed (true likelihood) curve also rises</text>
+  </g>
+</svg>
+
+<p>Push the green solid (ELBO) up and the blue dashed (true log-likelihood) is at least as high. With enough variational flexibility and training, the gap can shrink to nearly zero. But the gap is always $\geq 0$ in theory: ELBO is a <em>lower</em> bound, not an equivalent.</p>
+
+<h2>VIII. The physical meaning of the two terms</h2>
+
+<p>Negate ELBO to get the loss minimised at training:</p>
+
+$$L_{\text{VAE}}(x) \;=\; -\,\mathrm{ELBO}(x) \;=\; \underbrace{-\,\mathbb{E}_{q_\phi(z|x)}[\log p_\theta(x|z)]}_{\text{reconstruction loss}} \;+\; \underbrace{D_{\mathrm{KL}}\!\big(q_\phi(z|x) \,\|\, p(z)\big)}_{\text{KL regularisation}}$$
+
+<h3>8.1 Reconstruction term</h3>
+
+<p>Pass real $x$ through the encoder → sample $z$ → feed $z$ to the decoder → maximise "how likely the decoder thinks the original $x$ is." In practice:</p>
+<ul>
+  <li>$p_\theta(x|z) = \mathcal{N}(\mu_\theta(z), \sigma^2 I)$ → $-\log p_\theta(x|z)$ simplifies to <strong>MSE</strong>.</li>
+  <li>$p_\theta(x|z) = \prod_i \text{Bernoulli}(\mu_i)$ → $-\log p_\theta(x|z)$ simplifies to <strong>binary cross-entropy</strong>.</li>
+</ul>
+
+<div class="my-addition">
+🟡 <strong>Author's note (echoing §I)</strong>: MSE and BCE reappear here as the specific MLE forms inside the decoder's conditional distribution. Full chain: <strong>we want MLE → latent makes $p(x)$ intractable → fall back to ELBO → ELBO's reconstruction simplifies back to MSE/BCE, the MLE under the decoder's conditional</strong>. MLE recurses through the chapter — every "can't compute it" wraps a variational proxy until it bottoms out at a tractable MLE.
+</div>
+
+<h3>8.2 KL regularisation</h3>
+
+<p>$D_{\mathrm{KL}}(q_\phi(z|x) \,\|\, p(z))$ measures the distance between the encoder's output distribution and the prior.</p>
+
+<ul>
+  <li>Without it, the encoder cheats — map every image to a hyper-narrow $\delta$-distribution and let the decoder memorise. The latent space degenerates back to disconnected points.</li>
+  <li>KL <strong>forces</strong> $q_\phi(z|x)$ to look like $\mathcal{N}(0, I)$ — neither too wide ($\sigma$ too large gets penalised) nor too narrow ($-\log \sigma^2$ explodes), centred near the origin.</li>
+  <li>Result: different images' $q_\phi(z|x)$ overlap; the latent space becomes continuous; sampling any $z$ decodes to a sensible image.</li>
+</ul>
+
+<h2>IX. Aligning ELBO with the previous chapter's VAE</h2>
+
+<p>You should now have an "aha — the VAE loss <em>is</em> the negative ELBO" moment.</p>
+
+<table style="width:100%; border-collapse:collapse; margin:1rem 0;">
+<thead>
+<tr style="background:var(--surface-soft);">
+<th style="text-align:left; padding:0.5rem; border:1px solid var(--border);">VAE concept (Ch 2)</th>
+<th style="text-align:left; padding:0.5rem; border:1px solid var(--border);">Counterpart in the ELBO derivation</th>
+</tr>
+</thead>
+<tbody>
+<tr><td style="padding:0.5rem; border:1px solid var(--border);">Encoder $q_\phi(z|x)$</td><td style="padding:0.5rem; border:1px solid var(--border);">Variational approximate posterior</td></tr>
+<tr><td style="padding:0.5rem; border:1px solid var(--border);">Decoder $p_\theta(x|z)$</td><td style="padding:0.5rem; border:1px solid var(--border);">In the reconstruction term $\mathbb{E}_q[\log p_\theta(x|z)]$</td></tr>
+<tr><td style="padding:0.5rem; border:1px solid var(--border);">Prior $p(z) = \mathcal{N}(0, I)$</td><td style="padding:0.5rem; border:1px solid var(--border);">In the KL regularisation term</td></tr>
+<tr><td style="padding:0.5rem; border:1px solid var(--border);">Reparameterisation $z = \mu + \sigma \odot \epsilon$</td><td style="padding:0.5rem; border:1px solid var(--border);">Makes the reconstruction-term expectation differentiable</td></tr>
+<tr><td style="padding:0.5rem; border:1px solid var(--border);">$L_{\text{VAE}} = $ BCE + KL</td><td style="padding:0.5rem; border:1px solid var(--border);">$L_{\text{VAE}} = -\mathrm{ELBO}$</td></tr>
+</tbody>
+</table>
+
+<p>Chapter 2 "reverse-engineered" the VAE loss from intuition; this chapter "forward-derived" ELBO from $\log p(x)$. They are equivalent. <strong>VAE is the simplest concrete instance of the ELBO mathematical structure.</strong></p>
+
+<div class="callout callout-warning">
+⚠️ <strong>Common misconception</strong>: "ELBO is VAE-specific."<br>
+<strong>Correction</strong>: ELBO is the universal training objective for <em>any latent-variable probabilistic generative model</em>. VAE is the simplest instance (one latent step). DDPM is another ($T$ latent steps, Gaussian transition kernel, fixed encoder). Score-based and flow-matching models also trace back to ELBO.
+</div>
+
+<h2>X. Forward look: DDPM's loss is just $T$-step ELBO</h2>
+
+<p>VAE's latent is one step: $x \to z \to x$. DDPM <strong>unrolls into $T$ steps</strong>:</p>
+
+$$x = x_0 \;\to\; x_1 \;\to\; x_2 \;\to\; \cdots \;\to\; x_T \approx \mathcal{N}(0, I)$$
+
+<p>Each forward step $q(x_t | x_{t-1})$ is fixed (no learnable parameters, just a variance schedule). Each reverse step $p_\theta(x_{t-1} | x_t)$ is learnable.</p>
+
+<p>The full ELBO looks like (derivation in Chapter 5):</p>
+
+$$\log p(x_0) \;\geq\; \mathbb{E}_q\!\left[\log p_\theta(x_0 | x_1) \;-\; \sum_{t=2}^T D_{\mathrm{KL}}\!\big(q(x_{t-1} | x_t, x_0) \,\|\, p_\theta(x_{t-1} | x_t)\big) \;-\; D_{\mathrm{KL}}\!\big(q(x_T | x_0) \,\|\, p(x_T)\big)\right]$$
+
+<p>Scary-looking, but the skeleton is VAE's ELBO:</p>
+
+<ul>
+  <li>Leftmost term — <strong>reconstruction</strong> ("last step recovers $x_0$ from $x_1$").</li>
+  <li>The big sum of KLs — <strong>one per step</strong> (VAE has 1; DDPM has $T-1$).</li>
+  <li>Rightmost KL — <strong>does $x_T$ end up close to the prior?</strong> (Same role as VAE's prior-matching KL.)</li>
+</ul>
+
+<h3>10.1 The simple-loss sneak peek</h3>
+
+<p>That $T$-term ELBO compresses (via reparameterisation + completing-the-square + a carefully chosen variance) into <strong>one line of MSE</strong>:</p>
+
+$$L_{\text{simple}}(\theta) \;=\; \mathbb{E}_{t, x_0, \epsilon}\Big[\big\|\epsilon - \epsilon_\theta(x_t, t)\big\|^2\Big]$$
+
+<p>"Why does such a complex ELBO collapse to a noise-prediction MSE?" Because the forward chain is Gaussian, and every-step KL between two Gaussians simplifies to "squared distance between two means." This is Ho et al. 2020's engineering contribution. <strong>The simplification starts from this chapter's ELBO</strong>. Echoing §I: this MSE is also "MLE under a conditional Gaussian" — MLE recurses.</p>
+
+<h2>XI. ELBO as a general optimisation paradigm</h2>
+
+<p>ELBO isn't just a formula; it's a general <strong>recipe</strong> for "I want to compute X but X is intractable":</p>
+
+<ol>
+  <li>Identify what you actually want (here: $\log p(x)$).</li>
+  <li>Acknowledge it's intractable; isolate the culprit (high-dim integral).</li>
+  <li>Introduce an auxiliary distribution $q$ (easy to sample / parameterise).</li>
+  <li>Construct a tractable lower (or upper) bound.</li>
+  <li>Gradient-optimise the proxy.</li>
+</ol>
+
+<p>The same pattern recurs through ML — EM algorithm, variational inference, every diffusion/score-based training objective.</p>
+
+<h2>XII. Common misconceptions</h2>
+
+<h3>12.1 "ELBO is an inequality — what exactly is optimised at train time?"</h3>
+
+<p>ELBO itself (negated for gradient descent). We never directly optimise $\log p(x)$; we optimise its computable lower bound, which is a well-defined function of $\theta, \phi$.</p>
+
+<h3>12.2 "Why use KL($q \| p$) not KL($p \| q$)?"</h3>
+
+<p>KL is asymmetric. ELBO naturally yields <strong>forward KL</strong>, which is <strong>mode-seeking</strong> — if the true posterior is multimodal, $q$ tends to cover only one mode. This is a known "feature" of variational inference. Diffusion uses forward KL for engineering tractability.</p>
+
+<h3>12.3 "When is Jensen tight?"</h3>
+
+<p>Iff $Y$ is constant under the relevant distribution. In our derivation $Y = p(x,z)/q(z|x)$. Constant in $z$ under $q$ means $q(z|x) = p(z|x)$ — same condition as the §VI identity. <strong>Training the encoder to better approximate the true posterior</strong> and <strong>tightening ELBO</strong> are the same task.</p>
+
+<h2>XIII. (Optional) ELBO from an information-theory angle</h2>
+
+<p>Regrouped:</p>
+
+$$\mathrm{ELBO}(x) \;=\; \mathbb{E}_{q(z|x)}[\log p(x|z)] \;-\; D_{\mathrm{KL}}(q(z|x) \| p(z))$$
+
+<ul>
+  <li>First term: decoder's log-probability of the observation — the <strong>negative reconstruction coding cost</strong>.</li>
+  <li>Second term: the <strong>latent's coding cost</strong> — bits to encode $z$ with the prior codebook, minus bits with $q$.</li>
+</ul>
+
+<p>Maximising ELBO equals <strong>minimising total coding length</strong> — encoding $x$ via $z$ with the fewest bits. This is the rate-distortion / bits-back-coding view, linking VAE to lossless compression. Hinton & Zemel's 1993 paper on autoencoders and minimum description length derives an objective which, in hindsight, is ELBO — so it's been rediscovered many times. ELBO is simultaneously <strong>MLE's latent-variable extension</strong> and <strong>MDL's probabilistic version</strong>.</p>
+
+<h2>XIV. Source video clips</h2>
+
+<figure class="clip-frame">
+  <iframe src="https://www.youtube.com/embed/Yyir7-OAnlA?start=540" title="Vizuara L2: ELBO derivation whiteboard" allowfullscreen></iframe>
+  <figcaption>📺 Vizuara <em>Principles of Diffusion Models</em> Lecture 2 (around 9 min) — Dr. Raj's whiteboard derivation of the key Jensen step. §V's six steps are the unrolled version of this.</figcaption>
+</figure>
+
+<figure class="clip-frame">
+  <iframe src="https://www.youtube.com/embed/p7Q77S_ZhdA?start=0" title="CMU 10-799 S26 L1: Kelly Hu opening" allowfullscreen></iframe>
+  <figcaption>📺 CMU 10-799 S26 Lecture 1 — Kelly Hu opens with the probability viewpoint on diffusion and flow matching. She later calls "multiply by $q/q$ + Jensen" "the greatest mathematical trick of all time."</figcaption>
+</figure>
+
+<div class="takeaways" style="background:#0b5; color:#fff; padding:1.4rem; border-radius:8px; margin-top:2rem;">
+  <h3 style="margin-top:0; color:#fff;">Seven anchors to take away</h3>
+  <ol>
+    <li><strong>Every loss is a flavour of MLE</strong>. MSE = Gaussian MLE; BCE = Bernoulli MLE; ELBO = the proxy you fall back on when the latent-variable structure makes $p(x)$ intractable.</li>
+    <li><strong>$\log p(x)$ is intractable</strong> (Dr. Raj's "we can't integrate over the entire universe" / Earth-to-Mars cat). So we maximise its tractable lower bound <strong>ELBO</strong>.</li>
+    <li><strong>ELBO = reconstruction $-$ KL</strong>. Reconstruction makes the decoder rebuild the image; KL keeps the encoder's $q(z|x)$ close to $p(z) = \mathcal{N}(0, I)$.</li>
+    <li><strong>"The greatest mathematical trick of all time"</strong> (Kelly Hu) = multiplying the integral by $q/q$ + Jensen's inequality. These two moves together <em>are</em> variational inference.</li>
+    <li><strong>The identity</strong> $\log p(x) = \mathrm{ELBO}(x) + D_{\mathrm{KL}}(q(z|x) \| p(z|x))$. Pushing ELBO up does two jobs (improve likelihood + improve variational approximation).</li>
+    <li><strong>The KL inside ELBO is q vs the prior, not q vs the true posterior</strong>. Former tractable (closed form for two Gaussians); latter not (true posterior is itself intractable). This is the design trick that makes ELBO usable.</li>
+    <li><strong>VAE = ELBO's simplest instance; DDPM = ELBO unrolled across $T$ steps</strong>. §V's six steps + Markov-chain forward + Bayes-reverse = parent template for every diffusion loss to come.</li>
+  </ol>
+</div>
+
+</article>
