@@ -13,9 +13,11 @@ A Python CLI + Astro static-site generator that:
 5. **Explains** each concept as a rich illustrated encyclopedia entry.
 6. **Builds** the lot into a static Astro site you can host on GitHub Pages.
 
-## Agent-driven workflow
+## Agent-driven workflow (default in v2.3+)
 
-Every LLM stage (`tag`, `cluster`, `curriculum`, `synthesize`, `explain`) supports a two-phase **`--print-prompts` / `--apply-results`** pattern. The CLI emits a JSON envelope describing pending work; you (the agent) read it, decide, write a results JSON; the CLI applies that to SQLite.
+Every LLM stage (`tag`, `cluster`, `curriculum`, `synthesize`, `explain`) runs **in-session by default** — no `ANTHROPIC_API_KEY` required. The CLI writes a JSON prompts envelope to `<state_dir>/prompts/<step>.json` and exits. You read the envelope, reason, write a decisions JSON to the sibling `.decisions.json` path, then re-invoke the same command with `--apply`. The CLI applies your decisions to SQLite.
+
+`tag` and `cluster` also expose an opt-in `--use-api` flag that drives the Anthropic SDK directly (if you have a key). `curriculum`, `synthesize`, `explain` are in-session-only — they have no API path.
 
 The protocol is **agent-agnostic**. Schemas, conventions, idempotency guarantees, error semantics all live in [`docs/AGENT_PROTOCOL.md`](docs/AGENT_PROTOCOL.md). Read that file before driving the pipeline for the first time.
 
@@ -28,12 +30,15 @@ video-to-notebook crawl "<youtube-or-bilibili-url>" --name <slug>
 # Repeat crawl for each course
 
 # Then, for each LLM stage:
-video-to-notebook <stage> [args] --print-prompts > /tmp/cm-prompts.json
-# (you read the envelope, reason, write /tmp/cm-results.json)
-video-to-notebook <stage> [args] --apply-results /tmp/cm-results.json
+video-to-notebook <stage> [args]
+# CLI writes <state_dir>/prompts/<step>.json and prints a 3-line stderr hint.
+# You read the envelope, reason, write <state_dir>/prompts/<step>.decisions.json.
+video-to-notebook <stage> [args] --apply
 ```
 
 For `tag` this is a batch loop (small `--limit`, repeat until `chunks` array empty in the prompts envelope). For `cluster`, `curriculum` it's one-shot. For `synthesize` it's per-chapter; for `explain` it's per-concept.
+
+For a worked end-to-end recipe, see [`examples/frontier-notebook/RUNBOOK.md`](examples/frontier-notebook/RUNBOOK.md).
 
 ### Agent identifier
 
@@ -110,7 +115,8 @@ rm -rf .video-to-notebook/textbook/*.html .video-to-notebook/concepts/*.html
 sqlite3 .video-to-notebook/db.sqlite "UPDATE curriculum_chapters SET status='planned', synthesized_path=NULL, synthesized_at=NULL; DELETE FROM concept_explanations;"
 
 # 2. Translate curriculum titles + blurbs in-place via SQL (preserves order/slugs)
-#    OR re-run `video-to-notebook curriculum --print-prompts/--apply-results`.
+#    OR re-run `video-to-notebook curriculum` (writes prompts/curriculum.json),
+#    edit decisions, then `video-to-notebook curriculum --apply`.
 # 3. Loop: synthesize chapters 1..21 + explain all concepts via in-session agent.
 # 4. Build → fragments land under .video-to-notebook/textbook/ + concepts/, then
 #    `video-to-notebook build` copies them into `<project>/site/src/content/<area>/en/`.
@@ -184,12 +190,13 @@ CI runs the same three commands.
 
 - **Pipeline walkthrough**: `skills/video-to-notebook/SKILL.md` (skill format, but the prose is agent-agnostic).
 - **JSON schemas**: `docs/AGENT_PROTOCOL.md`.
-- **Design spec**: `docs/specs/2026-05-09-video-to-notebook-skill-design.md`.
+- **In-session recipe**: `examples/frontier-notebook/RUNBOOK.md`.
+- **Design specs**: `docs/specs/`.
 - **Implementation plans** (TDD-decomposed): `docs/superpowers/plans/`.
 - **Examples**: `examples/frontier-notebook/` (5-course World-Models corpus).
-- **Changelog**: `CHANGELOG.md` (v1.0 → v2.2.1, including bilingual demo scaffolding and language toggle fix).
+- **Changelog**: `CHANGELOG.md` (v1.0 → v2.3.0, including in-session-default behavior flip).
 - **Bilingual demo plan**: `docs/plans/2026-05-19-bilingual-demo.md`.
 
 ## In one line
 
-> *Drive the pipeline through `--print-prompts` / `--apply-results`. Read `docs/AGENT_PROTOCOL.md` for the schemas. Set your agent-id so audits work. Don't commit synthesized HTML — it's derived from copyrighted source.*
+> *Drive the pipeline by re-invoking each LLM command with `--apply` after writing the decisions JSON. Read `docs/AGENT_PROTOCOL.md` for the schemas. Set your agent-id so audits work. Don't commit synthesized HTML — it's derived from copyrighted source.*

@@ -1,6 +1,6 @@
 [project]
 name = "video-to-notebook"
-version = "2.2.1"
+version = "2.3.0"
 description = "Crawl open-courseware video playlists, tag with concepts via Claude / Codex / any agent, and render an interactive cross-course study notebook + concept encyclopedia"
 readme = "README.md"
 requires-python = ">=3.12"

@@ -132,9 +132,9 @@ Module 5  · 现代架构与未来         🌸 玫红
 
 ## 🚀 快速上手
 
-### 路线 A——不要 API key，靠 AI agent 驱动
+### 路线 A——不要 API key，靠 AI agent 驱动（默认）
 
-每个 LLM 阶段（`tag` / `cluster` / `curriculum` / `synthesize` / `explain`）都有 `--print-prompts` / `--apply-results` 两个标志。在 **Claude Code**、**OpenAI Codex**、**Cursor**、**Continue** 或你自己的脚本里驱动整套 pipeline——不需要单独的 API key。详见下面 [**§ 用 AI coding agent 驱动**](#-用-ai-coding-agent-驱动) 段落。
+每个 LLM 阶段（`tag` / `cluster` / `curriculum` / `synthesize` / `explain`）默认就走 in-session：CLI 把 prompt envelope 写到 `<state_dir>/prompts/<step>.json` 后退出；你（agent）把决策写到同目录的 `.decisions.json`，再用 `--apply` 重跑一次就把结果落到 DB。支持 **Claude Code**、**OpenAI Codex**、**Cursor**、**Continue** 或你自己的脚本——都不需要单独的 API key。详见下面 [**§ 用 AI coding agent 驱动**](#-用-ai-coding-agent-驱动) 段落。
 
 ### 路线 B——配 Anthropic API key
 
@@ -155,11 +155,13 @@ video-to-notebook crawl "https://www.youtube.com/playlist?list=PLxxx" --name cs3
 # B 站——单视频、季选集、合集都行。需要 cookies（看下面 § B 站 一节）
 video-to-notebook crawl "https://www.bilibili.com/video/BVxxx/" --name vizuara-llm --cookies-from chrome
 
-video-to-notebook tag      --ontology examples/ontology-llm.yaml  # 每门课 ~$0.10
-video-to-notebook cluster  --ontology examples/ontology-llm.yaml  # 每跑一次 ~$0.30
+video-to-notebook tag      --ontology examples/ontology-llm.yaml --use-api  # 每门课 ~$0.10
+video-to-notebook cluster  --ontology examples/ontology-llm.yaml --use-api  # 每跑一次 ~$0.30
 video-to-notebook build
 video-to-notebook serve    # http://localhost:4321
 ```
+
+> `--use-api` 显式启用 Anthropic SDK 路径。不加 = 走默认的 in-session（路线 A）。
 
 5 门课的语料首跑总成本：**~$2-4**，重跑 **$0**（每个 chunk 幂等）。
 
@@ -247,7 +249,7 @@ video-to-notebook build                    # 继续干活
 
 ## 🤖 用 AI coding agent 驱动
 
-每个 LLM 阶段都支持 **`--print-prompts` / `--apply-results`** 两段式流程。CLI 把待办工作以 JSON envelope 输出到 stdout；agent 读、推理、写一份结果 JSON；CLI 把结果应用到 SQLite。这套协议是**与 agent 无关的**——schema 和约定都在 [`docs/AGENT_PROTOCOL.md`](docs/AGENT_PROTOCOL.md) 里。
+每个 LLM 阶段默认就走两段式 in-session（v2.3+）：CLI 把待办工作以 JSON envelope 写到 `<state_dir>/prompts/<step>.json` 后退出；agent 读、推理，把决策 JSON 写到同目录的 `.decisions.json`；用 `--apply` 重跑一次就把结果应用到 SQLite。这套协议是**与 agent 无关的**——schema 和约定都在 [`docs/AGENT_PROTOCOL.md`](docs/AGENT_PROTOCOL.md) 里。
 
 <table>
 <tr>
@@ -302,15 +304,15 @@ Codex 读 [`AGENTS.md`](AGENTS.md)（Codex 的 CLAUDE.md 对应物）和 [`docs/
 
 ### ⚙️ 纯 API key
 
-如果你不用 agent，直接 `export ANTHROPIC_API_KEY=...`，然后 `tag` + `cluster` 都不加 `--print-prompts` 跑。它们会直接调用 Anthropic API（带 prompt caching），每门课 ~$0.30-0.80。
+不用 agent 时，`export ANTHROPIC_API_KEY=...`，然后给 `tag` + `cluster` 加 `--use-api`。它们会直接调 Anthropic API（带 prompt caching），每门课 ~$0.30-0.80。
 
-教材生成阶段（`curriculum` / `synthesize` / `explain`）目前**仅支持 in-session 模式**——它们是为 agent 的逐步推理设计的，不适合一次性 API 调用。
+教材生成阶段（`curriculum` / `synthesize` / `explain`）**仅支持 in-session 模式**——它们是为 agent 的逐步推理设计的，不适合一次性 API 调用。
 
 </td>
 </tr>
 </table>
 
-### 📋 In-session 流程（任意 agent 通用）
+### 📋 In-session 流程（任意 agent 通用，这是新默认）
 
 ```
 agent 说    "爬这个播放列表，用 examples/ontology-llm.yaml 打标。"
@@ -318,21 +320,24 @@ agent 说    "爬这个播放列表，用 examples/ontology-llm.yaml 打标。"
 CLI 循环：
   video-to-notebook init && video-to-notebook crawl <url>
   for batch in chunks_of(20):
-    video-to-notebook tag --print-prompts --limit 20 > p.json
-    agent 读 p.json、写 r.json
-    video-to-notebook tag --apply-results r.json
-  video-to-notebook cluster --print-prompts > c.json
-  agent 读 c.json、写 c-apply.json
-  video-to-notebook cluster --apply-results c-apply.json
+    video-to-notebook tag --limit 20                # 写 prompts/tag.json
+    agent 读 prompts/tag.json，
+      写  prompts/tag.decisions.json
+    video-to-notebook tag --apply
+  video-to-notebook cluster                         # 写 prompts/cluster.json
+  agent 读 + 写 prompts/cluster.decisions.json
+  video-to-notebook cluster --apply
   curriculum / synthesize（逐章）/ explain（逐概念）同样的两段式
   video-to-notebook build
 ```
+
+（端到端 worked example：[`examples/frontier-notebook/RUNBOOK.md`](examples/frontier-notebook/RUNBOOK.md)。）
 
 ### 成本与速度取舍
 
 |                          | API key 模式 | In-session 模式 |
 |--------------------------|--------------|------------------|
-| 需要 API key             | ✅ 是        | ❌ 否            |
+| 需要 API key             | ✅ 是（`--use-api`） | ❌ 否            |
 | 5 门课语料成本           | ~$2-4       | $0 额外（你 agent 的订阅已包） |
 | 1000 chunk 速度          | ~5-10 分钟  | ~1-2 小时        |
 | 100 chunk 速度           | ~30 秒      | ~5-10 分钟       |
@@ -345,9 +350,9 @@ CLI 循环：
 
 ```bash
 # 1. 在 Claude Code 里设计章节顺序（in-session）
-video-to-notebook curriculum --print-prompts > curr.json
-# Claude 读 curr.json、设计章节顺序、写 curr-results.json
-video-to-notebook curriculum --apply-results curr-results.json
+video-to-notebook curriculum                              # 写 prompts/curriculum.json
+# Claude 读它、设计章节顺序、写 prompts/curriculum.decisions.json
+video-to-notebook curriculum --apply
 
 # 2. agent 问你：整本批量做，还是一章一章来？
 #    - 整本批量：循环跑完所有 N 章，每章生成后立即 apply，最后 build 一次。
@@ -355,7 +360,7 @@ video-to-notebook curriculum --apply-results curr-results.json
 #    - 一章一章：合成第 1 章 → build → 把控制权交还给你检查 /textbook/1/ →
 #                给反馈后再做第 2 章。适合新语料的首跑。
 # 3. 每一章（两种模式都一样）：
-video-to-notebook synthesize --chapter N --print-prompts > chN.json
+video-to-notebook synthesize --chapter N                  # 写 prompts/synthesize/chapter-N.json
 # Agent 读 + 写 /tmp/chN.html，遵循 v3 风格指南：
 #   - 顶部 TL;DR + 8–14 个编号小节（一二三四……）
 #   - 逐步推导，每行带 **Why**: 注解
@@ -365,7 +370,7 @@ video-to-notebook synthesize --chapter N --print-prompts > chN.json
 #   - 引入模型时给完整 PyTorch 骨架
 #   - 5–7 条 takeaway，锚定到讲师给的具体例子
 #   - 目标正文长度：每章 5,000–8,000 中文字
-video-to-notebook synthesize --chapter N --apply-results apply-chN.json
+video-to-notebook synthesize --chapter N --apply
 
 # 4. 构建 + 查看
 video-to-notebook build
@@ -379,13 +384,13 @@ video-to-notebook serve  # http://localhost:4321/textbook/
 线性教材给首次阅读者用。概念百科给想就**单个**概念深入的人用：
 
 ```bash
-video-to-notebook explain --concept linear-algebra --print-prompts > la.json
+video-to-notebook explain --concept linear-algebra        # 写 prompts/explain/linear-algebra.json
 # Claude 写 /tmp/la.html，遵循 v2 风格指南：
 #   - 每个概念 CSS namespace 前缀（la-）
 #   - 仅用 CSS 变量颜色（暗色模式 + 模块强调色都通用）
 #   - 9 个固定章节顺序
 #   - 3 种交互组件模板任选一
-video-to-notebook explain --concept linear-algebra --apply-results la-results.json
+video-to-notebook explain --concept linear-algebra --apply
 
 video-to-notebook build  # /concepts/<slug>/ 立刻有了图文详解
 ```

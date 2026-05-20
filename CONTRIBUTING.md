@@ -87,7 +87,7 @@ Open an issue with:
 - `video-to-notebook version` output
 - OS + Python version
 
-For crawl/tag bugs, please include the corresponding `video-to-notebook crawl --debug` or `tag --print-prompts` JSON output if redactable.
+For crawl/tag bugs, please include the corresponding `video-to-notebook crawl --debug` output, or the contents of `<state_dir>/prompts/tag.json` from a default `tag` invocation, if redactable.
 
 ## License
 

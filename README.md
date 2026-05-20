@@ -132,9 +132,9 @@ No React, no Vue. Astro + 200 lines of vanilla JS. The whole concept page weighs
 
 ## 🚀 Quickstart
 
-### Option A — no API key, drive from an AI agent
+### Option A — no API key, drive from an AI agent (default)
 
-Every LLM stage (`tag`, `cluster`, `curriculum`, `synthesize`, `explain`) has `--print-prompts` / `--apply-results` flags. Drive the pipeline from inside **Claude Code**, **OpenAI Codex**, **Cursor**, **Continue**, or your own script — no separate API key needed. See [**§ Drive it from your AI coding agent**](#-drive-it-from-your-ai-coding-agent) below for setup.
+Every LLM stage (`tag`, `cluster`, `curriculum`, `synthesize`, `explain`) runs in-session by default. The CLI writes a prompts envelope to `<state_dir>/prompts/<step>.json` and exits; you (the agent) write decisions to the sibling `.decisions.json` and re-invoke with `--apply`. Works from **Claude Code**, **OpenAI Codex**, **Cursor**, **Continue**, or your own script. See [**§ Drive it from your AI coding agent**](#-drive-it-from-your-ai-coding-agent) below.
 
 ### Option B — with an Anthropic API key
 
@@ -155,11 +155,13 @@ video-to-notebook crawl "https://www.youtube.com/playlist?list=PLxxx" --name cs3
 # Bilibili — single video, season list, or series. Cookies required (see § Bilibili below).
 video-to-notebook crawl "https://www.bilibili.com/video/BVxxx/" --name vizuara-llm --cookies-from chrome
 
-video-to-notebook tag      --ontology examples/ontology-llm.yaml  # ~$0.10/course
-video-to-notebook cluster  --ontology examples/ontology-llm.yaml  # ~$0.30/run
+video-to-notebook tag      --ontology examples/ontology-llm.yaml --use-api  # ~$0.10/course
+video-to-notebook cluster  --ontology examples/ontology-llm.yaml --use-api  # ~$0.30/run
 video-to-notebook build
 video-to-notebook serve    # http://localhost:4321
 ```
+
+> The `--use-api` flag opts in to the Anthropic SDK path. Without it, the CLI defaults to writing in-session prompts (Option A).
 
 Total cost for a 5-course corpus: **~$2-4** first run, **$0** on re-runs (idempotent).
 
@@ -248,7 +250,7 @@ The `course-merger` binary still exists as a back-compat shim — it prints a on
 
 ## 🤖 Drive it from your AI coding agent
 
-Every LLM stage supports a **`--print-prompts` / `--apply-results`** two-phase flow. The CLI emits a JSON envelope of pending work; the agent reads it, reasons, writes a results JSON; the CLI applies that to SQLite. The protocol is **agent-agnostic** — schemas + conventions live in [`docs/AGENT_PROTOCOL.md`](docs/AGENT_PROTOCOL.md).
+Every LLM stage defaults to a two-phase **in-session** flow (v2.3+): the CLI writes a JSON envelope of pending work to `<state_dir>/prompts/<step>.json` and exits; the agent reads it, reasons, writes the decisions JSON to the sibling `.decisions.json` path; the CLI applies that to SQLite when you re-invoke with `--apply`. The protocol is **agent-agnostic** — schemas + conventions live in [`docs/AGENT_PROTOCOL.md`](docs/AGENT_PROTOCOL.md).
 
 <table>
 <tr>
@@ -303,15 +305,15 @@ When writing the results envelope, set the agent-id (`tagger_model_id`, `synthes
 
 ### ⚙️ Plain API key
 
-If you don't use an agent, set `ANTHROPIC_API_KEY` and run `tag` + `cluster` without `--print-prompts`. They'll call the Anthropic API directly with prompt caching. ~$0.30-0.80 per course.
+If you don't use an agent, set `ANTHROPIC_API_KEY` and pass `--use-api` to `tag` + `cluster`. They'll call the Anthropic API directly with prompt caching. ~$0.30-0.80 per course.
 
-The textbook-generation stages (`curriculum`, `synthesize`, `explain`) currently only work via the in-session flow — they're built for an agent's reasoning, not one-shot API calls.
+The textbook-generation stages (`curriculum`, `synthesize`, `explain`) only work via the in-session flow — they're built for an agent's reasoning, not one-shot API calls.
 
 </td>
 </tr>
 </table>
 
-### 📋 In-session flow (any agent)
+### 📋 In-session flow (any agent, the new default)
 
 ```
 agent says        "Crawl this playlist and tag using examples/ontology-llm.yaml."
@@ -319,21 +321,24 @@ agent says        "Crawl this playlist and tag using examples/ontology-llm.yaml.
 CLI loop:
   video-to-notebook init && video-to-notebook crawl <url>
   for batch in chunks_of(20):
-    video-to-notebook tag --print-prompts --limit 20 > p.json
-    agent reads p.json, writes r.json
-    video-to-notebook tag --apply-results r.json
-  video-to-notebook cluster --print-prompts > c.json
-  agent reads c.json, writes c-apply.json
-  video-to-notebook cluster --apply-results c-apply.json
+    video-to-notebook tag --limit 20            # writes prompts/tag.json
+    agent reads prompts/tag.json,
+      writes  prompts/tag.decisions.json
+    video-to-notebook tag --apply
+  video-to-notebook cluster                     # writes prompts/cluster.json
+  agent reads + writes prompts/cluster.decisions.json
+  video-to-notebook cluster --apply
   same for curriculum / synthesize (per chapter) / explain (per concept)
   video-to-notebook build
 ```
+
+(For an end-to-end worked example, see [`examples/frontier-notebook/RUNBOOK.md`](examples/frontier-notebook/RUNBOOK.md).)
 
 ### Cost & speed trade-offs
 
 |                          | API key mode | In-session mode |
 |--------------------------|--------------|------------------|
-| API key required         | ✅ yes       | ❌ no            |
+| API key required         | ✅ yes (`--use-api`) | ❌ no            |
 | Cost for demo corpus     | ~$2-4       | $0 extra (covered by your agent's subscription) |
 | Speed for 1000 chunks    | ~5-10 min   | ~1-2 hours       |
 | Speed for 100 chunks     | ~30 sec     | ~5-10 min        |
@@ -346,9 +351,9 @@ After `tag` + `cluster`, synthesize the corpus into a merged textbook:
 
 ```bash
 # 1. Design the chapter sequence (in-session in Claude Code)
-video-to-notebook curriculum --print-prompts > curr.json
-# Claude reads curr.json, designs the chapter order, writes curr-results.json
-video-to-notebook curriculum --apply-results curr-results.json
+video-to-notebook curriculum                              # writes prompts/curriculum.json
+# Claude reads it, designs the chapter order, writes prompts/curriculum.decisions.json
+video-to-notebook curriculum --apply
 
 # 2. The agent asks you: batch mode or chapter-by-chapter?
 #    - 整本批量做: loops through all N chapters, applies as it goes, build once.
@@ -358,7 +363,7 @@ video-to-notebook curriculum --apply-results curr-results.json
 #                 Best for the first run on a new corpus.
 
 # 3. For each chapter (whichever mode):
-video-to-notebook synthesize --chapter N --print-prompts > chN.json
+video-to-notebook synthesize --chapter N                   # writes prompts/synthesize/chapter-N.json
 # Agent reads + writes /tmp/chN.html following the v3 style guide:
 #   - TL;DR callout at the top + 8–14 numbered sections (一二三四 …)
 #   - Step-by-step derivations with **Why**: annotations per line
@@ -368,7 +373,7 @@ video-to-notebook synthesize --chapter N --print-prompts > chN.json
 #   - Complete PyTorch skeleton when a model is introduced
 #   - 5–7 takeaways anchored to lecturer-given examples
 #   - Target body length: 5,000–8,000 中文字 per chapter
-video-to-notebook synthesize --chapter N --apply-results apply-chN.json
+video-to-notebook synthesize --chapter N --apply
 
 # 4. Build & view
 video-to-notebook build
@@ -382,13 +387,13 @@ Each chapter is a self-contained HTML fragment with inline SVG, CSS animations, 
 Linear textbooks are great for first-time readers. The concept encyclopedia is for the reader looking up *one* idea in depth:
 
 ```bash
-video-to-notebook explain --concept linear-algebra --print-prompts > la.json
-# Claude writes /tmp/la.html following the v2 style guide:
+video-to-notebook explain --concept linear-algebra        # writes prompts/explain/linear-algebra.json
+# Claude writes prompts/explain/linear-algebra.decisions.json following the v2 style guide:
 #   - per-concept CSS namespace prefix (la-)
 #   - CSS-variable-only colors (works in light + dark + per-module accent)
 #   - 9 fixed sections in order
 #   - one of 3 interactive widget templates
-video-to-notebook explain --concept linear-algebra --apply-results la-results.json
+video-to-notebook explain --concept linear-algebra --apply
 
 video-to-notebook build  # /concepts/<slug>/ now serves the rich explainer
 ```

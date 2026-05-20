@@ -131,10 +131,10 @@ If the user explicitly says "I have Max" or "no API key", default to in-session 
 ### In-session tag loop
 
 ```bash
-video-to-notebook tag --ontology <ont.yaml> --print-prompts --limit 20 > /tmp/cm-prompts.json
+video-to-notebook tag --ontology <ont.yaml> --limit 20
 ```
 
-Read `/tmp/cm-prompts.json`:
+The CLI writes `.video-to-notebook/prompts/tag.json` and prints a 3-line stderr hint. Read that file:
 
 ```json
 {
@@ -145,7 +145,7 @@ Read `/tmp/cm-prompts.json`:
 }
 ```
 
-For each chunk, decide tags (your own reasoning) and write `/tmp/cm-results.json`:
+For each chunk, decide tags (your own reasoning) and write `.video-to-notebook/prompts/tag.decisions.json`:
 
 ```json
 {
@@ -161,24 +161,24 @@ For each chunk, decide tags (your own reasoning) and write `/tmp/cm-results.json
 Apply:
 
 ```bash
-video-to-notebook tag --ontology <ont.yaml> --apply-results /tmp/cm-results.json
+video-to-notebook tag --ontology <ont.yaml> --apply
 ```
 
-Repeat until `--print-prompts` returns empty `chunks` array.
+Repeat until re-running `tag` produces an envelope with an empty `chunks` array.
 
 ### In-session cluster
 
 ```bash
-video-to-notebook cluster --ontology <ont.yaml> --print-prompts > /tmp/cm-cluster-prompts.json
+video-to-notebook cluster --ontology <ont.yaml>
 ```
 
-Read the envelope. For each cluster, decide merge / create / reject / ambiguous.
+The CLI writes `.video-to-notebook/prompts/cluster.json`. Read it. For each cluster, decide merge / create / reject / ambiguous.
 
-Construct apply bundle (single file with BOTH envelopes):
+Construct the decisions file at `.video-to-notebook/prompts/cluster.decisions.json` (single file with BOTH envelopes):
 
 ```json
 {
-  "_prompts_envelope": { ... full /tmp/cm-cluster-prompts.json content ... },
+  "_prompts_envelope": { ... full content of prompts/cluster.json ... },
   "decisions_envelope": {
     "schema_version": "1",
     "kind": "cluster_results",
@@ -193,7 +193,7 @@ Construct apply bundle (single file with BOTH envelopes):
 Apply:
 
 ```bash
-video-to-notebook cluster --ontology <ont.yaml> --apply-results /tmp/cm-cluster-apply.json
+video-to-notebook cluster --ontology <ont.yaml> --apply
 ```
 
 ## Textbook generation (v1.2+, Plan 6)
@@ -203,10 +203,10 @@ After tag + cluster complete, you can synthesize the corpus into a beginner-frie
 ### Step T1: Design the curriculum
 
 ```bash
-video-to-notebook curriculum --print-prompts > /tmp/cm-curr.json
+video-to-notebook curriculum
 ```
 
-Read `/tmp/cm-curr.json`. It contains every concept that has chunks + sample chunks per concept. Decide a beginner-pedagogical chapter order. Write `/tmp/cm-curr-results.json`:
+The CLI writes `.video-to-notebook/prompts/curriculum.json` — every concept that has chunks + sample chunks per concept. Decide a beginner-pedagogical chapter order. Write `.video-to-notebook/prompts/curriculum.decisions.json`:
 
 ```json
 {
@@ -229,7 +229,7 @@ Read `/tmp/cm-curr.json`. It contains every concept that has chunks + sample chu
 Apply:
 
 ```bash
-video-to-notebook curriculum --apply-results /tmp/cm-curr-results.json
+video-to-notebook curriculum --apply
 ```
 
 ### Step T1.5: Ask the user which synthesis mode (DEFAULT — do this every time)
@@ -244,7 +244,7 @@ Question: 这门课怎么生成？
 - 一章一章来 (推荐第一次跑或换了课程主题) — 我先做第 1 章给你看，确认深度 / 排版 / 比喻取舍后再继续下一章。每章之间你可以反馈。
 ```
 
-When the user picks **batch mode**: loop through chapters 1..N, do `--print-prompts` → write HTML → `--apply-results` for each, then `build` once at the end. Don't pause between chapters unless an error blocks you.
+When the user picks **batch mode**: loop through chapters 1..N, run `synthesize --chapter N` (which writes the prompts envelope), produce HTML, then `--apply` for each; `build` once at the end. Don't pause between chapters unless an error blocks you.
 
 When the user picks **chapter-by-chapter**: do chapter 1 only, then `build` immediately so they can open the page in browser, then explicitly hand control back ("第 1 章已上线 http://localhost:4321/textbook/1/ — 看完告诉我继续还是改方向"). Wait for their go-ahead before chapter 2.
 
@@ -257,10 +257,10 @@ The same choice applies to `video-to-notebook explain` (concept pages) — ask t
 For each chapter N:
 
 ```bash
-video-to-notebook synthesize --chapter N --print-prompts > /tmp/cm-chN.json
+video-to-notebook synthesize --chapter N
 ```
 
-Read the envelope: chapter spec + all source chunks for the chapter's primary + related concepts + style guide. Following the style guide:
+The CLI writes `.video-to-notebook/prompts/synthesize/chapter-N.json`. Read it — chapter spec + all source chunks for the chapter's primary + related concepts + style guide. Following the style guide:
 - **Textbook-note depth (target 5,000–8,000 中文字 per chapter)** — the chapter should read like a graduate student's Obsidian study notes after watching the lecture, NOT a magazine summary. Concrete checklist: (1) TL;DR callout block at the top with the central formula + a hook; (2) 8–14 top-level sections using 一二三四 …; (3) step-by-step derivations with `<div class="deriv-step">` blocks containing `**Why**:` annotations for every non-trivial algebra move (reader follows with a pencil); (4) preserve ALL distinctive lecturer analogies — if the lecturer gave 4 metaphors for the same concept, keep all 4; (5) 3–5 callout boxes inline (`callout-info / callout-note / callout-warning / callout-tip / callout-quote`) for tone differentiation; (6) engineering details (numerical stability, training gotchas) embedded as callouts at the point they become relevant, not as appendices; (7) complete, runnable PyTorch skeleton (not pseudo-code) when the chapter introduces a model; (8) 5–7 takeaways at the end, each anchored to a specific lecturer-given example. Under 4,000 字 = under-developed. Over 10,000 字 = bloated.
 - **Source fidelity first** — extract the lecturer's metaphors, worked examples, named citations, and verbatim phrasings from the chunks BEFORE drafting. The chapter's job is to faithfully transmit how the lecturer actually taught it; your own framing is layered on top with explicit flags (e.g. "教材外补充：…"). If two courses give different metaphors, present both labelled. Failure mode: writing a generic textbook paraphrase a reader of the lectures wouldn't recognise.
 - **🛑 No fabrication — debug the pipeline instead** — if the source_chunks don't actually contain pedagogy on the chapter's primary concept (e.g. all 20 chunks are course logistics, or one alphabetically-early course dominates while another course has the real coverage), **STOP and fix the pipeline**, do NOT paper over the gap with LLM-generated content. Common bugs to check: synthesize SQL `LIMIT 20 ORDER BY course_slug` causes the alphabetically-first course to monopolise; tagging may have matched by lecture-title keyword without the concept actually being discussed; `--max-source-chunks` may be too low. Diagnose first: `sqlite3 .video-to-notebook/db.sqlite "SELECT courses.slug, COUNT(*) FROM chunk_concepts cc JOIN chunks ON chunks.id=cc.chunk_id JOIN lectures ON lectures.id=chunks.lecture_id JOIN courses ON courses.id=lectures.course_id JOIN concepts ON concepts.id=cc.concept_id WHERE concepts.slug='<primary>' GROUP BY courses.slug"`. If the DB has chunks but envelope is thin, the bug is in synthesize SQL; if the DB is empty, the bug is in tag.
@@ -277,7 +277,7 @@ Write the HTML fragment to `/tmp/cm-chN.html` (just `<article>...</article>` bod
 Apply:
 
 ```bash
-cat > /tmp/cm-apply.json <<EOF
+cat > .video-to-notebook/prompts/synthesize/chapter-N.decisions.json <<EOF
 {
   "schema_version": "1",
   "kind": "synthesize_results",
@@ -286,7 +286,7 @@ cat > /tmp/cm-apply.json <<EOF
   "html_fragment_path": "/tmp/cm-chN.html"
 }
 EOF
-video-to-notebook synthesize --chapter N --apply-results /tmp/cm-apply.json
+video-to-notebook synthesize --chapter N --apply
 ```
 
 ### Step T3: Build & view

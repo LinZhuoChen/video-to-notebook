@@ -1,8 +1,19 @@
 #!/usr/bin/env bash
-# build.sh — run the full video-to-notebook pipeline for the Frontier Notebook demo
+# build.sh — one-shot API-key path for the Frontier Notebook demo
 #
-# Reads courses.toml in this directory, crawls every entry, tags & clusters
-# using ontology.yaml, builds the static site.
+# REQUIRES ANTHROPIC_API_KEY. For the no-key, agent-driven path see RUNBOOK.md
+# in this directory; that one is the documented default in v2.3+.
+#
+# What this script does (end-to-end, no agent in the loop):
+#   1. init + crawl every entry in courses.toml
+#   2. tag    via --use-api (Claude Haiku)
+#   3. cluster via --use-api (Claude Sonnet)
+#   4. build the static site
+#
+# It does NOT drive curriculum / synthesize / explain — those steps are
+# in-session only. The site will still build (existing chapter / concept
+# fragments are picked up from the DB) but you will need an agent to
+# generate new textbook chapters and concept pages.
 #
 # v2.2+ bilingual support:
 #   bash build.sh                 # zh only (default — backwards compatible)
@@ -101,12 +112,12 @@ while IFS='|' read -r SLUG URL PLATFORM COOKIES; do
 done < /tmp/cm-courses.txt
 
 echo ""
-echo "=== tag ==="
-video-to-notebook tag --ontology "$ONTOLOGY"
+echo "=== tag (--use-api) ==="
+video-to-notebook tag --ontology "$ONTOLOGY" --use-api
 
 echo ""
-echo "=== cluster ==="
-video-to-notebook cluster --ontology "$ONTOLOGY"
+echo "=== cluster (--use-api) ==="
+video-to-notebook cluster --ontology "$ONTOLOGY" --use-api
 
 # Helper: regenerate synthesize/explain content for the current language.
 # (curriculum + synthesize + explain are in-session only — this script can't

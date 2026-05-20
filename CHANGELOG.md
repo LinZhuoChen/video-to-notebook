@@ -2,6 +2,45 @@
 
 All notable changes to video-to-notebook (formerly `course-merger`). Follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/).
 
+## [2.3.0] — 2026-05-20
+
+### Changed — in-session is now the default for every LLM-driven command
+
+All five LLM commands (`tag`, `cluster`, `curriculum`, `synthesize`, `explain`) now default to **writing a prompt envelope to disk and exiting**, expecting an in-session agent (Claude Code, Codex, ...) to write a decisions JSON and re-invoke the command with `--apply`. No `ANTHROPIC_API_KEY` is needed for the default path.
+
+Previously `tag` and `cluster` defaulted to calling the Anthropic SDK; `curriculum` / `synthesize` / `explain` defaulted to printing prompts to stdout. Both old paths are gone — the five commands are now unified.
+
+| Command | New default behavior |
+|---|---|
+| `tag` | Writes `<state_dir>/prompts/tag.json`, exits 0 |
+| `cluster` | Writes `<state_dir>/prompts/cluster.json`, exits 0 |
+| `curriculum` | Writes `<state_dir>/prompts/curriculum.json`, exits 0 |
+| `synthesize --chapter N` | Writes `<state_dir>/prompts/synthesize/chapter-N.json`, exits 0 |
+| `explain --concept SLUG` | Writes `<state_dir>/prompts/explain/<SLUG>.json`, exits 0 |
+
+Every default invocation emits a three-line stderr hint with the prompt path, the expected decisions path, and the exact follow-up `--apply` command.
+
+### Added
+
+- `--use-api` flag on `tag` and `cluster` — opt-in to the old Anthropic SDK path (requires `ANTHROPIC_API_KEY`). `curriculum` / `synthesize` / `explain` have no API path and never did.
+- `--apply` shorthand on all five commands — reads decisions from the default `<state_dir>/prompts/<step>.decisions.json` (or `<step>/<id>.decisions.json` for synthesize / explain). Equivalent to `--apply-results <default-path>`.
+- `examples/frontier-notebook/bootstrap.sh` — no-LLM subset of the pipeline (init + crawl). Run this first, then drive the LLM stages from inside Claude Code or Codex.
+- `examples/frontier-notebook/RUNBOOK.md` — agent-facing recipe walking through tag → cluster → curriculum → synthesize → explain → build, with worked JSON examples and SQL helper snippets.
+- `src/video_to_notebook/inflow.py` — single source of truth for in-session prompt/decision paths, atomic envelope write, and stderr hint format. Used by all five LLM commands.
+
+### Deprecated
+
+- `--print-prompts` is now a no-op alias that warns to stderr and otherwise behaves like the new default. Scripts that piped `video-to-notebook <step> --print-prompts | jq ...` must switch to reading the file from disk. The flag will be removed in a future release.
+
+### Maintained
+
+- `--apply-results <path>` still accepts an explicit decisions path — no change for callers that already pass an explicit path.
+- `examples/frontier-notebook/build.sh` still works end-to-end if `ANTHROPIC_API_KEY` is set — it now passes `--use-api` internally for the LLM stages. The script's surface (flags, output) is unchanged.
+
+### Migration
+
+If your scripts called `video-to-notebook tag --ontology X` (no flags) and expected the API path: add `--use-api`. Otherwise the new default writes a prompts file and exits without calling Claude.
+
 ## [2.2.1] — 2026-05-20
 
 ### Fixed — language toggle now honours `BASE_URL` on Pages

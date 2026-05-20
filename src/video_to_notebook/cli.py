@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import importlib.metadata
-import json
 import shutil
 import sys
 from enum import StrEnum
@@ -38,6 +37,17 @@ from video_to_notebook.db.session import init_db
 from video_to_notebook.explain.prompt_io import (
     apply_explain_results,
     collect_explain_prompts,
+)
+from video_to_notebook.inflow import (
+    cluster_paths,
+    curriculum_paths,
+    emit_hint,
+    explain_paths,
+    read_decisions,
+    synthesize_paths,
+    tag_paths,
+    warn_print_prompts_deprecated,
+    write_envelope,
 )
 from video_to_notebook.synthesize.prompt_io import (
     apply_synthesize_results,
@@ -76,6 +86,30 @@ DEFAULT_CONFIG_TOML = """\
 # tagger_model = "claude-haiku-4-5"
 # cluster_review_model = "claude-sonnet-4-6"
 """
+
+
+def _reject_mutually_exclusive(**flags: bool) -> None:
+    """Exit 1 if two or more of the given boolean flags are set.
+
+    Keys must be the public flag spellings (e.g. ``apply``, ``use_api``);
+    the error message prints them with leading ``--`` and underscores
+    replaced by hyphens.
+    """
+    active = [name for name, is_set in flags.items() if is_set]
+    if len(active) >= 2:
+        rendered = ", ".join(f"--{n.replace('_', '-')}" for n in active)
+        typer.echo(f"error: mutually exclusive flags: {rendered}", err=True)
+        raise typer.Exit(code=1)
+
+
+def _load_project_state_dir() -> Path:
+    """Resolve the active project's state dir (``<root>/.video-to-notebook``)."""
+    try:
+        root = find_project_root(Path.cwd())
+    except ProjectNotInitializedError as e:
+        typer.echo(f"error: {e}")
+        raise typer.Exit(code=1) from e
+    return root / PROJECT_MARKER
 
 
 @app.command("init")
@@ -309,7 +343,7 @@ def tag_cmd(
         ..., "--ontology", help="Path to ontology YAML.", exists=True, dir_okay=False
     ),
     model: str = typer.Option(
-        "claude-haiku-4-5", "--model", help="Claude model id (API mode only)."
+        "claude-haiku-4-5", "--model", help="Claude model id (--use-api only)."
     ),
     course: str | None = typer.Option(
         None, "--course", help="Only tag chunks of this course slug."
@@ -317,44 +351,73 @@ def tag_cmd(
     limit: int | None = typer.Option(
         None, "--limit", help="Max chunks to process this run."
     ),
-    print_prompts: bool = typer.Option(
-        False, "--print-prompts",
-        help="Emit untagged chunks as JSON envelope to stdout (in-session mode).",
+    apply: bool = typer.Option(
+        False, "--apply",
+        help="Read decisions from the default path and write tags to DB.",
     ),
     apply_results: Path | None = typer.Option(
         None, "--apply-results",
-        help="Read tag results JSON from this path and write to DB (in-session mode).",
+        help="Read decisions JSON from an explicit path and write to DB.",
+    ),
+    use_api: bool = typer.Option(
+        False, "--use-api",
+        help="Opt in to the Anthropic-SDK path (requires ANTHROPIC_API_KEY).",
+    ),
+    print_prompts: bool = typer.Option(
+        False, "--print-prompts",
+        help="DEPRECATED — printing prompts is now the default. Will be removed.",
     ),
 ) -> None:
-    """Assign concept tags to chunks. Default mode calls Claude Haiku.
+    """Assign concept tags to chunks.
 
-    --print-prompts / --apply-results provide an API-free path for Claude
-    Max subscribers running inside a Claude Code conversation.
+    Default mode writes an in-session prompt envelope to
+    ``<state_dir>/prompts/tag.json`` and exits, expecting an agent to write
+    decisions to the sibling ``.decisions.json`` and re-invoke with --apply.
+    Pass --use-api to call Claude Haiku directly instead.
     """
-    try:
-        root = find_project_root(Path.cwd())
-    except ProjectNotInitializedError as e:
-        typer.echo(f"error: {e}")
-        raise typer.Exit(code=1) from e
-
-    if print_prompts and apply_results is not None:
-        typer.echo("error: --print-prompts and --apply-results are mutually exclusive")
-        raise typer.Exit(code=1)
-
-    onto = load_ontology(ontology)
-    db_path = root / PROJECT_MARKER / "db.sqlite"
-
+    _reject_mutually_exclusive(
+        apply=apply,
+        apply_results=apply_results is not None,
+        use_api=use_api,
+    )
     if print_prompts:
-        envelope = collect_tag_prompts(
-            db_path=db_path, ontology=onto, course_slug=course, limit=limit,
+        if apply or apply_results is not None or use_api:
+            typer.echo(
+                "error: --print-prompts cannot be combined with --apply / "
+                "--apply-results / --use-api",
+                err=True,
+            )
+            raise typer.Exit(code=1)
+        warn_print_prompts_deprecated()
+
+    state_dir = _load_project_state_dir()
+    onto = load_ontology(ontology)
+    db_path = state_dir / "db.sqlite"
+
+    if use_api:
+        client = anthropic.Anthropic()
+        tagger = ClaudeTagger(client=client, model=model, ontology=onto)
+        report = run_tag(
+            db_path=db_path, tagger=tagger, ontology=onto,
+            course_slug=course, limit=limit,
         )
-        sys.stdout.write(json.dumps(envelope, ensure_ascii=False, indent=2))
-        sys.stdout.write("\n")
+        typer.echo(
+            f"done: {report.chunks_tagged} chunks tagged, "
+            f"{report.tags_known_written} known tags, "
+            f"{report.tags_proposed_written} proposed tags, "
+            f"{report.parse_failures} parse failures"
+        )
         return
 
-    if apply_results is not None:
-        with apply_results.open("r", encoding="utf-8") as fh:
-            results = json.load(fh)
+    prompts_path, decisions_path = tag_paths(state_dir)
+
+    if apply or apply_results is not None:
+        src = apply_results if apply_results is not None else decisions_path
+        try:
+            results = read_decisions(src)
+        except FileNotFoundError as e:
+            typer.echo(f"error: {e}", err=True)
+            raise typer.Exit(code=1) from e
         report = apply_tag_results(db_path=db_path, ontology=onto, results=results)
         typer.echo(
             f"done (in-session): {report.chunks_tagged} chunks tagged, "
@@ -363,17 +426,15 @@ def tag_cmd(
         )
         return
 
-    client = anthropic.Anthropic()
-    tagger = ClaudeTagger(client=client, model=model, ontology=onto)
-    report = run_tag(
-        db_path=db_path, tagger=tagger, ontology=onto,
-        course_slug=course, limit=limit,
+    envelope = collect_tag_prompts(
+        db_path=db_path, ontology=onto, course_slug=course, limit=limit,
     )
-    typer.echo(
-        f"done: {report.chunks_tagged} chunks tagged, "
-        f"{report.tags_known_written} known tags, "
-        f"{report.tags_proposed_written} proposed tags, "
-        f"{report.parse_failures} parse failures"
+    write_envelope(prompts_path, envelope)
+    emit_hint(
+        prompts_path=prompts_path,
+        decisions_path=decisions_path,
+        size_summary=f"{len(envelope['chunks'])} chunks",
+        next_command=f"video-to-notebook tag --ontology {ontology} --apply",
     )
 
 
@@ -383,56 +444,86 @@ def cluster_cmd(
         ..., "--ontology", help="Path to ontology YAML.", exists=True, dir_okay=False
     ),
     review_model: str = typer.Option(
-        "claude-sonnet-4-6", "--review-model", help="Claude model for review (API mode)."
+        "claude-sonnet-4-6", "--review-model",
+        help="Claude model for review (--use-api only).",
     ),
     threshold: float = typer.Option(
         0.75, "--threshold", help="Cosine similarity threshold for merging proposed tags."
     ),
-    print_prompts: bool = typer.Option(
-        False, "--print-prompts",
-        help="Emit cluster decisions to stdout (in-session mode).",
+    apply: bool = typer.Option(
+        False, "--apply",
+        help="Read decisions from the default path and write cluster results to DB.",
     ),
     apply_results: Path | None = typer.Option(
         None, "--apply-results",
-        help="Apply a cluster decisions JSON bundle to DB. The file must contain "
-        "both `_prompts_envelope` and `decisions_envelope` (or top-level decisions).",
+        help="Read decisions JSON from an explicit path. The file must contain both "
+        "`_prompts_envelope` and `decisions_envelope` (or top-level decisions).",
+    ),
+    use_api: bool = typer.Option(
+        False, "--use-api",
+        help="Opt in to the Anthropic-SDK path (requires ANTHROPIC_API_KEY).",
+    ),
+    print_prompts: bool = typer.Option(
+        False, "--print-prompts",
+        help="DEPRECATED — printing prompts is now the default. Will be removed.",
     ),
 ) -> None:
-    """Cluster proposed tags. Default mode calls Claude Sonnet.
+    """Review near-duplicate proposed tags and decide merge / create / reject.
 
-    --print-prompts / --apply-results provide an API-free path.
+    Default mode writes an in-session prompt envelope to
+    ``<state_dir>/prompts/cluster.json`` and exits. Pass --use-api to call
+    Claude Sonnet directly instead.
     """
-    try:
-        root = find_project_root(Path.cwd())
-    except ProjectNotInitializedError as e:
-        typer.echo(f"error: {e}")
-        raise typer.Exit(code=1) from e
+    _reject_mutually_exclusive(
+        apply=apply,
+        apply_results=apply_results is not None,
+        use_api=use_api,
+    )
+    if print_prompts:
+        if apply or apply_results is not None or use_api:
+            typer.echo(
+                "error: --print-prompts cannot be combined with --apply / "
+                "--apply-results / --use-api",
+                err=True,
+            )
+            raise typer.Exit(code=1)
+        warn_print_prompts_deprecated()
 
-    if print_prompts and apply_results is not None:
-        typer.echo("error: --print-prompts and --apply-results are mutually exclusive")
-        raise typer.Exit(code=1)
-
+    state_dir = _load_project_state_dir()
     onto = load_ontology(ontology)
-    db_path = root / PROJECT_MARKER / "db.sqlite"
+    db_path = state_dir / "db.sqlite"
     embedder = Embedder()
 
-    if print_prompts:
-        envelope = collect_cluster_prompts(
-            db_path=db_path, ontology=onto, embedder=embedder, threshold=threshold,
+    if use_api:
+        client = anthropic.Anthropic()
+        reviewer = Reviewer(client=client, model=review_model, ontology=onto)
+        report = run_cluster(
+            db_path=db_path, embedder=embedder, reviewer=reviewer, threshold=threshold,
         )
-        sys.stdout.write(json.dumps(envelope, ensure_ascii=False, indent=2))
-        sys.stdout.write("\n")
+        typer.echo(
+            f"done: {report.clusters_reviewed} clusters reviewed | "
+            f"{report.merged} merged, {report.created} created, "
+            f"{report.rejected} rejected, {report.ambiguous} ambiguous"
+        )
         return
 
-    if apply_results is not None:
-        with apply_results.open("r", encoding="utf-8") as fh:
-            payload = json.load(fh)
+    prompts_path, decisions_path = cluster_paths(state_dir)
+
+    if apply or apply_results is not None:
+        src = apply_results if apply_results is not None else decisions_path
+        try:
+            payload = read_decisions(src)
+        except FileNotFoundError as e:
+            typer.echo(f"error: {e}", err=True)
+            raise typer.Exit(code=1) from e
         prompts = payload.get("_prompts_envelope") or payload.get("prompts")
         decisions = payload.get("decisions_envelope") or payload.get("decisions") or payload
         if prompts is None or "clusters" not in prompts:
             typer.echo(
-                "error: --apply-results JSON must include the original prompts envelope "
-                "(under `_prompts_envelope`) and the decisions (under `decisions_envelope`)."
+                "error: decisions JSON must include the original prompts envelope "
+                "(under `_prompts_envelope`) and the decisions (under "
+                "`decisions_envelope`).",
+                err=True,
             )
             raise typer.Exit(code=1)
         report = apply_cluster_results(
@@ -445,15 +536,15 @@ def cluster_cmd(
         )
         return
 
-    client = anthropic.Anthropic()
-    reviewer = Reviewer(client=client, model=review_model, ontology=onto)
-    report = run_cluster(
-        db_path=db_path, embedder=embedder, reviewer=reviewer, threshold=threshold,
+    envelope = collect_cluster_prompts(
+        db_path=db_path, ontology=onto, embedder=embedder, threshold=threshold,
     )
-    typer.echo(
-        f"done: {report.clusters_reviewed} clusters reviewed | "
-        f"{report.merged} merged, {report.created} created, "
-        f"{report.rejected} rejected, {report.ambiguous} ambiguous"
+    write_envelope(prompts_path, envelope)
+    emit_hint(
+        prompts_path=prompts_path,
+        decisions_path=decisions_path,
+        size_summary=f"{len(envelope['clusters'])} clusters",
+        next_command=f"video-to-notebook cluster --ontology {ontology} --apply",
     )
 
 
@@ -513,48 +604,68 @@ def serve_cmd() -> None:
 
 @app.command("curriculum")
 def curriculum_cmd(
-    print_prompts: bool = typer.Option(
-        False, "--print-prompts",
-        help="Emit concepts + sample chunks as JSON envelope (in-session mode).",
+    apply: bool = typer.Option(
+        False, "--apply",
+        help="Read decisions from the default path and write chapters to DB.",
     ),
     apply_results: Path | None = typer.Option(
         None, "--apply-results",
-        help="Read curriculum_results JSON and write chapters to DB.",
+        help="Read decisions JSON from an explicit path and write to DB.",
     ),
     samples_per_concept: int = typer.Option(
         5, "--samples", help="Sample chunks per concept in the prompts envelope.",
     ),
+    print_prompts: bool = typer.Option(
+        False, "--print-prompts",
+        help="DEPRECATED — printing prompts is now the default. Will be removed.",
+    ),
 ) -> None:
     """Design the chapter sequence for the merged textbook.
 
-    Default behavior is print-prompts (the in-session designer flow).
-    Use --apply-results to commit a designer's decisions to the DB.
+    Default mode writes an in-session prompt envelope to
+    ``<state_dir>/prompts/curriculum.json`` and exits, expecting an agent to
+    write decisions to the sibling ``.decisions.json`` and re-invoke with
+    --apply. There is no API path for this command.
     """
-    try:
-        root = find_project_root(Path.cwd())
-    except ProjectNotInitializedError as e:
-        typer.echo(f"error: {e}")
-        raise typer.Exit(code=1) from e
+    _reject_mutually_exclusive(
+        apply=apply,
+        apply_results=apply_results is not None,
+    )
+    if print_prompts:
+        if apply or apply_results is not None:
+            typer.echo(
+                "error: --print-prompts cannot be combined with --apply / "
+                "--apply-results",
+                err=True,
+            )
+            raise typer.Exit(code=1)
+        warn_print_prompts_deprecated()
 
-    if print_prompts and apply_results is not None:
-        typer.echo("error: --print-prompts and --apply-results are mutually exclusive")
-        raise typer.Exit(code=1)
+    state_dir = _load_project_state_dir()
+    db_path = state_dir / "db.sqlite"
+    prompts_path, decisions_path = curriculum_paths(state_dir)
 
-    db_path = root / PROJECT_MARKER / "db.sqlite"
-
-    if apply_results is not None:
-        with apply_results.open("r", encoding="utf-8") as fh:
-            results = json.load(fh)
+    if apply or apply_results is not None:
+        src = apply_results if apply_results is not None else decisions_path
+        try:
+            results = read_decisions(src)
+        except FileNotFoundError as e:
+            typer.echo(f"error: {e}", err=True)
+            raise typer.Exit(code=1) from e
         n = apply_curriculum_results(db_path=db_path, results=results)
         typer.echo(f"done: wrote {n} chapters to curriculum_chapters")
         return
 
-    # Default = print prompts (the in-session designer path)
     envelope = collect_curriculum_prompts(
         db_path=db_path, samples_per_concept=samples_per_concept,
     )
-    sys.stdout.write(json.dumps(envelope, ensure_ascii=False, indent=2))
-    sys.stdout.write("\n")
+    write_envelope(prompts_path, envelope)
+    emit_hint(
+        prompts_path=prompts_path,
+        decisions_path=decisions_path,
+        size_summary=f"{len(envelope['concepts'])} concepts",
+        next_command="video-to-notebook curriculum --apply",
+    )
 
 
 @app.command("synthesize")
@@ -562,38 +673,54 @@ def synthesize_cmd(
     chapter: int = typer.Option(
         ..., "--chapter", help="The order_idx of the chapter to synthesize.",
     ),
-    print_prompts: bool = typer.Option(
-        False, "--print-prompts",
-        help="Emit chapter spec + source chunks as JSON envelope.",
+    apply: bool = typer.Option(
+        False, "--apply",
+        help="Read decisions from the default path and copy the HTML fragment into state.",
     ),
     apply_results: Path | None = typer.Option(
         None, "--apply-results",
-        help="Read synthesize_results JSON and copy the HTML fragment into state.",
+        help="Read decisions JSON from an explicit path.",
     ),
     max_source_chunks: int = typer.Option(
         20, "--max-chunks", help="Cap source chunks per chapter to control context size.",
     ),
+    print_prompts: bool = typer.Option(
+        False, "--print-prompts",
+        help="DEPRECATED — printing prompts is now the default. Will be removed.",
+    ),
 ) -> None:
-    """Generate the HTML for one textbook chapter (in-session mode)."""
-    try:
-        root = find_project_root(Path.cwd())
-    except ProjectNotInitializedError as e:
-        typer.echo(f"error: {e}")
-        raise typer.Exit(code=1) from e
+    """Generate the HTML for one textbook chapter (in-session only).
 
-    if print_prompts and apply_results is not None:
-        typer.echo("error: --print-prompts and --apply-results are mutually exclusive")
-        raise typer.Exit(code=1)
+    Default mode writes an in-session prompt envelope to
+    ``<state_dir>/prompts/synthesize/chapter-N.json`` and exits. There is no
+    API path for this command.
+    """
+    _reject_mutually_exclusive(
+        apply=apply,
+        apply_results=apply_results is not None,
+    )
+    if print_prompts:
+        if apply or apply_results is not None:
+            typer.echo(
+                "error: --print-prompts cannot be combined with --apply / "
+                "--apply-results",
+                err=True,
+            )
+            raise typer.Exit(code=1)
+        warn_print_prompts_deprecated()
 
-    db_path = root / PROJECT_MARKER / "db.sqlite"
-    state_dir = root / PROJECT_MARKER
+    state_dir = _load_project_state_dir()
+    db_path = state_dir / "db.sqlite"
+    prompts_path, decisions_path = synthesize_paths(state_dir, chapter)
 
-    if apply_results is not None:
-        with apply_results.open("r", encoding="utf-8") as fh:
-            results = json.load(fh)
-        apply_synthesize_results(
-            db_path=db_path, state_dir=state_dir, results=results,
-        )
+    if apply or apply_results is not None:
+        src = apply_results if apply_results is not None else decisions_path
+        try:
+            results = read_decisions(src)
+        except FileNotFoundError as e:
+            typer.echo(f"error: {e}", err=True)
+            raise typer.Exit(code=1) from e
+        apply_synthesize_results(db_path=db_path, state_dir=state_dir, results=results)
         typer.echo(
             f"done: synthesized chapter {results['chapter_order_idx']} → "
             f"{state_dir / 'textbook' / (str(results['chapter_order_idx']) + '.html')}"
@@ -604,8 +731,16 @@ def synthesize_cmd(
         db_path=db_path, chapter_order_idx=chapter,
         max_source_chunks=max_source_chunks,
     )
-    sys.stdout.write(json.dumps(envelope, ensure_ascii=False, indent=2))
-    sys.stdout.write("\n")
+    write_envelope(prompts_path, envelope)
+    emit_hint(
+        prompts_path=prompts_path,
+        decisions_path=decisions_path,
+        size_summary=(
+            f"chapter {chapter} '{envelope['chapter']['title']}', "
+            f"{len(envelope['source_chunks'])} source chunks"
+        ),
+        next_command=f"video-to-notebook synthesize --chapter {chapter} --apply",
+    )
 
 
 @app.command("explain")
@@ -613,13 +748,13 @@ def explain_cmd(
     concept: str = typer.Option(
         ..., "--concept", help="The concept slug to explain (e.g. 'gradient-descent').",
     ),
-    print_prompts: bool = typer.Option(
-        False, "--print-prompts",
-        help="Emit concept + occurrences + related as JSON envelope.",
+    apply: bool = typer.Option(
+        False, "--apply",
+        help="Read decisions from the default path and copy the HTML fragment into state.",
     ),
     apply_results: Path | None = typer.Option(
         None, "--apply-results",
-        help="Read explain_results JSON and copy the HTML fragment into state.",
+        help="Read decisions JSON from an explicit path.",
     ),
     max_source_chunks: int = typer.Option(
         12, "--max-chunks", help="Cap source chunks for the concept envelope.",
@@ -627,27 +762,43 @@ def explain_cmd(
     max_related: int = typer.Option(
         6, "--max-related", help="Cap related concepts surfaced in the envelope.",
     ),
+    print_prompts: bool = typer.Option(
+        False, "--print-prompts",
+        help="DEPRECATED — printing prompts is now the default. Will be removed.",
+    ),
 ) -> None:
-    """Generate a rich illustrated explanation for ONE concept (in-session mode)."""
-    try:
-        root = find_project_root(Path.cwd())
-    except ProjectNotInitializedError as e:
-        typer.echo(f"error: {e}")
-        raise typer.Exit(code=1) from e
+    """Generate a rich illustrated explanation for ONE concept (in-session only).
 
-    if print_prompts and apply_results is not None:
-        typer.echo("error: --print-prompts and --apply-results are mutually exclusive")
-        raise typer.Exit(code=1)
+    Default mode writes an in-session prompt envelope to
+    ``<state_dir>/prompts/explain/<SLUG>.json`` and exits. There is no API
+    path for this command.
+    """
+    _reject_mutually_exclusive(
+        apply=apply,
+        apply_results=apply_results is not None,
+    )
+    if print_prompts:
+        if apply or apply_results is not None:
+            typer.echo(
+                "error: --print-prompts cannot be combined with --apply / "
+                "--apply-results",
+                err=True,
+            )
+            raise typer.Exit(code=1)
+        warn_print_prompts_deprecated()
 
-    db_path = root / PROJECT_MARKER / "db.sqlite"
-    state_dir = root / PROJECT_MARKER
+    state_dir = _load_project_state_dir()
+    db_path = state_dir / "db.sqlite"
+    prompts_path, decisions_path = explain_paths(state_dir, concept)
 
-    if apply_results is not None:
-        with apply_results.open("r", encoding="utf-8") as fh:
-            results = json.load(fh)
-        dst = apply_explain_results(
-            db_path=db_path, state_dir=state_dir, results=results,
-        )
+    if apply or apply_results is not None:
+        src = apply_results if apply_results is not None else decisions_path
+        try:
+            results = read_decisions(src)
+        except FileNotFoundError as e:
+            typer.echo(f"error: {e}", err=True)
+            raise typer.Exit(code=1) from e
+        dst = apply_explain_results(db_path=db_path, state_dir=state_dir, results=results)
         typer.echo(
             f"done: explained concept '{results['concept_slug']}' → "
             f"{state_dir / 'concepts' / dst}"
@@ -658,5 +809,12 @@ def explain_cmd(
         db_path=db_path, concept_slug=concept,
         max_source_chunks=max_source_chunks, max_related=max_related,
     )
-    sys.stdout.write(json.dumps(envelope, ensure_ascii=False, indent=2))
-    sys.stdout.write("\n")
+    write_envelope(prompts_path, envelope)
+    emit_hint(
+        prompts_path=prompts_path,
+        decisions_path=decisions_path,
+        size_summary=(
+            f"concept '{concept}', {len(envelope['occurrences'])} occurrences"
+        ),
+        next_command=f"video-to-notebook explain --concept {concept} --apply",
+    )

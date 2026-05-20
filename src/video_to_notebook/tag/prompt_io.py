@@ -1,10 +1,12 @@
 """In-session tag mode: collect prompts as JSON, apply decisions back to DB.
 
-Lets Claude Max subscribers run tag inside a Claude Code conversation without
-a separate Anthropic API key. The conversation flow:
-  1. `course-merger tag --print-prompts ...` emits envelope to stdout
-  2. Claude (conversation agent) produces decisions JSON
-  3. `course-merger tag --apply-results decisions.json` writes to DB
+Lets agents (Claude Code, Codex, ...) drive tag without a separate Anthropic
+API key. Default conversation flow (v2.3+):
+  1. ``video-to-notebook tag --ontology X`` writes the envelope to
+     ``<state_dir>/prompts/tag.json`` and exits.
+  2. The agent reads it, produces decisions, writes
+     ``<state_dir>/prompts/tag.decisions.json``.
+  3. ``video-to-notebook tag --ontology X --apply`` writes to DB.
 """
 from __future__ import annotations
 

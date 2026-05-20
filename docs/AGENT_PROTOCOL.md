@@ -2,27 +2,51 @@
 
 video-to-notebook's LLM stages are designed to be **agent-agnostic**. Any agent that can read JSON, reason, and write JSON can drive the pipeline.
 
-This document defines the JSON envelope schemas, expected agent behavior, and conventions for the `--print-prompts` / `--apply-results` flow. It's the source of truth for any client (Claude Code, Codex, Cursor, Continue, your own script).
+This document defines the JSON envelope schemas, expected agent behavior, and conventions for the default in-session flow (v2.3+). It's the source of truth for any client (Claude Code, Codex, Cursor, Continue, your own script).
 
 ## Workflow shape
 
 Every LLM-driven stage shares the same shape:
 
 ```
-                       ┌─────────────────────────────────┐
-       video-to-notebook   │  *_prompts envelope  (JSON)     │   ──── stdout
-   --print-prompts    →└─────────────────────────────────┘
-                                      │
+                           ┌─────────────────────────────────┐
+       video-to-notebook   │  *_prompts envelope  (JSON)     │   ←── file write
+       <stage> [args]    →└─────────────────────────────────┘
+                                      │     <state_dir>/prompts/<step>.json
                                       ▼
                          agent reads, reasons, writes
-                                      │
+                                      │     <state_dir>/prompts/<step>.decisions.json
                                       ▼
-                       ┌─────────────────────────────────┐
-       video-to-notebook   │  *_results  envelope  (JSON)    │   ──── file path
-   --apply-results    ←└─────────────────────────────────┘
+                           ┌─────────────────────────────────┐
+       video-to-notebook   │  *_results  envelope  (JSON)    │   ──── read + apply
+       <stage> [args] --apply ←└─────────────────────────────────┘
 ```
 
 The CLI never depends on which agent generates the results. It validates the schema, applies to SQLite, and reports.
+
+### Path layout
+
+```
+<state_dir>/prompts/
+├── tag.json                                      ← tag           --apply reads
+├── tag.decisions.json                            ← cluster       sibling .decisions.json
+├── cluster.json
+├── cluster.decisions.json
+├── curriculum.json
+├── curriculum.decisions.json
+├── synthesize/chapter-N.json                     ← per chapter
+├── synthesize/chapter-N.decisions.json
+├── explain/<slug>.json                           ← per concept
+└── explain/<slug>.decisions.json
+```
+
+The CLI always prints a three-line stderr hint after the default invocation showing the exact path it wrote, the expected decisions path, and the follow-up `--apply` command.
+
+### Legacy flags
+
+- `--apply-results <path>` accepts an explicit decisions path (still works, useful when you want decisions stored outside the project).
+- `--use-api` (tag / cluster only) opts in to the Anthropic SDK path.
+- `--print-prompts` is a no-op deprecation alias that warns and otherwise behaves like the default. To be removed.
 
 ## Universal envelope fields
 
@@ -64,7 +88,8 @@ This means: one demo project can only host one language at a time. To produce bo
 
 ### Prompts envelope
 
-`video-to-notebook tag --ontology <ont.yaml> --print-prompts [--limit N] [--course SLUG]`
+`video-to-notebook tag --ontology <ont.yaml> [--limit N] [--course SLUG]`
+→ writes `<state_dir>/prompts/tag.json`
 
 ```json
 {
@@ -102,13 +127,14 @@ The agent's job: read each chunk, decide which ontology slugs apply (multi-label
 
 **Confidence semantics:** entries with confidence < 0.55 are stored in `proposed_tags` (uncertain, surface in cluster review); ≥ 0.55 are written to `chunk_concepts` (high-confidence, indexed in the site).
 
-**Loop:** re-run `--print-prompts` to get the next batch. The envelope's `chunks` array shrinks as you tag. Empty `chunks` = done.
+**Loop:** after each `--apply`, re-run `video-to-notebook tag --ontology <ont.yaml>` (default = write a fresh prompts envelope). The envelope's `chunks` array shrinks as you tag. Empty `chunks` = done.
 
 ## Stage 2 — `cluster` (merge proposed tags into the ontology)
 
 ### Prompts envelope
 
-`video-to-notebook cluster --ontology <ont.yaml> --print-prompts`
+`video-to-notebook cluster --ontology <ont.yaml>`
+→ writes `<state_dir>/prompts/cluster.json`
 
 ```json
 {
@@ -137,11 +163,11 @@ The clusterer pre-groups proposed tags by embedding similarity. The agent's job:
 
 ### Results envelope (bundled apply)
 
-The cluster stage requires the prompts envelope back, because `apply` re-derives chunk-level changes from the clustering result. Construct a single bundle file:
+The cluster stage requires the prompts envelope back, because `apply` re-derives chunk-level changes from the clustering result. Construct a single bundle and write it to `<state_dir>/prompts/cluster.decisions.json`:
 
 ```json
 {
-  "_prompts_envelope": { ...full prompts envelope from --print-prompts... },
+  "_prompts_envelope": { ...full prompts envelope from prompts/cluster.json... },
   "decisions_envelope": {
     "schema_version": "1",
     "kind": "cluster_results",
@@ -159,12 +185,14 @@ The cluster stage requires the prompts envelope back, because `apply` re-derives
 Apply:
 
 ```bash
-video-to-notebook cluster --ontology <ont.yaml> --apply-results bundle.json
+video-to-notebook cluster --ontology <ont.yaml> --apply
+# Or: --apply-results <explicit/path/to/bundle.json>
 ```
 
 ## Stage 3 — `curriculum` (chapter ordering for the textbook)
 
-`video-to-notebook curriculum --print-prompts [--samples N]`
+`video-to-notebook curriculum [--samples N]`
+→ writes `<state_dir>/prompts/curriculum.json`
 
 ### Prompts envelope
 
@@ -210,7 +238,8 @@ Idempotent: re-applying overwrites the chapter list (use this to iterate).
 
 ## Stage 4 — `synthesize` (per-chapter HTML fragment)
 
-`video-to-notebook synthesize --chapter N --print-prompts`
+`video-to-notebook synthesize --chapter N`
+→ writes `<state_dir>/prompts/synthesize/chapter-N.json`
 
 ### Prompts envelope
 
@@ -254,7 +283,8 @@ Apply copies the fragment to `.video-to-notebook/textbook/N.html` and marks the 
 
 ## Stage 5 — `explain` (per-concept encyclopedia entry, v1.3+)
 
-`video-to-notebook explain --concept <slug> --print-prompts`
+`video-to-notebook explain --concept <slug>`
+→ writes `<state_dir>/prompts/explain/<slug>.json`
 
 ### Prompts envelope
 

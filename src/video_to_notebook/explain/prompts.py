@@ -365,8 +365,9 @@ The prompts envelope you'll be given contains:
   related_concepts   list of { slug, canonical_name, co_occurrence }
                      — the ONLY slugs you may link to in §H
 
-Output an HTML fragment file path; the CLI's --apply-results stage
-hashes it into the database and copies it into the Astro content tree.
+Output an HTML fragment file path; the CLI's ``--apply`` (or
+``--apply-results``) stage hashes it into the database and copies it into
+the Astro content tree.
 """
 
 
