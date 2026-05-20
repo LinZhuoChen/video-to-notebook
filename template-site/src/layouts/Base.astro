@@ -62,6 +62,7 @@ const base = import.meta.env.BASE_URL; // e.g. '/video-to-notebook/' on Pages, '
         class="lang-toggle"
         id="lang-toggle"
         data-current-lang={currentLanguage}
+        data-base={base}
         aria-label={currentLanguage === 'en' ? 'switch to Chinese' : '切换到英文'}
         title={currentLanguage === 'en' ? 'switch to 中文' : '切换到 English'}
       >
@@ -107,31 +108,38 @@ const base = import.meta.env.BASE_URL; // e.g. '/video-to-notebook/' on Pages, '
       });
     })();
 
-    // Language toggle — navigates to the sibling deployment (/ ↔ /en/)
-    // preserving the current sub-path when possible.
+    // Language toggle — navigates between sibling deployments (zh at <root> ↔
+    // en at <root>en/) preserving the current sub-path when possible.
+    //
+    // The button's data-base is Astro's import.meta.env.BASE_URL baked at
+    // build time. Examples:
+    //   - zh build locally:   data-base = "/"
+    //   - en build locally:   data-base = "/en/"
+    //   - zh build on Pages:  data-base = "/video-to-notebook/"
+    //   - en build on Pages:  data-base = "/video-to-notebook/en/"
+    //
+    // Algorithm:
+    //   sub = current pathname minus the current build's base
+    //   if currently on en  → root = base minus trailing "en/" → target = root + sub
+    //   if currently on zh  → target = base + "en/" + sub
     (function () {
       const btn = document.getElementById('lang-toggle');
       if (!btn) return;
       btn.addEventListener('click', () => {
         const current = btn.dataset.currentLang || 'zh';
+        let base = btn.dataset.base || '/';
+        if (!base.endsWith('/')) base += '/';
+
         const path = window.location.pathname;
         const search = window.location.search + window.location.hash;
-        // base is something like "/video-to-notebook/" or "/" locally
-        const base = (document.querySelector('base')?.getAttribute('href')) || '/';
-
-        // Strip the base path to get the sub-path within the site
-        let sub = path.startsWith(base) ? path.slice(base.length) : path.replace(/^\//, '');
+        const sub = path.startsWith(base) ? path.slice(base.length) : path.replace(/^\//, '');
 
         let target;
         if (current === 'en') {
-          // We're on en site. Strip leading 'en/' if present (it shouldn't be
-          // — en build has its own base). Go to zh site at base ../ minus en/
-          // Simplest: navigate to the en-base's parent + sub-path
-          // base ends with /en/, parent is base without that segment
-          const parentBase = base.replace(/en\/$/, '');
-          target = parentBase + sub + search;
+          // base ends with "en/" — drop that segment to land on the zh root
+          const root = base.replace(/en\/$/, '');
+          target = root + sub + search;
         } else {
-          // We're on zh site. Append 'en/' to current base
           target = base + 'en/' + sub + search;
         }
         window.location.href = target;
