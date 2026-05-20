@@ -40,6 +40,16 @@ For `tag` this is a batch loop (small `--limit`, repeat until `chunks` array emp
 
 For a worked end-to-end recipe, see [`examples/frontier-notebook/RUNBOOK.md`](examples/frontier-notebook/RUNBOOK.md).
 
+#### Bilibili requires cookies — playbook for the agent
+
+Bilibili crawls **always** need cookies; an unauthenticated request gets HTTP 412 before yt-dlp can even list a playlist. The full playbook is in [`skills/video-to-notebook/SKILL.md`](skills/video-to-notebook/SKILL.md#bilibili-cookies-playbook-required--bilibili-always-needs-cookies). Short version:
+
+1. Try `--cookies-from chrome` (or firefox / safari / edge) first. On Linux this usually works. On macOS, Chrome v10 cookies are Keychain-encrypted and yt-dlp typically can't read them.
+2. If you see `HTTP 412`, `cannot decrypt v10 cookies`, or `expected string or bytes-like object, got 'bool'`, **stop retrying** — those failures are deterministic. Switch to step 3.
+3. Ask the user to install the **"Get cookies.txt LOCALLY"** browser extension, log into bilibili.com, export Netscape-format cookies, and save the file **outside** `~/Downloads/`, `~/Desktop/`, and the root of `~/Documents/` (those are TCC-protected on macOS and yt-dlp can't read them). Then run with `--cookies-file <absolute-path>`.
+
+For videos without official subtitles, also add `--whisper` to fall back to local transcription.
+
 ### Agent identifier
 
 When you write a results envelope, set the agent-id field (`tagger_model_id`, `reviewer_model_id`, `designer`, `synthesizer`, `explainer`) so the DB records which agent produced each decision. Convention:

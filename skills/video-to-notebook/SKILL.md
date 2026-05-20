@@ -65,16 +65,65 @@ If the directory already has `.video-to-notebook/`, ask whether to use it or `--
 For each course URL the user provides:
 
 ```bash
-# YouTube
+# YouTube — no auth needed
 video-to-notebook crawl "<url>" --name "<slug>"
 
-# Bilibili (requires logged-in browser)
-video-to-notebook crawl "<url>" --name "<slug>" --cookies-from edge
+# Bilibili — see "Bilibili cookies playbook" below; always requires cookies
+video-to-notebook crawl "<url>" --name "<slug>" --cookies-from chrome
 ```
 
 Use `--name` to give a human-readable slug (e.g. `cs336`, `gpu-mode`). Without it the slug is derived from the URL's playlist/video ID, which is ugly.
 
 Report counts after each crawl: `done: N ok, M no-subs, K errors`.
+
+#### Bilibili cookies playbook (REQUIRED — Bilibili always needs cookies)
+
+Bilibili's anti-spider returns **HTTP 412** to every unauthenticated request, even for listing a public playlist. You CANNOT crawl Bilibili without a logged-in session. The playbook:
+
+**Attempt 1: try `--cookies-from <browser>` first.** Works reliably on Linux. Works *sometimes* on macOS Chrome. Failure modes you might see:
+
+- `WARNING: find-generic-password failed` / `cannot decrypt v10 cookies: no key found` — macOS Keychain blocks yt-dlp from decrypting Chrome v10 cookies.
+- `HTTP Error 412: Precondition Failed` followed by `ERROR: expected string or bytes-like object, got 'bool'` — extractor crashes when cookies are present but invalid/expired, OR when no cookies were extracted at all.
+
+If you see any of those, **STOP and switch to Attempt 2**. Don't keep retrying — the failure is deterministic.
+
+**Attempt 2: ask the user to export cookies.txt manually.** This is the reliable path. Give the user EXACTLY these steps:
+
+> Bilibili 必须要 cookies 才能爬。`--cookies-from <browser>` 在你这台 macOS 上跑不通（Keychain 解密被系统挡了），改用手动导出的 cookies 文件：
+>
+> 1. **装浏览器扩展** "Get cookies.txt LOCALLY"（Chrome / Edge / Firefox 商店都有，搜这个名字第一个就是）
+> 2. **打开 `https://www.bilibili.com`** 任意一个页面，确认右上角是登录态（看得到你的头像）
+> 3. **点击扩展图标** → 选 "Export" → 默认是 "Current Site" → 下载得到一个 `bilibili.com_cookies.txt`
+> 4. **保存到一个非 TCC 路径**。**重要：不要放在 `~/Downloads/`、`~/Desktop/`、`~/Documents/` 根目录** —— macOS 的 TCC 沙箱会让 yt-dlp 读不到这些文件夹的内容。建议放：
+>    - `~/note/bilibili-cookies.txt` ✅
+>    - `~/code/.secrets/bilibili-cookies.txt` ✅
+>    - `~/Documents/cookies/bilibili.txt` ✅（`Documents/` 的**子文件夹**就行，根目录不行）
+>    - `~/Downloads/bilibili.txt` ❌ TCC 会挡
+> 5. **告诉我文件的绝对路径**，比如 `/Users/you/note/bilibili-cookies.txt`
+
+Then run the crawl with `--cookies-file`:
+
+```bash
+video-to-notebook crawl "<bilibili-url>" --name "<slug>" \
+  --cookies-file "<absolute-path>"
+```
+
+**Sanity checks before running**:
+- The cookies.txt must be in **Netscape format** (the extension exports this by default).
+- The file must contain a `SESSDATA` line and a `buvid3` line. If neither is present, the user isn't logged in or exported the wrong site.
+- If the cookies.txt is older than ~30 days, it's likely expired — ask the user to re-export.
+
+**When the crawl still fails after Attempt 2**:
+- `HTTP 412` again → cookies expired. Re-export.
+- `Failed to read cookies file` → likely TCC permission. Move the file to one of the suggested paths above.
+- `No video formats found` on a specific BV → that video is region-locked or DRM'd. Continue with the rest, report which one failed.
+
+**Whisper for videos without subtitles**: Bilibili often doesn't have official subtitles. Add `--whisper` to fall back to local transcription (mlx-whisper on Apple Silicon, faster-whisper elsewhere):
+
+```bash
+video-to-notebook crawl "<bilibili-url>" --name "<slug>" \
+  --cookies-file "<path>" --whisper
+```
 
 ### Step 3: Tag with concept labels (costs ~$0.10/course)
 
