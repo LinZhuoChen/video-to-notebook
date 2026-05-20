@@ -460,6 +460,7 @@ build 脚本会串起 crawl / tag / cluster / build，读 `courses.toml`，最�
   - Plan 3：[Build + HTML](docs/superpowers/plans/2026-05-09-plan-3-build-and-html.md)
   - Plan 4：[Demo + Deploy + Skill](docs/superpowers/plans/2026-05-09-plan-4-demo-deploy-skill.md)
   - Plan 6：[教材生成器](docs/superpowers/plans/2026-05-13-plan-6-textbook-generator.md)
+  - Plan 7：[双语 demo](docs/superpowers/plans/2026-05-19-plan-7-bilingual-demo.md)
 
 ## ⚖️ 免责声明
 

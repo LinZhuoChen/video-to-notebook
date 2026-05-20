@@ -2,7 +2,20 @@
 
 > Goal: ship a Pages demo where readers can switch between **中文** and **English** versions of the diffusion textbook + concept encyclopedia, with the English content **regenerated from the same English source transcripts** (not machine-translated from the existing Chinese fragments).
 
-## Current state
+## Status (as of 2026-05-20)
+
+| Phase | Status | Shipped in |
+|---|---|---|
+| **Phase 1 — code changes** (Astro content split, Python writers per-lang, Pages workflow build-twice, header toggle, frontier `build.sh --bilingual`) | ✅ **done** | v2.2.0 (commit `8b35535`) + v2.2.1 hotfix for the toggle's `BASE_URL` handling (commit `5c84244`) |
+| **Phase 2 — content regeneration** (21 chapters + 33 concepts in en, from English source transcripts) | 🟡 **partial (3 / 21 chapters)** | v2.2.0 (commit `0f0c831`): Module 1 = Why Diffusion / VAE / ELBO. Remaining 18 chapters + all 33 concepts pending. |
+| **Phase 3 — deploy + verify** | ✅ Pages auto-deploys both `/` and `/en/` on each push; verified live at `https://linzhuochen.github.io/video-to-notebook/en/textbook/`. |
+
+Open questions resolved (originally listed at the bottom of this doc):
+- **A.** Run en regen in a fresh Codex/Claude Code session? → **Yes**, but Module 1's three chapters were authored in the same session that wrote this plan, as quality benchmark. Modules 2–6 + concepts are left for fresh sessions.
+- **B.** Regenerate the *curriculum* too (en titles)? → **Yes**, full en regen. Curriculum metadata (titles + blurbs for all 21 chapters) was translated in-place via SQL in the demo project so the en textbook nav doesn't break even before all bodies land.
+- **C.** Upgrade `examples/frontier-notebook/build.sh` to drive bilingual builds? → **Yes**, the script gained `--language` and `--bilingual` flags in Phase 1.
+
+## Current state (snapshot before the work started)
 
 - Demo corpus: 4 diffusion courses, all original lecture audio is in English (Karpathy / Dr. Raj / CMU 10-799 / chuguo-aigc).
 - Demo project: `~/note/courses/diffusion-merged/.video-to-notebook/` (separate from the source repo).
@@ -102,11 +115,37 @@ Cost: 0 extra (in-session via Claude Max / Codex subscription). Time: ~1-3 hours
 
 2. Commit + push. Pages workflow builds both, switcher works.
 
-## Open questions for user (decide before Phase 2)
+## Remaining work for Phase 2
 
-- **A.** Run the en regeneration in this conversation (slow, eats context) or in a fresh Codex/Claude Code session (recommended — agent runs the in-session loop autonomously)?
-- **B.** Should the en version regenerate the *curriculum* too (en chapter titles like "Why diffusion? AR vs Diffusion") or keep zh chapter titles even on the en page? Recommended: full en regen of curriculum + chapter bodies + concepts for consistency.
-- **C.** Acceptable to leave the in-progress zh demo's `examples/frontier-notebook/` build script alone, or update it to drive bilingual builds too?
+To finish the en demo, drive an in-session agent (Codex or Claude Code) through the remaining 18 chapters and 33 concepts. The demo project DB is already in the `language='en'` state with curriculum metadata translated and Module 1 (chapters 1–3) marked `synthesized`; from there:
+
+```bash
+cd ~/note/courses/diffusion-merged
+
+# Synthesize chapters 4..21
+for n in 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21; do
+  video-to-notebook synthesize --chapter $n --print-prompts > /tmp/en/ch${n}.json
+  # agent reads, writes /tmp/en/ch${n}.html, then:
+  video-to-notebook synthesize --chapter $n --apply-results /tmp/en/apply-ch${n}.json
+done
+
+# Explain all 33 concepts
+sqlite3 .video-to-notebook/db.sqlite "SELECT slug FROM concepts;" | while read slug; do
+  video-to-notebook explain --concept "$slug" --print-prompts > /tmp/en/c-$slug.json
+  # agent writes /tmp/en/c-$slug.html, then:
+  video-to-notebook explain --concept "$slug" --apply-results /tmp/en/apply-c-$slug.json
+done
+
+# Build (copies into <project>/site/src/content/<area>/en/), then mirror into source repo:
+video-to-notebook build --no-npm
+cp site/src/content/textbook/en/*  <repo>/template-site/src/content/textbook/en/
+cp site/src/content/concept-explainers/en/* <repo>/template-site/src/content/concept-explainers/en/
+git -C <repo> add template-site/src/content/textbook/en/ template-site/src/content/concept-explainers/en/
+git -C <repo> commit -m "content(en): Module 2..6 + concepts"
+git -C <repo> push
+```
+
+Pages will auto-rebuild both `/` and `/en/` on push (see `.github/workflows/pages.yml`).
 
 ## Estimated total work
 

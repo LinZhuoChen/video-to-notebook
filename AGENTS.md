@@ -71,6 +71,75 @@ tests/                  # pytest — 148 unit tests
 
 Every subcommand is idempotent and resumable. The DB schema lives in `src/video_to_notebook/db/migrations/*.sql` and uses `PRAGMA user_version` for linear migration tracking.
 
+## Bilingual content layout (v2.2+)
+
+The site supports parallel zh and en builds. **Content (HTML fragments + manifest/curriculum JSON) lives per-language under `<lang>/` sub-folders, not flat.** Astro routes dispatch on `PUBLIC_LANGUAGE` (build-time env). Pages CI builds twice — once with `PUBLIC_LANGUAGE=zh` mounted at `/`, once with `PUBLIC_LANGUAGE=en` mounted at `/en/` — and merges into a single artifact.
+
+```
+template-site/src/content/textbook/
+├── zh/
+│   ├── 1.html ... 21.html
+│   └── curriculum.json
+└── en/
+    ├── 1.html ... 21.html
+    └── curriculum.json
+
+template-site/src/content/concept-explainers/
+├── zh/
+│   ├── <slug>.html ...
+│   └── manifest.json
+└── en/
+    ├── <slug>.html ...
+    └── manifest.json
+```
+
+### How the Python writers behave
+
+`build/textbook_writer.py` and `build/concept_writer.py` read `build_meta.language` from the project's SQLite (defaulting to `'zh'` for legacy projects) and write into the matching `<lang>/` folder. One demo project corresponds to one language. **Bilingual demos need two projects (or one project that swings `build_meta.language` between runs)** — see `examples/frontier-notebook/build.sh --bilingual` for a reference implementation.
+
+### How to drive Phase-2 content regeneration (en chapters + concepts)
+
+The zh demo is the source of structural truth — its 21 chapters and 33 concepts define the topology. The en version regenerates *bodies* from the same English source transcripts (not machine-translation), preserving chapter order and concept slugs:
+
+```bash
+cd <project-dir>
+# 1. Back up zh, flip the project to en, wipe synth outputs
+cp -r .video-to-notebook .video-to-notebook.zh-backup
+sqlite3 .video-to-notebook/db.sqlite "INSERT INTO build_meta (key, value) VALUES ('language', 'en') ON CONFLICT(key) DO UPDATE SET value=excluded.value;"
+rm -rf .video-to-notebook/textbook/*.html .video-to-notebook/concepts/*.html
+sqlite3 .video-to-notebook/db.sqlite "UPDATE curriculum_chapters SET status='planned', synthesized_path=NULL, synthesized_at=NULL; DELETE FROM concept_explanations;"
+
+# 2. Translate curriculum titles + blurbs in-place via SQL (preserves order/slugs)
+#    OR re-run `video-to-notebook curriculum --print-prompts/--apply-results`.
+# 3. Loop: synthesize chapters 1..21 + explain all concepts via in-session agent.
+# 4. Build → fragments land under .video-to-notebook/textbook/ + concepts/, then
+#    `video-to-notebook build` copies them into `<project>/site/src/content/<area>/en/`.
+# 5. Copy en/*.html + en/manifest.json + en/curriculum.json into the source repo
+#    under template-site/src/content/<area>/en/, commit, push → Pages deploys.
+```
+
+### Agent-id convention for bilingual writes
+
+When writing en results envelopes, suffix the standard agent-id with `:v2-en` (or just use whatever distinguishable string you like) so audits can tell zh vs en synthesis apart:
+
+```json
+{
+  "schema_version": "1",
+  "kind": "synthesize_results",
+  "chapter_order_idx": 1,
+  "synthesizer": "claude-code-max:v2-en",
+  "html_fragment_path": "/tmp/en/ch1.html"
+}
+```
+
+### Header language toggle (Astro)
+
+`Base.astro` renders an `EN`/`中` button that navigates between sibling deployments preserving the current sub-path. The button's `data-base` attribute is `import.meta.env.BASE_URL` baked at build time — the JS uses it to construct the target URL. If you change `Base.astro`'s button markup, keep `data-base={base}` intact or the toggle 404s on Pages.
+
+### Don't translate Chinese fragments to en
+
+The en chapters should be authored *from the English source transcripts*, not machine-translated from the zh fragments. The zh chapters' structural decisions (section order, equations, SVG, code) are good scaffolding to follow, but the prose must be sourced from the English lectures' verbatim quotes. Otherwise the en version will read as "translated Chinese," not as native English textbook prose.
+
 ## Code style (when you edit the repo)
 
 - **Ruff** with `select = ["E", "F", "I", "B", "UP", "SIM"]`. Must be green.
@@ -118,7 +187,8 @@ CI runs the same three commands.
 - **Design spec**: `docs/specs/2026-05-09-video-to-notebook-skill-design.md`.
 - **Implementation plans** (TDD-decomposed): `docs/superpowers/plans/`.
 - **Examples**: `examples/frontier-notebook/` (5-course World-Models corpus).
-- **Changelog**: `CHANGELOG.md` (v1.0 → v1.3 ).
+- **Changelog**: `CHANGELOG.md` (v1.0 → v2.2.1, including bilingual demo scaffolding and language toggle fix).
+- **Bilingual demo plan**: `docs/plans/2026-05-19-bilingual-demo.md`.
 
 ## In one line
 

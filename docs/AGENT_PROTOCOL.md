@@ -45,6 +45,21 @@ Results envelopes additionally specify the **agent identifier** in a field named
 
 These are free-form strings. The CLI doesn't validate them, but they're persisted in the DB so future audits can tell which agent produced which decision.
 
+When generating bilingual content, suffix the agent-id with a language tag — e.g. `claude-code-max:v2-en` for English regeneration — so that audits can distinguish zh and en synthesis runs against the same project DB.
+
+## Bilingual content layout (v2.2+)
+
+The Astro site is built once per language with `PUBLIC_LANGUAGE=zh|en` (env). The build writers route content to per-language sub-folders:
+
+```
+template-site/src/content/textbook/{zh,en}/{N.html, curriculum.json}
+template-site/src/content/concept-explainers/{zh,en}/{<slug>.html, manifest.json}
+```
+
+`apply_synthesize_results` and `apply_explain_results` are language-agnostic — they write into `<project>/.video-to-notebook/textbook/` and `<project>/.video-to-notebook/concepts/` regardless. `video-to-notebook build` reads `build_meta.language` from the DB to decide whether the next dist of fragments lands under `zh/` or `en/`. **Set `build_meta.language='en'` before running build to produce en content.**
+
+This means: one demo project can only host one language at a time. To produce both, either run two projects, or swing `build_meta.language` between runs and accumulate outputs in the source repo's `template-site/src/content/<area>/{zh,en}/` folders.
+
 ## Stage 1 — `tag` (per-chunk concept labeling)
 
 ### Prompts envelope

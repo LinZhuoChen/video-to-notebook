@@ -463,6 +463,7 @@ The build script chains crawl/tag/cluster/build, reads `courses.toml`, and lands
   - Plan 3: [Build + HTML](docs/superpowers/plans/2026-05-09-plan-3-build-and-html.md)
   - Plan 4: [Demo + Deploy + Skill](docs/superpowers/plans/2026-05-09-plan-4-demo-deploy-skill.md)
   - Plan 6: [Textbook generator](docs/superpowers/plans/2026-05-13-plan-6-textbook-generator.md)
+  - Plan 7: [Bilingual demo](docs/superpowers/plans/2026-05-19-plan-7-bilingual-demo.md)
 
 ## ⚖️ Disclaimer
 

@@ -2,6 +2,51 @@
 
 All notable changes to video-to-notebook (formerly `course-merger`). Follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/).
 
+## [2.2.1] — 2026-05-20
+
+### Fixed — language toggle now honours `BASE_URL` on Pages
+
+The `lang-toggle` JS was reading the site's base path from a `<base href="…">` tag — but Astro doesn't emit one — so the lookup always fell back to `/`. On Pages (`BASE_PATH=/video-to-notebook/`) this produced 404s on every toggle:
+
+| Was on | Click toggle | Used to go to | Now correctly goes to |
+|---|---|---|---|
+| `/video-to-notebook/textbook/1/` | EN | `/en/textbook/1/` (404) | `/video-to-notebook/en/textbook/1/` |
+| `/video-to-notebook/en/textbook/1/` | 中 | `/textbook/1/` (404) | `/video-to-notebook/textbook/1/` |
+
+Fix: bake `import.meta.env.BASE_URL` into the button as `data-base` at build time. The JS now reads `data-base` directly, computes the sub-path, and prefixes the sibling deployment's base. Search and hash are preserved.
+
+## [2.2.0] — 2026-05-20
+
+### Added — bilingual demo scaffolding (Phase 1)
+
+Wire the codebase to host **zh** and **en** demo sites side-by-side on Pages (`/` ↔ `/en/`) with a header language switcher. Content for both languages lives in parallel sub-folders; an empty `en/` still builds cleanly (empty-state pages). Content regeneration is Phase 2 and runs separately via in-session synthesize/explain.
+
+- **Astro content layout** re-organised to `<area>/<lang>/*`:
+  - `template-site/src/content/textbook/{zh,en}/` (HTML fragments + `curriculum.json`)
+  - `template-site/src/content/concept-explainers/{zh,en}/` (HTML fragments + `manifest.json`)
+  - Existing 21 zh chapter fragments + 33 zh concept fragments moved via `git mv` (history preserved). Empty `en/curriculum.json` + `en/manifest.json` placeholders so en build doesn't 404.
+- **Astro pages dispatch on language**: `pages/textbook/index.astro`, `[order].astro`, `pages/concepts/index.astro`, `[slug]/index.astro`, `components/TextbookNav.astro`, `pages/index.astro` all read `currentLanguage` from `i18n.ts` (driven by `PUBLIC_LANGUAGE` env) and pick the right folder.
+- **Header language toggle**: new `.lang-toggle` button in `Base.astro` between search and theme-toggle. Renders `EN` on zh pages, `中` on en pages. JS preserves current sub-path while navigating to the sibling deployment.
+- **Python build writers**: `textbook_writer.py` + `concept_writer.py` read `build_meta.language` from the project DB (defaulting to `'zh'` for legacy projects) and write into `template-site/src/content/<area>/<lang>/`. New test `test_respects_build_meta_language`.
+- **Pages workflow** runs `npm run build` twice — once with `PUBLIC_LANGUAGE=zh BASE_PATH=/<repo>/`, once with `PUBLIC_LANGUAGE=en BASE_PATH=/<repo>/en/` — and merges the en dist into `dist-zh/en/` before upload.
+- **Frontier example** `build.sh` gains `--language` and `--bilingual` flags. `--bilingual` swings `build_meta.language` and reruns the build writers twice. The in-session synthesize/explain still needs to be driven separately per language by an agent.
+
+### Added — English Module 1 demo content (Phase 2 partial)
+
+First three chapters of the bilingual demo's English half, regenerated from the original English source transcripts (not machine-translated from Chinese):
+
+- Ch 1 "Why Diffusion? AR vs Diffusion" (~3000 words)
+- Ch 2 "VAE: Compressing Data into a Latent Space" (~3500 words)
+- Ch 3 "ELBO: The Evidence Lower Bound" (~3000 words)
+
+Each follows the v3 synthesizer style guide: TL;DR callout, 8–14 numbered sections, every non-trivial formula in a `deriv-step` block with `**Why**:`, multiple coloured callouts, source quotes verbatim from the English video lectures, takeaway block. Curriculum metadata (titles + blurbs) for all 21 chapters already translated in-place so the textbook nav doesn't break on the en build. **Remaining 18 chapters + 39 concept explainers ship in subsequent batches.**
+
+### Docs
+
+- README: real demo screenshots (3-shot grid: textbook TOC, concept encyclopedia, single chapter reading view) replace the placeholder upload image. Bilibili parity restored across tagline, early-days note, quickstart Option B, disclaimer, footer.
+- README.zh-CN.md added — full Chinese translation, with `English · 中文` switcher at the top of both files.
+- `docs/plans/2026-05-19-bilingual-demo.md` — 3-phase architecture sketch for the bilingual demo.
+
 ## [2.1.1] — 2026-05-19
 
 ### Fixed — Bilibili season URLs were silently downloading the same video N times
@@ -171,9 +216,14 @@ The SQLite schema, chunk text, tag tables, curriculum, and synthesized HTML frag
 - Skill-driven UX via Claude Code (install with `bash skills/course-merger/scripts/install-locally.sh`).
 - Example corpus: `examples/frontier-notebook/` with 5 World-Models × Agents courses.
 
-[Unreleased]: https://github.com/chenlinzhuo/course-merger/compare/v1.4.0...HEAD
-[1.4.0]: https://github.com/chenlinzhuo/course-merger/compare/v1.3.0...v1.4.0
-[1.3.0]: https://github.com/chenlinzhuo/course-merger/compare/v1.2.0...v1.3.0
-[1.2.0]: https://github.com/chenlinzhuo/course-merger/compare/v1.1.0...v1.2.0
-[1.1.0]: https://github.com/chenlinzhuo/course-merger/compare/v1.0.0...v1.1.0
-[1.0.0]: https://github.com/chenlinzhuo/course-merger/releases/tag/v1.0.0
+[Unreleased]: https://github.com/LinZhuoChen/video-to-notebook/compare/v2.2.1...HEAD
+[2.2.1]: https://github.com/LinZhuoChen/video-to-notebook/compare/v2.2.0...v2.2.1
+[2.2.0]: https://github.com/LinZhuoChen/video-to-notebook/compare/v2.1.1...v2.2.0
+[2.1.1]: https://github.com/LinZhuoChen/video-to-notebook/compare/v2.1.0...v2.1.1
+[2.1.0]: https://github.com/LinZhuoChen/video-to-notebook/compare/v2.0.0...v2.1.0
+[2.0.0]: https://github.com/LinZhuoChen/video-to-notebook/compare/v1.4.0...v2.0.0
+[1.4.0]: https://github.com/LinZhuoChen/video-to-notebook/compare/v1.3.0...v1.4.0
+[1.3.0]: https://github.com/LinZhuoChen/video-to-notebook/compare/v1.2.0...v1.3.0
+[1.2.0]: https://github.com/LinZhuoChen/video-to-notebook/compare/v1.1.0...v1.2.0
+[1.1.0]: https://github.com/LinZhuoChen/video-to-notebook/compare/v1.0.0...v1.1.0
+[1.0.0]: https://github.com/LinZhuoChen/video-to-notebook/releases/tag/v1.0.0
