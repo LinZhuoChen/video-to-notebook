@@ -47,59 +47,58 @@ If `video-to-notebook` is MISSING: install with `pip install video-to-notebook` 
 If Node is MISSING: install Node 20+ (brew install node).
 If ANTHROPIC_API_KEY is MISSING: stop and ask the user to set it — without it, tag/cluster fail.
 
-## ⚠️ Anti-pattern that has bitten this project twice — read before doing anything
+## ⚠️ Why this skill stopped relying on text warnings (read first)
 
-When driving this pipeline you will feel pressure to "close the loop" — finish all chapters, mark every task green, see the final site go live. **This skill has been violated by previous runs in exactly the same way, twice in a single session.** The pattern is precise enough to call out:
+**Text warnings about chapter depth failed three consecutive sessions on the same project.** Every time the LLM rationalised through them under context pressure and shipped 1.5K–3K-字 paraphrases instead of the 5K–8K-字 lecturer-faithful chapters the user expected. The fix in v4 is **structural, not textual**:
 
-### The shape of the failure
+- **Synthesizer prompt** (`synthesize/prompts.py` v4) forces a two-phase output: Phase 1 EXTRACTION JSON (every lecturer quote, metaphor, derivation step, aside, misconception, numerical example) **before** any HTML. Phase 2 HTML must scaffold on Phase 1 — every extracted item must appear in the chapter.
+- **Chunk preprocessing** (`synthesize/prompt_io.py` v4) deduplicates triplicated YouTube auto-caption lines, filters sponsor / intro chunks, sorts lectures chronologically (not alphabetically by course_slug, which was a known bias bug). The chunks the LLM sees are now clean pedagogy, not noise.
+- **CLI depth gate** (`video-to-notebook synthesize --chapter N --apply` v4) parses the decisions JSON + HTML and refuses to copy the chapter into the project unless **6 HARD RULES pass**:
+  - **HARD RULE 1**: chunk-coverage audit ≥ 0.90, every skipped chunk has a non-empty `reason_skipped`, Phase 1 total items ≥ 25 (full) / 15 (overview)
+  - **HARD RULE 2**: every Phase 1 item appears in the HTML (substring fingerprint check)
+  - **HARD RULE 3**: structural floors — `<h2>` ≥ 10, callout-quote ≥ 5, deriv-step ≥ 3, pre-code-python ≥ 1, callout-info/note/warning/tip ≥ 5, `<svg>` ≥ 2, animated SVG ≥ 1, `<iframe>` ≥ 1, takeaways 5–7 items
+  - **HARD RULE 4**: beginner-friendly format — first-use jargon gloss, formula + plain-language pair, two-layer metaphor per major section, no hand-waving in `**Why**:` annotations (user's rule: 假设读者是小白，用通俗易懂的方式)
+  - **HARD RULE 5**: ≥ 2 SVG with `<title>` + `<figcaption>`, ≥ 1 with `@keyframes` animation, ≥ 1 iframe lecture clip, interactive elements encouraged (user's rule: 生动的比喻 + 完善的动图交互)
+  - **HARD RULE 6**: weighted body ≥ 5,000 (full chapter) / ≥ 4,000 (overview chapter), where weighted = zh chars + en words × 2
 
-1. **Treating structure as a proxy for depth.** A chapter that has TL;DR + 8 numbered sections + lecturer-quote blockquotes + takeaways block but is 2000 字 looks shaped-correct. It is not. SKILL says 5,000-8,000 字 with full deriv-step blocks + PyTorch skeleton + ALL distinctive lecturer analogies preserved. Hitting the section count is not hitting the depth. If your chapter is under 4,000 字, it is — per this skill's own words — **under-developed**, regardless of how clean the structure looks.
-2. **Writing from training-data knowledge instead of the transcript.** The chunks in `source_chunks` are the *primary source*. Your job is "faithfully transmit how the lecturer actually taught" — extract their specific metaphors, worked examples, verbatim phrasings *before drafting*. If you draft a chapter without re-reading the chunks in detail, you are fabricating "plausible-sounding content from your own training-data knowledge" — the exact thing the no-fabrication rule prohibits.
-3. **Re-defining the quality bar as "pacing."** T1.5 says the choice between batch / chapter-by-chapter is "only about pacing, not quality bar." If you find yourself thinking "23 chapters × 6000 字 won't fit, I'll do 3000 字 each instead" — you are doing the forbidden translation. The fix isn't "shorter chapters," it's "fewer chapters per session" or "ask the user."
-4. **Skipping skill invocations.** The agent has access to `obsidian-brain` (for "what depth does the user expect"), `--whisper` flag (for `no_subs` lectures), and `obsidian-wiki` (for note-integration patterns). Skipping these and falling back to "what I already have in context" is the same anti-pattern as fabricating chapter content — it's preferring the cheaper path over the correct path.
-5. **Marking tasks complete before they meet spec.** A task list with 23/23 ✅, a `build` that exits 0, all pages returning HTTP 200 — none of these prove the chapters meet the depth bar. Don't mark `synthesize all chapters` complete until you have sampled actual chapter word-counts and verified they're in the 5,000-8,000 range with real lecturer content.
+The agent **cannot** ship a short chapter through `--apply` anymore. If you find yourself wanting to: that's the v2.3.0 / v2.4.0 / v2.5.0 failure mode the v4 changes were designed to block. Pass `--skip-depth-gate` only after explicit user authorisation.
 
-### Red-flag phrases that mean you are doing it
+### User's two non-negotiable rules (May 2026, said three times)
 
-Catch yourself saying these and stop:
+Operationalised into HARD RULE 1, 4, 5 above:
+
+> 1. 绝对不能遗漏字幕里的任何讲解内容、细节和教学方法。
+> 2. 要假设用户是小白，用通俗易懂的方式来进行讲解，要有生动的比喻和尽可能完善的动图交互讲解。
+
+These are encoded in the prompt template AND the gate. Skipping them is a tool-level failure now, not an agent-discipline failure.
+
+### Red-flag phrases that meant the agent was about to violate the old rules
+
+Listed for historical reference; the gate now catches all of these regardless:
 
 - "Pragmatic call given context budget" — used to justify short chapters.
 - "Demo-quality / abridged but coherent" — same thing dressed differently.
-- "Source-fidelity is preserved by adding quote blocks" — no, fidelity requires the body to be built from the chunks, not just decorated with them.
-- "I'll do the cornerstone chapters at full depth and abridge the rest" — the spec doesn't have a "supporting chapter" tier. Either do the chapter properly or don't include it.
-- "The user said go, so I should push through" — the user's `/goal` does not override SKILL's hard constraints; T1.5 is a blocking question the user **must** answer.
+- "I'll do the cornerstone chapters at full depth and abridge the rest" — there is no supporting-chapter tier.
+- "The user said go, so I should push through" — `/goal` does not override HARD RULEs; the gate enforces them at CLI level.
 
-### Stop-and-correct mechanism
+### What to do when --apply fails with a depth-gate error
 
-Before calling `synthesize --chapter N --apply` for any chapter, verify all five:
+```
+error: chapter 13: depth gate FAILED (5 HARD RULE violation(s))
 
-```bash
-# Run before --apply
-N=5
-CH=/tmp/cm-chapters/$N.html
-echo "char count: $(python3 -c "import re; t=open('$CH').read(); print(len(re.sub(r'<[^>]+>','',t)))")"
-# Must be 5,000-8,000 for non-overview chapters. 4,000-6,000 ok for Module 1 overview chapters.
-
-grep -c 'class="deriv-step"' $CH
-# At least 3 for any chapter introducing a formula.
-
-grep -c 'class="lecturer-quote"' $CH
-# At least 2 distinct quotes drawn from `source_chunks` (not from training data).
-
-grep -c '<pre><code>' $CH
-# At least 1 PyTorch block if the chapter introduces a model component.
-
-# And one manual check:
-# Re-open the envelope; for each lecturer quote you used, locate the source
-# chunk that contains its zh translation or English original. If you can't
-# point at the source chunk, the quote was fabricated.
+  • HARD RULE 6 (weighted body): 2031 < floor 5000
+  • HARD RULE 3a (top-level sections): 8 < 10
+  • HARD RULE 3e (callout info/note/warning/tip): 2 < 5
+  ...
 ```
 
-If any check fails, the chapter is not done. Don't `--apply`, don't move on.
+Read each violation literally, expand the chapter to satisfy it, re-write `decisions.json`, re-run `synthesize --chapter N --apply`. The gate is your friend — it catches what you would otherwise rationalise past.
 
-### Why this section exists
+If the chapter genuinely cannot meet the floor because the source material is thin (HARD RULE 1c fallback), output `BLOCKED_INSUFFICIENT_INPUT` in the extraction JSON; the gate will refuse `--apply` and report the gap to the user so they can fix the pipeline (re-tag, increase `--max-chunks`, add chunks via whisper).
 
-In v2.3.0 development a session produced 23 chapter HTMLs averaging 1,500-4,500 字, full structure but thin content, lecturer quotes mostly decorative not load-bearing. The user — correctly — called it "trash". The chapters had been written from the model's own LLM knowledge with chunks used as decoration. This was caught and the same anti-pattern was repeated in the same session on the second attempt. The lesson: **the bias toward "appearance of completion" is strong enough to defeat explicit anti-patterns elsewhere in this same file unless made bluntly visible at the top**. That's why this section is here, before Step 1.
+### Why this section is shorter than the v3 anti-pattern section
+
+The v3 anti-pattern section (~1 KB of warnings + a Stop-and-correct shell script the agent was supposed to run) **failed** because it depended on agent self-discipline. v4 moves enforcement to the tool. The text above explains the mechanism but is no longer load-bearing — even if an agent skips reading this, the CLI still refuses bad chapters.
 
 ## Core principle: ONE output language, even when sources span multiple
 

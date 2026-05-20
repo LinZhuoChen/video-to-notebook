@@ -22,9 +22,15 @@ def _seed(db_path: Path) -> int:
             "INSERT INTO lectures (id, course_id, idx, title, video_url, transcript, status) "
             "VALUES (1, 1, 2, 'L2', 'https://www.youtube.com/watch?v=abc', 't', 'ok')"
         )
+        # Use a realistic-length chunk so it passes the v4 preprocessing
+        # filter (min 80 chars, after sponsor/intro detection).
         conn.execute(
             "INSERT INTO chunks (id, lecture_id, idx, start_sec, end_sec, text) "
-            "VALUES (1, 1, 0, 268.4, 320.0, 'vector basics text')"
+            "VALUES (1, 1, 0, 268.4, 320.0, "
+            "'A vector is a list of numbers with both magnitude and direction. "
+            "We use vectors to represent positions, velocities, forces, and in "
+            "machine learning the embedding of a token in some d-dimensional "
+            "space. The dot product of two vectors measures their alignment.')"
         )
         conn.execute(
             "INSERT INTO concepts (id, slug, canonical_name, ontology_source) "
@@ -82,6 +88,7 @@ def test_apply_writes_fragment_and_marks_chapter(tmp_path: Path):
     }
     apply_synthesize_results(
         db_path=db, state_dir=state_dir, results=results,
+        skip_depth_gate=True,  # legacy tests verify apply-flow contract, not depth
     )
 
     # The file is copied into <state_dir>/textbook/<order>.html

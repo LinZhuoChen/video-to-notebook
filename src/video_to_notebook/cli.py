@@ -688,12 +688,25 @@ def synthesize_cmd(
         False, "--print-prompts",
         help="DEPRECATED — printing prompts is now the default. Will be removed.",
     ),
+    skip_depth_gate: bool = typer.Option(
+        False, "--skip-depth-gate",
+        help=(
+            "Bypass v4 HARD RULE depth checks (weighted body floor, structural "
+            "element counts, extraction-coverage). NOT recommended — defeats "
+            "the purpose of the gate. Useful only for legacy projects from "
+            "before v4 or for explicit user override after a careful review."
+        ),
+    ),
 ) -> None:
     """Generate the HTML for one textbook chapter (in-session only).
 
     Default mode writes an in-session prompt envelope to
     ``<state_dir>/prompts/synthesize/chapter-N.json`` and exits. There is no
     API path for this command.
+
+    v4 (May 2026): --apply runs HARD RULE checks (see
+    ``synthesize/prompts.py``) and refuses to copy the HTML fragment into
+    state if any check fails. To bypass: --skip-depth-gate.
     """
     _reject_mutually_exclusive(
         apply=apply,
@@ -720,7 +733,18 @@ def synthesize_cmd(
         except FileNotFoundError as e:
             typer.echo(f"error: {e}", err=True)
             raise typer.Exit(code=1) from e
-        apply_synthesize_results(db_path=db_path, state_dir=state_dir, results=results)
+        try:
+            apply_synthesize_results(
+                db_path=db_path,
+                state_dir=state_dir,
+                results=results,
+                skip_depth_gate=skip_depth_gate,
+            )
+        except ValueError as e:
+            # Depth-gate failures arrive here; surface them with exit 1
+            # so callers can detect failure.
+            typer.echo(f"error: {e}", err=True)
+            raise typer.Exit(code=1) from e
         typer.echo(
             f"done: synthesized chapter {results['chapter_order_idx']} → "
             f"{state_dir / 'textbook' / (str(results['chapter_order_idx']) + '.html')}"
