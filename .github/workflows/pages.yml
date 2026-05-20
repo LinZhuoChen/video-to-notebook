@@ -5,9 +5,18 @@ name: Deploy demo to GitHub Pages
 # build is merged into the zh dist as a subdirectory before upload. Header
 # language toggle navigates between sibling deployments.
 #
-# Content lives in template-site/src/content/{textbook,concept-explainers}/<lang>/.
-# If en/ is empty (only en/curriculum.json and en/manifest.json placeholders),
-# the en build still succeeds but shows the empty-state pages.
+# v2.3.0: template-site/src/content/ is now an empty scaffold (the v2.2
+# demo data was moved to examples/diffusion-bilingual-demo/ to stop it
+# leaking into newly-init'd downstream projects via template_copy). To
+# keep the public demo site alive without re-polluting the template, we
+# overlay examples/diffusion-bilingual-demo/content/ on top of
+# template-site/src/content/ as a CI-only step, right before the Astro
+# build. The git-tracked tree stays clean; only this ephemeral
+# checkout sees the demo content.
+#
+# Cleanliness invariants enforced by tests in tests/unit/test_template_copy.py
+# (test_template_site_has_no_demo_data) run in ci.yml against a fresh
+# checkout, so this overlay does NOT affect them.
 
 on:
   push:
@@ -39,6 +48,20 @@ jobs:
       - name: Install template-site deps
         working-directory: template-site
         run: npm ci
+
+      - name: Overlay diffusion-bilingual demo content into template-site
+        run: |
+          set -euo pipefail
+          demo=examples/diffusion-bilingual-demo/content
+          dst=template-site/src/content
+          test -d "$demo" || { echo "demo dir missing: $demo"; exit 1; }
+          cp -R "$demo/." "$dst/"
+          echo "Overlay complete. Sample counts:"
+          find "$dst/concept"             -name '*.md'   | wc -l | xargs echo "  concept .md:"
+          find "$dst/course"              -name '*.md'   | wc -l | xargs echo "  course  .md:"
+          find "$dst/lecture"             -name '*.md'   | wc -l | xargs echo "  lecture .md:"
+          find "$dst/textbook"            -name '*.html' | wc -l | xargs echo "  textbook .html:"
+          find "$dst/concept-explainers"  -name '*.html' | wc -l | xargs echo "  concept-explainers .html:"
 
       - name: Build zh (mounted at /)
         working-directory: template-site
