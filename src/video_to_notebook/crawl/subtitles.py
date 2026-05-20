@@ -13,15 +13,25 @@ class Cue:
     text: str
 
 
-_TIMESTAMP_RE = re.compile(
-    r"(\d{2}):(\d{2}):(\d{2})\.(\d{3})\s*-->\s*(\d{2}):(\d{2}):(\d{2})\.(\d{3})"
-)
+# WebVTT timestamps come in two shapes:
+#   MM:SS.mmm           (hours omitted when total duration < 1h — the
+#                        WebVTT spec allows this; yt-dlp's SRT→VTT
+#                        converter produces this shape for short clips,
+#                        including Bilibili's ai-zh auto-captions on
+#                        ~10-30 min videos).
+#   HH:MM:SS.mmm        (hours always present — YouTube's auto-captions
+#                        use this regardless of duration).
+# The regex must accept both. The hours group is optional with a
+# non-capturing wrapper so the parser can default the hour component
+# to "0" when it's missing.
+_HMS_RE = r"(?:(\d{2,}):)?(\d{2}):(\d{2})\.(\d{3})"
+_TIMESTAMP_RE = re.compile(rf"{_HMS_RE}\s*-->\s*{_HMS_RE}")
 _TAG_RE = re.compile(r"<[^>]+>")
-_INNER_TIMESTAMP_RE = re.compile(r"<\d{2}:\d{2}:\d{2}\.\d{3}>")
+_INNER_TIMESTAMP_RE = re.compile(r"<(?:\d{2,}:)?\d{2}:\d{2}\.\d{3}>")
 
 
-def _hms_to_sec(h: str, m: str, s: str, ms: str) -> float:
-    return int(h) * 3600 + int(m) * 60 + int(s) + int(ms) / 1000.0
+def _hms_to_sec(h: str | None, m: str, s: str, ms: str) -> float:
+    return (int(h) if h else 0) * 3600 + int(m) * 60 + int(s) + int(ms) / 1000.0
 
 
 def parse_vtt(text: str) -> list[Cue]:
