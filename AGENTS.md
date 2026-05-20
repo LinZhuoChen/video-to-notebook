@@ -86,6 +86,12 @@ tests/                  # pytest — 148 unit tests
 
 Every subcommand is idempotent and resumable. The DB schema lives in `src/video_to_notebook/db/migrations/*.sql` and uses `PRAGMA user_version` for linear migration tracking.
 
+## Output language: ONE per project, even with cross-language sources
+
+A project has exactly one `build_meta.language` value (`zh` or `en`). Every chapter, every concept page, every UI string on the rendered site is in **that one language** — regardless of source mix.
+
+If the user crawls a mix of English and Chinese courses into the same project (e.g. Stanford CS336 + a B 站 讲座), the transcripts in SQLite stay in their native languages (correct, for source fidelity), but the synthesized output is monolingual. Cross-language lecturer quotes get **translated to the target language** with source-course attribution; never ship a `<blockquote>` in the source language inside a chapter whose prose is in another language. Code, formulas, slugs, lecturer names pass through verbatim. Full rationale and examples in [`skills/video-to-notebook/SKILL.md`](skills/video-to-notebook/SKILL.md#core-principle-one-output-language-even-when-sources-span-multiple).
+
 ## Bilingual content layout (v2.2+)
 
 The site supports parallel zh and en builds. **Content (HTML fragments + manifest/curriculum JSON) lives per-language under `<lang>/` sub-folders, not flat.** Astro routes dispatch on `PUBLIC_LANGUAGE` (build-time env). Pages CI builds twice — once with `PUBLIC_LANGUAGE=zh` mounted at `/`, once with `PUBLIC_LANGUAGE=en` mounted at `/en/` — and merges into a single artifact.

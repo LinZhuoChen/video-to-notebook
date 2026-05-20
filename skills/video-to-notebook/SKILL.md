@@ -47,6 +47,50 @@ If `video-to-notebook` is MISSING: install with `pip install video-to-notebook` 
 If Node is MISSING: install Node 20+ (brew install node).
 If ANTHROPIC_API_KEY is MISSING: stop and ask the user to set it — without it, tag/cluster fail.
 
+## Core principle: ONE output language, even when sources span multiple
+
+**The final textbook is monolingual.** A project has exactly one `build_meta.language` value (`zh` or `en`), set at `init` time. Every chapter, every concept page, every UI string in the rendered site is in **that one language** — regardless of whether the underlying source courses are English, Chinese, or a mix.
+
+A common scenario where this matters: the user gives you a mix of English open-courseware (Stanford CS336, Vizuara, CMU lectures) and Chinese 课程 (B 站讲座). You crawl all of them — the transcripts in SQLite are in their native languages, that's correct and necessary for source fidelity. But the **synthesized output** is monolingual.
+
+### Decision: which language?
+
+Ask the user upfront. The choice is theirs and depends on **the target audience**, not the source mix:
+
+> 这个教材最后给谁读？中文读者还是英文读者？源课程是哪个语言其实不重要 —— transcript 我们都会原样存下来，但合成出的章节、概念页、网站 UI 必须统一成一种语言。
+
+If they hesitate, ask follow-ups: who's the primary reader, what's the user themselves more comfortable reading, is there an English-speaking audience for the deployed site. Don't default — make them pick.
+
+Pass the choice to `init`:
+
+```bash
+video-to-notebook init --language zh    # or --language en
+```
+
+This sets `build_meta.language` in SQLite. The synthesize and explain envelopes will carry this value in their `language` field, telling you what language to write the HTML fragment in.
+
+### When source and target language differ
+
+If the chapter's source_chunks (or a concept page's occurrences) include text in a language different from the target — e.g. a zh textbook synthesizing from an English lecture, or vice versa — the rule is:
+
+- **Body text**: target language, always. Never mix languages within a chapter's prose.
+- **Inline lecturer quotes**: translate to the target language. Cite the original course slug so attribution is preserved. Do **not** ship verbatim English quotes inside a `<blockquote>` in a zh chapter (or vice versa) — that mid-stream language switch breaks reader flow.
+- **Code snippets, formulas, technical terms**: pass through verbatim. `LayerNorm`, `softmax`, `Q · K^T` stay the same in any language.
+- **Lecturer names, course titles, concept slugs**: pass through verbatim (`Stanford CS336`, `multi-head-latent-attention`, `Vizuara`).
+- **Footnote / parenthetical with the original**: optional, for high-fidelity passages where the lecturer's exact wording matters. Use sparingly — too many `<aside>` callouts in original-language break flow as much as untranslated quotes.
+
+Concrete example for a zh chapter sourcing from an English DeepSeek lecture:
+
+> ✅ 好：「Vizuara 老师在 *Build DeepSeek from Scratch* 里的原话翻译过来是：『MLA 不是缓存 K 和 V 本身，而是缓存它们的潜在压缩表示。』」
+>
+> ❌ 不要：「The lecturer said: 'MLA doesn't cache K and V themselves, but caches their latent compressed representation.'」 —— 在 zh 章节里突然插一段英文 blockquote。
+
+Same rule mirrored for en chapters sourcing from Chinese B 站 lectures: translate the lecturer's words to English, attribute the course.
+
+### Why this matters
+
+The source-fidelity Principle 0 still applies — your obligation is to **faithfully transmit how the lecturer taught it**. Translation is a faithfulness operation, not a fabrication operation, as long as: (a) the meaning is preserved, (b) the source course is attributed, and (c) you're not inventing new pedagogy that the lecturer never said. If a passage feels lossy when translated, find a different passage that survives translation better, rather than dropping back into the source language mid-paragraph.
+
 ## The 5-step pipeline
 
 After confirming prerequisites, work through this with the user. Confirm each step before running the next; tag and cluster cost real money.
@@ -313,13 +357,14 @@ The CLI writes `.video-to-notebook/prompts/synthesize/chapter-N.json`. Read it �
 - **Textbook-note depth (target 5,000–8,000 中文字 per chapter)** — the chapter should read like a graduate student's Obsidian study notes after watching the lecture, NOT a magazine summary. Concrete checklist: (1) TL;DR callout block at the top with the central formula + a hook; (2) 8–14 top-level sections using 一二三四 …; (3) step-by-step derivations with `<div class="deriv-step">` blocks containing `**Why**:` annotations for every non-trivial algebra move (reader follows with a pencil); (4) preserve ALL distinctive lecturer analogies — if the lecturer gave 4 metaphors for the same concept, keep all 4; (5) 3–5 callout boxes inline (`callout-info / callout-note / callout-warning / callout-tip / callout-quote`) for tone differentiation; (6) engineering details (numerical stability, training gotchas) embedded as callouts at the point they become relevant, not as appendices; (7) complete, runnable PyTorch skeleton (not pseudo-code) when the chapter introduces a model; (8) 5–7 takeaways at the end, each anchored to a specific lecturer-given example. Under 4,000 字 = under-developed. Over 10,000 字 = bloated.
 - **Source fidelity first** — extract the lecturer's metaphors, worked examples, named citations, and verbatim phrasings from the chunks BEFORE drafting. The chapter's job is to faithfully transmit how the lecturer actually taught it; your own framing is layered on top with explicit flags (e.g. "教材外补充：…"). If two courses give different metaphors, present both labelled. Failure mode: writing a generic textbook paraphrase a reader of the lectures wouldn't recognise.
 - **🛑 No fabrication — debug the pipeline instead** — if the source_chunks don't actually contain pedagogy on the chapter's primary concept (e.g. all 20 chunks are course logistics, or one alphabetically-early course dominates while another course has the real coverage), **STOP and fix the pipeline**, do NOT paper over the gap with LLM-generated content. Common bugs to check: synthesize SQL `LIMIT 20 ORDER BY course_slug` causes the alphabetically-first course to monopolise; tagging may have matched by lecture-title keyword without the concept actually being discussed; `--max-source-chunks` may be too low. Diagnose first: `sqlite3 .video-to-notebook/db.sqlite "SELECT courses.slug, COUNT(*) FROM chunk_concepts cc JOIN chunks ON chunks.id=cc.chunk_id JOIN lectures ON lectures.id=chunks.lecture_id JOIN courses ON courses.id=lectures.course_id JOIN concepts ON concepts.id=cc.concept_id WHERE concepts.slug='<primary>' GROUP BY courses.slug"`. If the DB has chunks but envelope is thin, the bug is in synthesize SQL; if the DB is empty, the bug is in tag.
+- **Output is monolingual in `envelope["language"]`** — even when source_chunks span multiple languages (e.g. some chunks are English from Stanford CS336 and some are Chinese from a B 站 course). The chapter's prose, section headings, callouts, and lecturer quotes are ALL in the target language; you translate cross-language lecturer phrasings to the target language and attribute the source course. See **"Core principle: ONE output language"** earlier in this skill for the full rule. Never ship a mid-paragraph language switch into a `<blockquote>`.
 - Anti-bias opening (prefer misconceptions the lecturer themselves called out)
 - Inline SVG diagrams + CSS animations
 - One embedded source clip with `?start=N` timestamp — pick the clip that best shows the lecturer's signature framing of this concept
 - LaTeX math via `$...$` / `$$...$$` — reproduce the lecturer's derivation, not the cleaned-up textbook version
 - End with `<div class="takeaways">` (3 bullets)
 
-The same source-fidelity principle applies to `video-to-notebook explain` (concept pages): extract the lecturer's analogies from `occurrences` first, layer your additions on top.
+The same source-fidelity principle applies to `video-to-notebook explain` (concept pages): extract the lecturer's analogies from `occurrences` first, layer your additions on top. And the same monolingual-output rule applies: cross-language occurrences get translated into the target language with course attribution — concept pages don't mix languages either.
 
 Write the HTML fragment to `/tmp/cm-chN.html` (just `<article>...</article>` body content; no `<html><head><body>` wrapper).
 
